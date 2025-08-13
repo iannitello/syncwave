@@ -3,13 +3,14 @@
 Make your code reactive; Turn plain JSONs into a live data store, two-way synced with Python objects.
 
 > [!WARNING]
+> 
 > Syncwave is under active development. Until version **1.0**, any minor release (`0.x`) may introduce breaking API changes. Pin the exact version to use in production.
 >
 > Version **1.0** will be released when the library is stable, feature-complete, and tested.
 
 ## Getting Started
 
-Install from [PyPI](https://pypi.org):
+Install from [PyPI](https://pypi.org/project/syncwave/):
 
 ```shell
 # pip

@@ -1,6 +1,6 @@
 [project]
 name = "syncwave"
-version = "0.1.0"
+version = "0.1.1"
 description = "Make your code reactive; Turn plain JSONs into a live data store, two-way synced with Python objects."
 readme = "README.md"
 authors = [{ name = "Lucas Iannitello", email = "lucas.iannitello@protonmail.com" }]
@@ -14,11 +14,9 @@ keywords = []
 classifiers = []
 
 [project.urls]
-Homepage = ""
-Documentation = ""
-Repository = ""
-Issues = ""
-Changelog = ""
+Homepage = "https://github.com/iannitello/syncwave"
+Issues = "https://github.com/iannitello/syncwave/issues"
+Repository = "https://github.com/iannitello/syncwave"
 
 [build-system]
 requires = ["uv_build>=0.8.4,<0.9.0"]
