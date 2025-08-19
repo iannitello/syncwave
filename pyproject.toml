@@ -28,4 +28,8 @@ dev = [
 ]
 
 [tool.ruff.lint]
-extend-select = ["E501"]
+select = ["E", "F"]
+
+unfixable = [
+    "F401"  # disable fix for unused imports
+]
