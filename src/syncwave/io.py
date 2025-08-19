@@ -68,7 +68,7 @@ class _IO:
         self._atomic_write(path, data_provider())
 
     def _atomic_write(self, path: Path, data: JSONData) -> None:
-        fd, tmp_path = mkstemp(prefix=".tmp_", suffix=".json", dir=path.parent)
+        fd, tmp_path = mkstemp(prefix=watcher.TMP_FILE_PREFIX, dir=path.parent)
         try:
             with os.fdopen(fd, "w", encoding=self.ENCODING) as tmp_file:
                 json.dump(data, tmp_file, **self.DUMPS_CONFIG)
