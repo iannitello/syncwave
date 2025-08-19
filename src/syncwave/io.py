@@ -62,12 +62,10 @@ class _IO:
             timer.start()
 
     def _scheduled_write(self, path: Path, data_provider: DataProvider) -> None:
-        try:
-            self._atomic_write(path, data_provider())
-        finally:
-            with self._lock:
-                self._debounce_timers.pop(path, None)
-                self._pending_data_providers.pop(path, None)
+        with self._lock:
+            self._debounce_timers.pop(path, None)
+            self._pending_data_providers.pop(path, None)
+        self._atomic_write(path, data_provider())
 
     def _atomic_write(self, path: Path, data: JSONData) -> None:
         fd, tmp_path = mkstemp(prefix=".tmp_", suffix=".json", dir=path.parent)

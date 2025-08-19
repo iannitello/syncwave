@@ -128,12 +128,10 @@ class _EventHandler(FileSystemEventHandler):
             self.debounce_timers[event] = timer
             timer.start()
 
-    def schedule_callback(self, event: FileSystemEvent, callback: Callback) -> None:
-        try:
-            callback()
-        finally:
-            with self.lock:
-                self.debounce_timers.pop(event, None)
+    def _scheduled_callback(self, file_path: FilePath, callback: Callback) -> None:
+        with self._lock:
+            self._debounce_timers.pop(file_path, None)
+        callback()
 
 
 watcher = _Watcher()
