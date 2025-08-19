@@ -1,8 +1,8 @@
-import json
-import threading
 from collections.abc import Mapping
 from inspect import isclass
+from json import JSONDecodeError
 from pathlib import Path
+from threading import RLock
 from typing import Any, Callable, Iterator, Optional, Type, Union, get_args
 
 from pydantic import BaseModel, ValidationError
@@ -62,7 +62,7 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
         self.path = self._get_path(file_name or name_, sub_dir, file_path)
 
         self._ssd: dict[JSONKey, BaseModel] = {}  # actual mapping, ssd = SyncStoreDict
-        self._lock = threading.RLock()
+        self._lock = RLock()
         self._patch_cls()
         io.init_json_file(self.path)
         self.load()
@@ -111,9 +111,9 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
                 # no JSONDecodeError or ValidationError at this point, safe to clear
                 self._ssd.clear()
                 self._ssd.update(tmp_ssd)
-        except (json.JSONDecodeError, ValidationError):
-            return
-        else:
+        except (FileNotFoundError, JSONDecodeError, ValidationError):
+            pass
+        finally:
             io.write_json(self.path, self.to_dict)
 
     def _get_path(

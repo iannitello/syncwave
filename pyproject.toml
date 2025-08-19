@@ -1,6 +1,6 @@
 [project]
 name = "syncwave"
-version = "0.1.1"
+version = "0.1.2"
 description = "Make your code reactive; Turn plain JSONs into a live data store, two-way synced with Python objects."
 readme = "README.md"
 authors = [{ name = "Lucas Iannitello", email = "lucas.iannitello@protonmail.com" }]
@@ -24,8 +24,12 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "ruff>=0.12.7",
+    "ruff>=0.12.9",
 ]
 
 [tool.ruff.lint]
-extend-select = ["E501"]
+select = ["E", "F"]
+
+unfixable = [
+    "F401"  # disable fix for unused imports
+]
