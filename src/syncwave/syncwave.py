@@ -5,7 +5,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Iterator, Optional, Type, Union, get_args
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, create_model, model_validator
 
 from .io import io
 from .watcher import watcher
@@ -40,12 +40,18 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
         file_name: Optional[str] = None,
         sub_dir: Optional[Union[Path, str]] = None,
         file_path: Optional[Union[Path, str]] = None,
+        new_cls_name: Optional[str] = None,
         # in_memory: bool = True,  # TODO: implement in_memory
     ) -> None:
         if not isinstance(syncwave, Syncwave):
             raise ValueError("The syncwave argument must be an instance of Syncwave.")
         if not (isclass(cls) and issubclass(cls, BaseModel)):
-            raise ValueError("Only subclasses of BaseModel can be used.")
+            raise TypeError("Only subclasses of Pydantic's BaseModel can be used.")
+        # `store.cls` is created with `create_model`, with `cls` as its only base class
+        # in other words, this checks that `cls` has not been registered already
+        if any(store.cls.__bases__[0] is cls for store in syncwave.values()):
+            raise ValueError(f"The class '{cls.__name__}' has already been registered.")
+        # `name` defaults to the lowercased class name if not provided
         if (name_ := name or cls.__name__.lower()) in syncwave:
             raise ValueError(f"The name '{name_}' is already registered.")
         if cls in [store.cls for store in syncwave.values()]:
@@ -56,7 +62,7 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
             _validate_key_type(cls, key)
 
         self.syncwave = syncwave
-        self.cls = cls
+        self.cls = self._patch_cls(cls, new_cls_name or f"Syncwave{cls.__name__}")
         self.name = name_
         self.key = key
         self.path = self._get_path(file_name or name_, sub_dir, file_path)
@@ -75,7 +81,7 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
 
     def __iter__(self) -> Iterator[JSONKey]:
         with self._lock:
-            # first, convert to a list so the iterator is over a frozen object
+            # first convert to a list so the iterator is over a frozen object
             return iter(list(self._ssd))
 
     def __len__(self) -> int:
@@ -91,10 +97,7 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
 
     def to_dict(self) -> dict[JSONKey, dict[str, Any]]:
         with self._lock:
-            return {
-                key: model_instance.model_dump()
-                for key, model_instance in self._ssd.items()
-            }
+            return {key: instance.model_dump() for key, instance in self._ssd.items()}
 
     def delete(self, key: JSONKey) -> None:
         with self._lock:
@@ -129,41 +132,53 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
             return (self.syncwave.data_dir / sub_dir / file_name).resolve()
         return (self.syncwave.data_dir / file_name).resolve()
 
-    def _patch_cls(self) -> None:
+    def _patch_cls(self, cls: Type[BaseModel], new_cls_name: str) -> Type[BaseModel]:
+        # This is a validator that acts as a post-initialization hook.
+        # Using a validator instead of `__init__` ensures every instance is tracked.
+        # Libraries such as FastAPI may create instances indirectly with methods like
+        # `validate_python` or `model_validate` and `__init__` may never be called.
+        def init(self_model: BaseModel) -> BaseModel:
+            key_value = getattr(self_model, self.key)
+            with self._lock:
+                if key_value in self._ssd and self._ssd[key_value] == self_model:
+                    return self_model  # no changes, no need to write
+                self._ssd[key_value] = self_model
+            io.write_json(self.path, self.to_dict)
+            return self_model
+
+        new_cls = create_model(
+            new_cls_name,
+            __base__=cls,
+            __validators__={"__syncwave_init__": model_validator(mode="after")(init)},
+        )
+
         # preserve original methods
-        original_init = self.cls.__init__
-        original_setattr = self.cls.__setattr__
-        original_delattr = self.cls.__delattr__
+        original_setattr = cls.__setattr__
+        original_delattr = cls.__delattr__
 
-        def __init__(model_instance: BaseModel, *args: Any, **kwargs: Any) -> None:
-            original_init(model_instance, *args, **kwargs)
-            key_value = getattr(model_instance, self.key)
-            with self._lock:
-                self._ssd[key_value] = model_instance
-            io.write_json(self.path, self.to_dict)
-
-        def __setattr__(model_instance: BaseModel, attr: str, value: Any) -> None:
+        def __setattr__(self_model: BaseModel, attr: str, value: Any) -> None:
             # TODO check for edge cases
-            old_value = getattr(model_instance, attr)
-            original_setattr(model_instance, attr, value)
+            old_value = getattr(self_model, attr)
+            original_setattr(self_model, attr, value)
             with self._lock:
                 if attr == self.key:
                     del self._ssd[old_value]
-                    self._ssd[value] = model_instance
+                    self._ssd[value] = self_model
             io.write_json(self.path, self.to_dict)
 
-        def __delattr__(model_instance: BaseModel, attr: str) -> None:
-            old_value = getattr(model_instance, attr)
-            original_delattr(model_instance, attr)
+        def __delattr__(self_model: BaseModel, attr: str) -> None:
+            old_value = getattr(self_model, attr)
+            original_delattr(self_model, attr)
             with self._lock:
                 if attr == self.key:
                     del self._ssd[old_value]
             io.write_json(self.path, self.to_dict)
 
-        # override original methods
-        self.cls.__init__ = __init__
-        self.cls.__setattr__ = __setattr__
-        self.cls.__delattr__ = __delattr__
+        # assign the new methods
+        new_cls.__setattr__ = __setattr__
+        new_cls.__delattr__ = __delattr__
+
+        return new_cls
 
 
 class Syncwave(Mapping[str, SyncStore]):
@@ -208,7 +223,7 @@ class Syncwave(Mapping[str, SyncStore]):
         # in_memory: bool = True,  # TODO: implement in_memory
     ) -> Callable[[Type[BaseModel]], Type[BaseModel]]:
         def decorator(cls: Type[BaseModel]) -> Type[BaseModel]:
-            SyncStore(
+            store = SyncStore(
                 self,
                 cls,
                 name=name,
@@ -217,7 +232,8 @@ class Syncwave(Mapping[str, SyncStore]):
                 file_name=file_name,
                 sub_dir=sub_dir,
                 file_path=file_path,
+                new_cls_name=cls.__name__,
             )
-            return cls
+            return store.cls
 
         return decorator
