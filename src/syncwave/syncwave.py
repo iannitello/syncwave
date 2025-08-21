@@ -3,7 +3,7 @@ from inspect import isclass
 from json import JSONDecodeError
 from pathlib import Path
 from threading import RLock
-from typing import Any, Callable, Iterator, Optional, Type, Union, get_args
+from typing import Any, Callable, Iterator, Optional, Type, Union, get_args, overload
 
 from pydantic import BaseModel, ValidationError, create_model, model_validator
 
@@ -33,9 +33,10 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
         self,
         syncwave: "Syncwave",
         cls: Type[BaseModel],
-        *,
+        /,
         name: Optional[str] = None,
-        key: str,
+        key: Optional[str] = None,
+        *,
         skip_key_validation: bool = False,
         file_name: Optional[str] = None,
         sub_dir: Optional[Union[Path, str]] = None,
@@ -44,7 +45,7 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
         # in_memory: bool = True,  # TODO: implement in_memory
     ) -> None:
         if not isinstance(syncwave, Syncwave):
-            raise ValueError("The syncwave argument must be an instance of Syncwave.")
+            raise TypeError("The first argument must be an instance of Syncwave.")
         if not (isclass(cls) and issubclass(cls, BaseModel)):
             raise TypeError("Only subclasses of Pydantic's BaseModel can be used.")
         # `store.cls` is created with `create_model`, with `cls` as its only base class
@@ -53,23 +54,23 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
             raise ValueError(f"The class '{cls.__name__}' has already been registered.")
         # `name` defaults to the lowercased class name if not provided
         if (name_ := name or cls.__name__.lower()) in syncwave:
-            raise ValueError(f"The name '{name_}' is already registered.")
-        if cls in [store.cls for store in syncwave.values()]:
-            raise ValueError(f"The class '{cls.__name__}' is already registered.")
-        if key not in cls.model_fields:
-            raise ValueError(f"'{cls.__name__}' does not have a field '{key}'.")
+            raise ValueError(f"The name '{name_}' has already been registered.")
+        if not cls.model_fields:
+            raise ValueError(f"Class '{cls.__name__}' has no fields defined.")
+        # `key` defaults to the first field in the model if not provided
+        if (key_ := key or next(iter(cls.model_fields))) not in cls.model_fields:
+            raise ValueError(f"'{cls.__name__}' does not have a field named '{key_}'.")
         if not skip_key_validation:
-            _validate_key_type(cls, key)
+            _validate_key_type(cls, key_)
 
         self.syncwave = syncwave
         self.cls = self._patch_cls(cls, new_cls_name or f"Syncwave{cls.__name__}")
         self.name = name_
-        self.key = key
+        self.key = key_
         self.path = self._get_path(file_name or name_, sub_dir, file_path)
 
         self._ssd: dict[JSONKey, BaseModel] = {}  # actual mapping, ssd = SyncStoreDict
         self._lock = RLock()
-        self._patch_cls()
         io.init_json_file(self.path)
         self.load()
         watcher.watch(self.path, self.load)
@@ -211,17 +212,31 @@ class Syncwave(Mapping[str, SyncStore]):
     def stop(self) -> None:
         watcher.stop()
 
+    @overload
     def register(
         self,
         *,
         name: Optional[str] = None,
-        key: str,
+        key: Optional[str] = None,
+        skip_key_validation: bool = False,
+        file_name: Optional[str] = None,
+        sub_dir: Optional[Union[Path, str]] = None,
+        file_path: Optional[Union[Path, str]] = None,
+    ) -> Callable[[Type[BaseModel]], Type[BaseModel]]: ...
+
+    def register(
+        self,
+        _cls: Optional[Type[BaseModel]] = None,
+        /,
+        *,
+        name: Optional[str] = None,
+        key: Optional[str] = None,
         skip_key_validation: bool = False,
         file_name: Optional[str] = None,
         sub_dir: Optional[Union[Path, str]] = None,
         file_path: Optional[Union[Path, str]] = None,
         # in_memory: bool = True,  # TODO: implement in_memory
-    ) -> Callable[[Type[BaseModel]], Type[BaseModel]]:
+    ) -> Union[Type[BaseModel], Callable[[Type[BaseModel]], Type[BaseModel]]]:
         def decorator(cls: Type[BaseModel]) -> Type[BaseModel]:
             store = SyncStore(
                 self,
@@ -236,4 +251,8 @@ class Syncwave(Mapping[str, SyncStore]):
             )
             return store.cls
 
-        return decorator
+        if _cls is None:
+            # called with parenthesis: @syncwave.register(...)
+            return decorator
+        # called without parenthesis: @syncwave.register
+        return decorator(_cls)
