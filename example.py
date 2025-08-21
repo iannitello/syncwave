@@ -43,15 +43,12 @@ class Customer(BaseModel):
 
 
 def create_initial_data() -> None:
-    """Seed a handful of records so the user has something to look at."""
-    if len(syncwave["orders"]) == 0 and len(syncwave["customers"]) == 0:
-        # Orders first so we can reference them from customers
-        Order(id=1, product_id=1, quantity=10)
-        Order(id=2, product_id=2, quantity=5)
-        Order(id=3, product_id=1, quantity=20)
+    Order(id=1, product_id=1, quantity=10)
+    Order(id=2, product_id=2, quantity=5)
+    Order(id=3, product_id=1, quantity=20)
 
-        Customer(id=1, name="Jane Doe", age=28, orders=[1, 2])
-        Customer(id=2, name="John Doe", age=31, orders=[3])
+    Customer(id=1, name="Jane Doe", age=28, orders=[1, 2])
+    Customer(id=2, name="John Doe", age=31, orders=[3])
 
 
 # ---------------------------------------------------------------------------
