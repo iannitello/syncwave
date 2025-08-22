@@ -79,6 +79,7 @@ class _IO:
             # Atomically replace the target file
             watcher.mark_self_write(path)
             os.replace(tmp_path, path)
+            # print(f"Wrote JSON to {path}")
 
         except Exception as e:
             # Attempt to remove temporary file on error
