@@ -10,6 +10,8 @@ editor while the script is running; edit them, save, and watch Syncwave detect a
 reload the changes on-the-fly.
 """
 
+from __future__ import annotations
+
 import random
 import string
 from pathlib import Path
