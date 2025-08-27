@@ -1,9 +1,11 @@
-from collections.abc import Mapping
+from __future__ import annotations
+
+from collections.abc import Iterator, Mapping
 from inspect import isclass
 from json import JSONDecodeError
 from pathlib import Path
 from threading import RLock
-from typing import Any, Callable, Iterator, Optional, Type, Union, get_args, overload
+from typing import Any, Callable, Union, get_args, overload
 
 from pydantic import BaseModel, ValidationError, create_model, model_validator
 
@@ -14,7 +16,7 @@ from .watcher import watcher
 JSONKey = Union[str, int, float, bool, None]
 
 
-def _validate_key_type(cls: Type[BaseModel], key: str) -> None:
+def _validate_key_type(cls: type[BaseModel], key: str) -> None:
     # This will work if the key field is a basic type (str, int, float, bool, or None),
     # but will fail for more complex types (Union[str, int], Optional[str], etc.).
     # In that case skip the validation.
@@ -31,17 +33,17 @@ def _validate_key_type(cls: Type[BaseModel], key: str) -> None:
 class SyncStore(Mapping[JSONKey, BaseModel]):
     def __init__(
         self,
-        syncwave: "Syncwave",
-        cls: Type[BaseModel],
+        syncwave: Syncwave,
+        cls: type[BaseModel],
         /,
-        name: Optional[str] = None,
-        key: Optional[str] = None,
+        name: str | None = None,
+        key: str | None = None,
         *,
         skip_key_validation: bool = False,
-        file_name: Optional[str] = None,
-        sub_dir: Optional[Union[Path, str]] = None,
-        file_path: Optional[Union[Path, str]] = None,
-        new_cls_name: Optional[str] = None,
+        file_name: str | None = None,
+        sub_dir: Path | str | None = None,
+        file_path: Path | str | None = None,
+        new_cls_name: str | None = None,
         # in_memory: bool = True,  # TODO: implement in_memory
     ) -> None:
         if not isinstance(syncwave, Syncwave):
@@ -123,8 +125,8 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
     def _get_path(
         self,
         file_name: str,
-        sub_dir: Union[Path, str, None],
-        file_path: Union[Path, str, None],
+        sub_dir: Path | str | None,
+        file_path: Path | str | None,
     ) -> Path:
         if file_path:
             return Path(file_path).resolve()
@@ -133,7 +135,7 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
             return (self.syncwave.data_dir / sub_dir / file_name).resolve()
         return (self.syncwave.data_dir / file_name).resolve()
 
-    def _patch_cls(self, cls: Type[BaseModel], new_cls_name: str) -> Type[BaseModel]:
+    def _patch_cls(self, cls: type[BaseModel], new_cls_name: str) -> type[BaseModel]:
         # This is a validator that acts as a post-initialization hook.
         # Using a validator instead of `__init__` ensures every instance is tracked.
         # Libraries such as FastAPI may create instances indirectly with methods like
@@ -157,7 +159,7 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
         original_setattr = cls.__setattr__
         original_delattr = cls.__delattr__
 
-        def __setattr__(self_model: BaseModel, attr: str, value: Any) -> None:
+        def __setattr__(self_model: BaseModel, attr: str, value: Any) -> None:  # noqa: ANN401
             # TODO check for edge cases
             old_value = getattr(self_model, attr)
             original_setattr(self_model, attr, value)
@@ -183,7 +185,7 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
 
 
 class Syncwave(Mapping[str, SyncStore]):
-    def __init__(self, data_dir: Union[str, Path]) -> None:
+    def __init__(self, data_dir: str | Path) -> None:
         self.data_dir = Path(data_dir).resolve()
         self._swd: dict[str, SyncStore] = {}  # actual mapping, swd = SyncWaveDict
 
@@ -216,28 +218,28 @@ class Syncwave(Mapping[str, SyncStore]):
     def register(
         self,
         *,
-        name: Optional[str] = None,
-        key: Optional[str] = None,
+        name: str | None = None,
+        key: str | None = None,
         skip_key_validation: bool = False,
-        file_name: Optional[str] = None,
-        sub_dir: Optional[Union[Path, str]] = None,
-        file_path: Optional[Union[Path, str]] = None,
-    ) -> Callable[[Type[BaseModel]], Type[BaseModel]]: ...
+        file_name: str | None = None,
+        sub_dir: Path | str | None = None,
+        file_path: Path | str | None = None,
+    ) -> Callable[[type[BaseModel]], type[BaseModel]]: ...
 
     def register(
         self,
-        _cls: Optional[Type[BaseModel]] = None,
+        _cls: type[BaseModel] | None = None,
         /,
         *,
-        name: Optional[str] = None,
-        key: Optional[str] = None,
+        name: str | None = None,
+        key: str | None = None,
         skip_key_validation: bool = False,
-        file_name: Optional[str] = None,
-        sub_dir: Optional[Union[Path, str]] = None,
-        file_path: Optional[Union[Path, str]] = None,
+        file_name: str | None = None,
+        sub_dir: Path | str | None = None,
+        file_path: Path | str | None = None,
         # in_memory: bool = True,  # TODO: implement in_memory
-    ) -> Union[Type[BaseModel], Callable[[Type[BaseModel]], Type[BaseModel]]]:
-        def decorator(cls: Type[BaseModel]) -> Type[BaseModel]:
+    ) -> type[BaseModel] | Callable[[type[BaseModel]], type[BaseModel]]:
+        def decorator(cls: type[BaseModel]) -> type[BaseModel]:
             store = SyncStore(
                 self,
                 cls,

@@ -1,9 +1,12 @@
+from __future__ import annotations
+
+import contextlib
 import json
 import os
 from pathlib import Path
 from tempfile import mkstemp
 from threading import Lock, Timer
-from typing import Any, Callable
+from typing import Any, Callable, Final
 
 from .watcher import watcher
 
@@ -12,10 +15,10 @@ DataProvider = Callable[[], JSONData]
 
 
 class _IO:
-    ENCODING = "utf-8"
-    DEFAULT_JSON_CONTENT = {}
-    DUMPS_CONFIG = {"indent": 2, "ensure_ascii": False}
-    DEBOUNCE_WINDOW = 0.05
+    ENCODING: Final[str] = "utf-8"
+    DEFAULT_JSON_CONTENT: Final[JSONData] = {}
+    DUMPS_CONFIG: Final[dict[str, Any]] = {"indent": 2, "ensure_ascii": False}
+    DEBOUNCE_WINDOW: Final[float] = 0.05
 
     def __init__(self) -> None:
         self._lock = Lock()
@@ -37,7 +40,7 @@ class _IO:
             with path.open(encoding=self.ENCODING) as f:
                 json.load(f)
         except json.JSONDecodeError as e:
-            raise IOError(f"File '{path}' exists but is not a valid JSON file.") from e
+            raise OSError(f"File '{path}' exists but is not a valid JSON file.") from e
 
     def read_json(self, path: Path) -> JSONData:
         with self._lock:
@@ -83,12 +86,10 @@ class _IO:
 
         except Exception as e:
             # Attempt to remove temporary file on error
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(tmp_path)
-            except OSError:
-                pass
             # Raise a clear error message including context
-            raise IOError(
+            raise OSError(
                 f"Failed to write JSON to '{path}'. "
                 f"Temporary file '{tmp_path}' removed. Original error: {e}"
             ) from e

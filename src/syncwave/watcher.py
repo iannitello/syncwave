@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 from pathlib import Path
 from threading import Lock, Timer
 from time import monotonic, sleep
-from typing import Callable
+from typing import Callable, Final
 
 from watchdog.events import (
     DirDeletedEvent,
@@ -18,7 +20,7 @@ Callback = Callable[[], None]
 
 
 class _Watcher:
-    TMP_FILE_PREFIX = ".tmp_"
+    TMP_FILE_PREFIX: Final[str] = ".tmp_"
 
     def __init__(self) -> None:
         self._lock = Lock()
@@ -96,8 +98,8 @@ class _Watcher:
 
 
 class _EventHandler(FileSystemEventHandler):
-    DEBOUNCE_WINDOW = 0.05
-    SELF_WRITE_WINDOW = 0.5
+    DEBOUNCE_WINDOW: Final[float] = 0.05
+    SELF_WRITE_WINDOW: Final[float] = 0.5
 
     def __init__(self, watcher: _Watcher) -> None:
         self._watcher = watcher
@@ -121,9 +123,7 @@ class _EventHandler(FileSystemEventHandler):
     def _is_self_write(self, file_path: FilePath) -> bool:
         # not protected by the lock because it's only called internally
         ts = self._self_writes_ts.get(file_path)
-        if ts is not None and monotonic() - ts < self.SELF_WRITE_WINDOW:
-            return True
-        return False
+        return ts is not None and monotonic() - ts < self.SELF_WRITE_WINDOW
 
     def dispatch(self, event: FileSystemEvent) -> None:
         if event.is_directory:
