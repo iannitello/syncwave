@@ -24,20 +24,22 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "fastapi[standard]>=0.116.1",
+    "notebook>=7.4.5",
     "ruff>=0.12.9",
 ]
 
 [tool.ruff.lint]
 select = [
-    "E",  # pycodestyle errors
-    "F",  # pyflakes
-    "I",  # isort
-    "B",  # flake8-bugbear
-    "C4",  # flake8-comprehensions
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
     "SIM",  # flake8-simplify
     "ANN",  # flake8-annotations
     "RUF",  # ruff
-    "UP",  # pyupgrade
+    "UP",   # pyupgrade
 ]
 
 unfixable = [
