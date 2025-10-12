@@ -42,6 +42,11 @@ select = [
     "UP",   # pyupgrade
 ]
 
+ignore = [
+    "ANN401"
+]
+
+
 unfixable = [
     "F401"  # disable fix for unused imports
 ]
