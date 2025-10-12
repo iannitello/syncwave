@@ -159,7 +159,7 @@ class SyncStore(Mapping[JSONKey, BaseModel]):
         original_setattr = cls.__setattr__
         original_delattr = cls.__delattr__
 
-        def __setattr__(self_model: BaseModel, attr: str, value: Any) -> None:  # noqa: ANN401
+        def __setattr__(self_model: BaseModel, attr: str, value: Any) -> None:
             # TODO check for edge cases
             old_value = getattr(self_model, attr)
             original_setattr(self_model, attr, value)
