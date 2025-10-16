@@ -1,23 +1,25 @@
 from __future__ import annotations
 
-from typing import Any, TypeVar, final
-
-Self = TypeVar("Self", bound="Reactive")
+from abc import ABCMeta, abstractmethod
+from typing import final
 
 
 class DeadReferenceError(RuntimeError):
-    def __init__(self, *, reference: object) -> None:
+    """Exception raised for operations on a dead or stale reactive reference."""
+
+    def __init__(self, *, reference: Reactive) -> None:
         message = f"Operation attempted on a dead reference: {reference!r}"
         super().__init__(message)
 
 
-class Reactive:
+class Reactive(metaclass=ABCMeta):
+    """A mixin class that marks an object as part of the Syncwave reactive system."""
+
     __syncwave_live__ = False
 
-    def __new__(cls: type[Self], *args: Any, **kwargs: Any) -> Self:
-        if cls is Reactive:
-            raise TypeError("Reactive is a mixin and cannot be instantiated directly.")
-        return super().__new__(cls)
+    @abstractmethod
+    def __syncwave_abc_marker__(self) -> None:
+        raise NotImplementedError
 
     @final
     @property
