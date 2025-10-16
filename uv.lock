@@ -2271,6 +2271,7 @@ version = "0.1.4"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
+    { name = "typing-extensions" },
     { name = "watchdog" },
 ]
 
@@ -2284,6 +2285,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2.11.7" },
+    { name = "typing-extensions", specifier = ">=4.14.1" },
     { name = "watchdog", specifier = ">=6.0.0" },
 ]
 
