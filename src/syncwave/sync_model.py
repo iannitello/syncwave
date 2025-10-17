@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import dataclasses as dc
 from abc import ABCMeta, abstractmethod
-from typing import Any
+from typing import Any, final
 
 from pydantic import BaseModel, RootModel
 
 from .reactive import Reactive
+from .syncwave import Syncwave
 
 
 class SyncModelSupportedMeta(ABCMeta):
@@ -24,6 +25,7 @@ class SyncModelSupportedMeta(ABCMeta):
         raise TypeError("SyncModelSupported does not support class registration.")
 
 
+@final
 class SyncModelSupported(metaclass=SyncModelSupportedMeta):
     """
     An ABC that acts as a protocol for types that Syncwave can make reactive.
@@ -46,4 +48,6 @@ class SyncModelSupported(metaclass=SyncModelSupportedMeta):
 class SyncModel(Reactive):
     """A marker base class for models that have been made reactive by Syncwave."""
 
-    pass
+    @staticmethod
+    def _reactive(syncwave: Syncwave, cls: type[SyncModelSupported]) -> type[SyncModel]:
+        pass
