@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Iterator, MutableMapping, MutableSequence, MutableSet
 from threading import RLock
-from typing import Any, NoReturn, TypeVar, Union
+from typing import Any, NoReturn, TypeVar, Union, final
 from typing_extensions import Self
 
 from .reactive import Reactive
 
 JSONKey = Union[str, int, float, bool, None]
-VT = TypeVar("VT")
+VT = TypeVar("VT")  # value type
 
 
+@final
 class SyncCollection(Reactive):
     def __init_subclass__(cls: type[SyncCollection], /, **kwargs: Any) -> None:
         raise TypeError("SyncCollection cannot be subclassed.")
@@ -36,6 +37,7 @@ class SyncDict(MutableMapping[JSONKey, VT], Reactive):
     def __init__(self) -> None:
         """
         Initialization hook. Override this method to perform initialization logic.
+
         No parameters can be passed to this method.
         """
         pass
@@ -83,6 +85,7 @@ class SyncList(MutableSequence[VT], Reactive):
     def __init__(self) -> None:
         """
         Initialization hook. Override this method to perform initialization logic.
+
         No parameters can be passed to this method.
         """
         pass
@@ -129,6 +132,7 @@ class SyncSet(MutableSet[VT], Reactive):
     def __init__(self) -> None:
         """
         Initialization hook. Override this method to perform initialization logic.
+
         No parameters can be passed to this method.
         """
         pass
@@ -156,6 +160,9 @@ class SyncSet(MutableSet[VT], Reactive):
 
     def __syncwave_abc_marker__(self) -> None:
         pass
+
+    # repr to be implemented
+    # str to be implemented
 
 
 SyncCollection.register(SyncDict)
