@@ -76,12 +76,14 @@ Any JSON-serializable data can be saved in `Syncwave`. You access data via `sync
 > my_list.append(4)              # nothing happens on `syncwave` and on-disk
 > ```
 >
-> **Important: in-place mutations to the stored copy itself will break the synchronization guarantee!** The in-memory data would change, but the on-disk data would not, causing them to diverge.
+> **Important: in-place mutations to the stored copy itself will break the synchronization guarantee!**
 >
 > ```python
 > # Do not do this!
 > syncwave["my_list"].append(4)
 > ```
+>
+> The in-memory data would change, but the on-disk data would not, causing them to diverge.
 >
 > _Syncwave_ cannot detect this in-place mutation on a standard Python collection, so it is **strongly discouraged**. This is a fundamental aspect of Python's data model; the `append` operation modifies the list in-place and does not trigger the parent object's `__setitem__` method.
 >
@@ -192,6 +194,8 @@ def create_customer(customer: Customer) -> SyncCustomer:
     return sync_customer
 ```
 
+TODO: There's an issue with "illegal" models; e.g. a user instantiate a model nested in a SyncSet, and an "equal" model already exists in the set. What happens then? Maybe the model is created but is dead (`sync_live=False`), or maybe the instantiation raises an error?
+
 ## 5. `Reactive`
 
 `Reactive` is an abstract base class that serves as a unifying trait. All **reactive** types exposed by _Syncwave_ inherit from `Reactive`:
@@ -213,13 +217,13 @@ print(store)     # `store` still exists, but it is now a dead reference
 store.append(0)  # this operation should fail
 
 # Sub-references can also become stale.
-data: SyncDict[str, SyncList[int]] = syncwave["data"]
-sub_ref: SyncList[int] = data["inner"]
-data["inner"] = [1, 2, 3]  # replaces the list, unaliving `sub_ref`
-sub_ref.append(4)          # should also fail
+store: SyncDict[str, SyncList[int]] = syncwave["store"]
+inner: SyncList[int] = store["inner"]  # `inner` is a sub-reference
+store["inner"] = [1, 2, 3]             # replaces the list, unaliving `inner`
+inner.append(4)                        # should also fail
 ```
 
-To prevent errors from operating on stale data, each `Reactive` object has a read-only `sync_live` property. This flag is managed by _Syncwave_. If an operation "kills" a **reference**, its `sync_live` property will be set to `False`.
+To prevent errors caused by operations on stale data, each `Reactive` object has a read-only `sync_live` property. This flag is managed by _Syncwave_. If an operation "kills" a **reference**, its `sync_live` property will be set to `False`.
 
 Every read and write operation on a `Reactive` object first checks this property. If the object is not live, it will raise a `DeadReferenceError`.
 

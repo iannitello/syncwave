@@ -20,7 +20,7 @@ class Customer(BaseModel):
 # The original Customer is just a intermediary class that the new one inherits from.
 # It makes sense to keep the original name for the new class because
 # a user creating a Customer instance with `customer = Customer(...)`
-# would not expect the type of `customer` to be "SyncwaveCustomer".
+# would not expect the type of `customer` to be "SyncCustomer".
 
 
 # 2. You can also create a model and make it reactive later:
