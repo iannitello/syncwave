@@ -1,6 +1,6 @@
 __version__ = "0.1.4"
 
 
-from .syncwave import SyncStore, Syncwave
+from .syncwave import Syncwave
 
-__all__ = ["SyncStore", "Syncwave"]
+__all__ = ["Syncwave"]

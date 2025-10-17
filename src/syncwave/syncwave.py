@@ -3,28 +3,28 @@ from __future__ import annotations
 from collections.abc import Iterator, MutableMapping
 from pathlib import Path
 from threading import RLock
-from typing import TypeVar, Union
+from typing import Any
+
+from pydantic import TypeAdapter
 
 from .reactive import Reactive
 from .sync_model import SyncModel, SyncModelSupported
+from .utils import expand_path, get_main_module_dir
 
-RKey = TypeVar("RKey", str)  # registered key
-UKey = TypeVar("UKey", str)  # unregistered key
-Key = Union[UKey, RKey]  # key type
-RStore = TypeVar("RStore")  # registered store
-UStore = TypeVar("UStore")  # unregistered store
-Store = Union[UStore, RStore]  # store type
+Key = str
+Store = Any
 
 
-# Has to be thread-safe, this is temporary solution just to start the implementation.
+# Has to be thread-safe, this is a temporary solution just to start the implementation.
 
 
 class Syncwave(MutableMapping[Key, Store], Reactive):
-    def __init__(self) -> None:
+    def __init__(self, stores_dir: str | Path = "") -> None:
+        self.stores_dir = self._get_stores_dir(stores_dir)
+
         self.__syncwave_lock__ = RLock()
         self.__syncwave_stores__: dict[Key, Store] = {}
-        self.__syncwave_registered__: list[RKey] = []
-        self.__syncwave_unregistered__: list[UKey] = []
+        self.__syncwave_registered__: dict[Key, TypeAdapter] = {}
 
     def __getitem__(self, key: Key) -> Store:
         with self.__syncwave_lock__:
@@ -32,7 +32,8 @@ class Syncwave(MutableMapping[Key, Store], Reactive):
 
     def __setitem__(self, key: Key, value: Store) -> None:
         with self.__syncwave_lock__:
-            self.__syncwave_stores__[key] = value
+            if key not in self.__syncwave_registered__:
+                self.__syncwave_stores__[key] = value
 
     def __delitem__(self, key: Key) -> None:
         with self.__syncwave_lock__:
@@ -67,3 +68,15 @@ class Syncwave(MutableMapping[Key, Store], Reactive):
 
     def reactive(self, cls: type[SyncModelSupported]) -> type[SyncModel]:
         return SyncModel._reactive(self, cls)
+
+    @staticmethod
+    def _get_stores_dir(stores_dir: str | Path) -> Path:
+        if stores_dir == "":
+            stores_dir = get_main_module_dir() or Path.cwd()
+
+        path = Path(expand_path(stores_dir)).resolve()
+        if path.exists() and not path.is_dir():
+            raise NotADirectoryError(f"Path `{path}` exists and is not a directory.")
+
+        path.mkdir(parents=True, exist_ok=True)
+        return path
