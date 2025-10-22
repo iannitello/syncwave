@@ -90,7 +90,7 @@ class _IO:
         with self._lock:
             if path in self._pending_data_providers:
                 return self._pending_data_providers[path]()
-        return from_json(path.read_text(encoding=self.ENCODING), allow_partial=True)
+        return from_json(path.read_text(encoding=self.ENCODING))
 
     def write_json(self, path: Path, data_provider: DataProvider) -> None:
         with self._lock:

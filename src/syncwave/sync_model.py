@@ -7,7 +7,6 @@ from typing import Any, final
 from pydantic import BaseModel, RootModel
 
 from .reactive import Reactive
-from .syncwave import Syncwave
 
 
 class SyncModelSupportedMeta(ABCMeta):
@@ -49,5 +48,5 @@ class SyncModel(Reactive):
     """A marker base class for models that have been made reactive by Syncwave."""
 
     @staticmethod
-    def _reactive(syncwave: Syncwave, cls: type[SyncModelSupported]) -> type[SyncModel]:
+    def _reactive(syncwave, cls: type[SyncModelSupported]) -> type[SyncModel]:
         pass
