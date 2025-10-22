@@ -7,9 +7,9 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
+from .io import io
 from .reactive import Reactive
 from .sync_model import SyncModel, SyncModelSupported
-from .utils import expand_path, get_main_module_dir
 
 Key = str
 Store = Any
@@ -20,7 +20,13 @@ Store = Any
 
 class Syncwave(MutableMapping[Key, Store], Reactive):
     def __init__(self, stores_dir: str | Path = "") -> None:
-        self.stores_dir = self._get_stores_dir(stores_dir)
+        stores_dir = (
+            io.get_root_dir() / "syncstores"
+            if stores_dir == ""
+            else io.sanitize_path(stores_dir)
+        )
+        io.create_dir(stores_dir)
+        self.stores_dir = stores_dir
 
         self.__syncwave_lock__ = RLock()
         self.__syncwave_stores__: dict[Key, Store] = {}
@@ -68,15 +74,3 @@ class Syncwave(MutableMapping[Key, Store], Reactive):
 
     def reactive(self, cls: type[SyncModelSupported]) -> type[SyncModel]:
         return SyncModel._reactive(self, cls)
-
-    @staticmethod
-    def _get_stores_dir(stores_dir: str | Path) -> Path:
-        if stores_dir == "":
-            stores_dir = get_main_module_dir() or Path.cwd()
-
-        path = Path(expand_path(stores_dir)).resolve()
-        if path.exists() and not path.is_dir():
-            raise NotADirectoryError(f"Path `{path}` exists and is not a directory.")
-
-        path.mkdir(parents=True, exist_ok=True)
-        return path
