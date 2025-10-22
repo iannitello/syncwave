@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from threading import Lock, Timer
 from time import monotonic, sleep
-from typing import Callable, Final
+from typing import Any, Callable, Final
 
 from watchdog.events import (
     DirDeletedEvent,
@@ -16,7 +17,7 @@ from watchdog.observers.api import ObservedWatch
 
 DirPath = Path
 FilePath = Path
-Callback = Callable[[], None]
+Callback = Callable[..., None]
 
 
 class _Watcher:
@@ -31,24 +32,27 @@ class _Watcher:
         self._event_handler = _EventHandler(self)
         self._observer.start()
 
-    def watch(self, file_path: FilePath, callback: Callback) -> None:
+    def watch(
+        self,
+        file_path: FilePath,
+        callback: Callback,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         if not file_path.is_file():
             raise ValueError(f"Path '{file_path}' is not a file.")
 
         dir_path = file_path.parent
         with self._lock:
-            # if the directory is already being watched, just add the file to the set
-            if dir_path in self._watched_dirs:
-                _, watched_files = self._watched_dirs[dir_path]
-                watched_files.add(file_path)
-            # otherwise, schedule the directory and create the set of watched files
-            else:
+            if dir_path not in self._watched_dirs:
                 self._watched_dirs[dir_path] = (
                     self._observer.schedule(self._event_handler, str(dir_path)),
-                    {file_path},
+                    set(),
                 )
-        # set or reset the callback in all cases
-        self._event_handler.set_callback(file_path, callback)
+            self._watched_dirs[dir_path][1].add(file_path)
+        # set or reset the callback no matter what
+        bound_callback = partial(callback, *args, **kwargs)
+        self._event_handler.set_callback(file_path, bound_callback)
 
     def unwatch(self, file_path: FilePath) -> None:
         # remove the callback
@@ -62,8 +66,7 @@ class _Watcher:
 
             # if the file is in the set, remove it
             watch, watched_files = self._watched_dirs[dir_path]
-            if file_path in watched_files:
-                watched_files.remove(file_path)
+            watched_files.discard(file_path)
 
             # if the set is empty, unschedule the directory
             if not watched_files:
@@ -148,8 +151,8 @@ class _EventHandler(FileSystemEventHandler):
             if file_path not in self._callbacks or self._is_self_write(file_path):
                 return
 
-            if file_path in self._debounce_timers:
-                self._debounce_timers[file_path].cancel()
+            if timer := self._debounce_timers.get(file_path):
+                timer.cancel()
 
             timer = Timer(
                 self.DEBOUNCE_WINDOW,
@@ -165,13 +168,14 @@ class _EventHandler(FileSystemEventHandler):
         callback()
 
     def _paths_from_event(self, event: FileSystemEvent) -> list[Path]:
-        paths = []
-        if self._watcher.TMP_FILE_PREFIX not in event.src_path:
-            paths.append(Path(event.src_path).resolve())
-        dest_path = getattr(event, "dest_path", "")
-        if dest_path and self._watcher.TMP_FILE_PREFIX not in dest_path:
-            paths.append(Path(dest_path).resolve())
-        return paths
+        raw_paths = [event.src_path]
+        if dest_path := getattr(event, "dest_path", None):
+            raw_paths.append(dest_path)
+        return [
+            Path(p).resolve()
+            for p in raw_paths
+            if p and self._watcher.TMP_FILE_PREFIX not in p
+        ]
 
 
 watcher = _Watcher()
