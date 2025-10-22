@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import sys
 from pathlib import Path
 from tempfile import mkstemp
 from threading import Lock, Timer
@@ -25,11 +26,54 @@ class _IO:
         self._debounce_timers: dict[Path, Timer] = {}
         self._pending_data_providers: dict[Path, DataProvider] = {}
 
+    @staticmethod
+    def sanitize_path(path: Path | str) -> Path:
+        path_str = os.fspath(path)
+        path_str = os.path.expandvars(path_str)
+        path_str = os.path.expanduser(path_str)
+        return Path(path_str).resolve()
+
+    @staticmethod
+    def get_root_dir() -> Path:
+        main_module = sys.modules.get("__main__")
+        if file_attr := getattr(main_module, "__file__", None):
+            path = Path(file_attr).parent
+        else:
+            path = Path.cwd()
+        return _IO.sanitize_path(path)
+
+    @staticmethod
+    def create_dir(path: Path) -> None:
+        if path.exists() and not path.is_dir():
+            raise FileExistsError(f"Path '{path}' exists and is not a directory.")
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except PermissionError as e:
+            raise PermissionError(
+                f"Permission denied to create directory at '{path}'."
+            ) from e
+        except OSError as e:
+            raise OSError(f"Unable to create directory at '{path}'.") from e
+
+    @staticmethod
+    def create_file(path: Path) -> None:
+        _IO.create_dir(path.parent)
+        if path.exists() and not path.is_file():
+            raise FileExistsError(f"Path '{path}' exists and is not a file.")
+        try:
+            path.touch(exist_ok=True)
+        except PermissionError as e:
+            raise PermissionError(
+                f"Permission denied to create file at '{path}'."
+            ) from e
+        except OSError as e:
+            raise OSError(f"Unable to create file at '{path}'.") from e
+
     def json_dumps(self, data: JSONData) -> str:
         return json.dumps(data, **self.DUMPS_CONFIG)
 
     def init_json_file(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        self.create_dir(path.parent)
 
         if path.is_dir():
             raise IsADirectoryError(f"Path '{path}' is a directory, not a file.")
