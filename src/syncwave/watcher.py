@@ -76,14 +76,14 @@ class _Watcher:
     def mark_self_write(self, file_path: FilePath) -> None:
         self._event_handler.mark_self_write(file_path)
 
-    def get_watched_dirs(self) -> dict[DirPath, set[FilePath]]:
+    def _get_watched_dirs(self) -> dict[DirPath, set[FilePath]]:
         with self._lock:
             return {
                 dir_path: watched_files.copy()
                 for dir_path, (_, watched_files) in self._watched_dirs.items()
             }
 
-    def restore_watched_dir(self, dir_path: DirPath) -> None:
+    def _restore_watched_dir(self, dir_path: DirPath) -> None:
         with self._lock:
             if dir_path not in self._watched_dirs:
                 return
@@ -94,10 +94,6 @@ class _Watcher:
                 self._observer.schedule(self._event_handler, str(dir_path)),
                 watched_files,
             )
-
-    def stop(self) -> None:
-        self._observer.stop()
-        self._observer.join()
 
 
 class _EventHandler(FileSystemEventHandler):
@@ -132,7 +128,7 @@ class _EventHandler(FileSystemEventHandler):
         if event.is_directory:
             if not isinstance(event, (DirDeletedEvent, DirMovedEvent)):
                 return
-            watched_dirs = self._watcher.get_watched_dirs()
+            watched_dirs = self._watcher._get_watched_dirs()
             for dir_path in self._paths_from_event(event):
                 if dir_path in watched_dirs:
                     self._on_dir_deleted(dir_path, watched_dirs[dir_path])
@@ -142,7 +138,7 @@ class _EventHandler(FileSystemEventHandler):
 
     def _on_dir_deleted(self, dir_path: DirPath, watched_files: set[FilePath]) -> None:
         sleep(self.DEBOUNCE_WINDOW)  # low-tech debounce
-        self._watcher.restore_watched_dir(dir_path)
+        self._watcher._restore_watched_dir(dir_path)
         for file_path in watched_files:
             self._on_file_modified(file_path)
 
