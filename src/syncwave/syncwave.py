@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator, MutableMapping
+from collections.abc import Callable, Iterator, MutableMapping
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
-from typing import Any, Union
+from typing import Any, TypeVar, overload
 
 from pydantic import TypeAdapter
 
@@ -15,23 +15,23 @@ from .reactive import Reactive
 from .sync_model import SyncModel, SyncModelSupported
 from .watcher import watcher
 
+T = TypeVar("T", bound=SyncModelSupported)
+
 
 @dataclass
-class _UMeta:
+class _Metadata:
+    key: str
+    path: Path
+
+
+class _UMetadata(_Metadata):
     # unregistered store metadata
-    key: str
-    path: Path
+    pass
 
 
-@dataclass
-class _RMeta:
+class _RMetadata(_Metadata):
     # registered store metadata
-    key: str
-    path: Path
     type_adapter: TypeAdapter
-
-
-_Meta = Union[_UMeta, _RMeta]
 
 
 # Has to be thread-safe, this is a temporary solution just to start the implementation.
@@ -46,7 +46,7 @@ class Syncwave(MutableMapping[str, Any], Reactive):
         self.stores_dir = stores_dir
 
         self.__lock = RLock()
-        self.__data: dict[str, tuple[Any, _Meta]] = {}
+        self.__data: dict[str, tuple[Any, _Metadata]] = {}
 
     def __getitem__(self, key: str) -> Any:
         with self.__lock:
@@ -57,15 +57,18 @@ class Syncwave(MutableMapping[str, Any], Reactive):
         with self.__lock:
             if key not in self.__data:
                 path = self.stores_dir / f"{key}.json"
-                meta = _UMeta(key, path)
+                meta = _UMetadata(key, path)
                 data = deepcopy(value)
                 self.__data[key] = (data, meta)
                 io.create_file(path)
                 io.write_json(path, lambda: data)
                 watcher.watch(path, self.__sync_unregistered, meta=meta)
                 return
-            if isinstance(self.__data[key][1], _UMeta):
-                self.__data[key][0] = deepcopy(value)
+            data, meta = self.__data[key]
+            if isinstance(meta, _UMetadata):
+                data = deepcopy(value)
+                self.__data[key] = (data, meta)
+                io.write_json(meta.path, lambda: data)
                 return
             raise NotImplementedError("Registered store are not supported yet.")
 
@@ -85,24 +88,68 @@ class Syncwave(MutableMapping[str, Any], Reactive):
     def __syncwave_abc_marker__(self) -> None:
         pass
 
-    def __sync_unregistered(self, meta: _UMeta) -> None:
-        context = contextlib.suppress(FileNotFoundError, ValueError)
-        with context:
-            data = io.read_json(meta.path)
-            self.__data[meta.key] = (deepcopy(data), meta)
+    def __sync_unregistered(self, meta: _UMetadata) -> None:
+        with contextlib.suppress(FileNotFoundError, ValueError):
+            data = deepcopy(io.read_json(meta.path))
+        with self.__lock:
+            self.__data[meta.key] = (data, None)
         io.write_json(meta.path, lambda: self.__data[meta.key][0])
 
     # repr to be implemented
     # str to be implemented
-
+    @overload
     def register(
         self,
         *,
         name: str | None = None,
         key: str | None = None,
         skip_key_validation: bool = False,
-    ) -> None:
-        pass
+        file_name: str | None = None,
+        sub_dir: Path | str | None = None,
+        file_path: Path | str | None = None,
+    ) -> Callable[[type[T]], type[SyncModel[T]]]:
+        """
+        Decorator usage: @syncwave.register
+        """
+        ...
 
-    def reactive(self, cls: type[SyncModelSupported]) -> type[SyncModel]:
-        return SyncModel._reactive(self, cls)
+    @overload
+    def register(
+        self,
+        type_: Any,
+        /,
+        *,
+        name: str | None = None,
+        key: str | None = None,
+        skip_key_validation: bool = False,
+        file_name: str | None = None,
+        sub_dir: Path | str | None = None,
+        file_path: Path | str | None = None,
+    ) -> None:
+        """
+        Method usage: syncwave.register(type, ...)
+        """
+        ...
+
+    def register(
+        self,
+        type_: Any = None,
+        /,
+        *,
+        name: str | None = None,
+        key: str | None = None,
+        skip_key_validation: bool = False,
+        file_name: str | None = None,
+        sub_dir: Path | str | None = None,
+        file_path: Path | str | None = None,
+    ) -> Callable[[type[T]], type[SyncModel[T]]] | None:
+        if type_ is None:
+            # decorator usage
+            def decorator(cls: type[T]) -> type[SyncModel[T]]:
+                # implementation
+                return cls
+
+            return decorator
+        # method usage
+        # implementation
+        pass
