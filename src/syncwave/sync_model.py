@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses as dc
 from abc import ABCMeta, abstractmethod
-from typing import Any, final
+from typing import Any, Generic, TypeVar, final
 
 from pydantic import BaseModel, RootModel
 
@@ -44,8 +44,13 @@ class SyncModelSupported(metaclass=SyncModelSupportedMeta):
         raise NotImplementedError
 
 
-class SyncModel(Reactive):
-    """A marker base class for models that have been made reactive by Syncwave."""
+T = TypeVar("T", bound=SyncModelSupported)
+
+
+class SyncModel(Generic[T], Reactive):
+    """
+    A marker base class for models that have been made reactive by Syncwave.
+    """
 
     @staticmethod
     def _reactive(syncwave, cls: type[SyncModelSupported]) -> type[SyncModel]:
