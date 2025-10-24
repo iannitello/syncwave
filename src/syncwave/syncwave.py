@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, TypeVar, overload
 
-from pydantic import TypeAdapter
+from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
 from .io import io
 from .reactive import Reactive
@@ -16,6 +16,9 @@ from .sync_model import SyncModel, SyncModelSupported
 from .watcher import watcher
 
 T = TypeVar("T", bound=SyncModelSupported)
+
+default_provider = {"array": list, "object": dict, "string": str, "null": lambda: None}
+_UNINITIALIZED = object()
 
 
 @dataclass
@@ -97,16 +100,10 @@ class Syncwave(MutableMapping[str, Any], Reactive):
 
     # repr to be implemented
     # str to be implemented
+
     @overload
     def register(
-        self,
-        *,
-        name: str | None = None,
-        key: str | None = None,
-        skip_key_validation: bool = False,
-        file_name: str | None = None,
-        sub_dir: Path | str | None = None,
-        file_path: Path | str | None = None,
+        self, *, name: str | None = None
     ) -> Callable[[type[T]], type[SyncModel[T]]]:
         """
         Decorator usage: @syncwave.register
@@ -114,36 +111,16 @@ class Syncwave(MutableMapping[str, Any], Reactive):
         ...
 
     @overload
-    def register(
-        self,
-        type_: Any,
-        /,
-        *,
-        name: str | None = None,
-        key: str | None = None,
-        skip_key_validation: bool = False,
-        file_name: str | None = None,
-        sub_dir: Path | str | None = None,
-        file_path: Path | str | None = None,
-    ) -> None:
+    def register(self, type: Any, /, *, name: str) -> None:
         """
         Method usage: syncwave.register(type, ...)
         """
         ...
 
     def register(
-        self,
-        type_: Any = None,
-        /,
-        *,
-        name: str | None = None,
-        key: str | None = None,
-        skip_key_validation: bool = False,
-        file_name: str | None = None,
-        sub_dir: Path | str | None = None,
-        file_path: Path | str | None = None,
+        self, type: Any = None, /, *, name: str | None = None
     ) -> Callable[[type[T]], type[SyncModel[T]]] | None:
-        if type_ is None:
+        if type is None:
             # decorator usage
             def decorator(cls: type[T]) -> type[SyncModel[T]]:
                 # implementation

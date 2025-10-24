@@ -18,7 +18,6 @@ DataProvider = Callable[[], JSONData]
 
 class _IO:
     ENCODING: Final[str] = "utf-8"
-    DEFAULT_JSON_CONTENT: Final[JSONData] = {}
     DUMPS_CONFIG: Final[dict[str, Any]] = {"indent": 2}
     DEBOUNCE_WINDOW: Final[float] = 0.05
 
@@ -50,11 +49,9 @@ class _IO:
         try:
             path.mkdir(parents=True, exist_ok=True)
         except PermissionError as e:
-            raise PermissionError(
-                f"Permission denied to create directory at '{path}'."
-            ) from e
+            raise PermissionError(f"Permission denied to create dir '{path}'.") from e
         except OSError as e:
-            raise OSError(f"Unable to create directory at '{path}'.") from e
+            raise OSError(f"Unable to create dir '{path}'.") from e
 
     @staticmethod
     def create_file(path: Path) -> None:
@@ -62,34 +59,33 @@ class _IO:
         if path.exists() and not path.is_file():
             raise FileExistsError(f"Path '{path}' exists and is not a file.")
         try:
-            path.touch(exist_ok=True)
+            path.touch()
         except PermissionError as e:
-            raise PermissionError(
-                f"Permission denied to create file at '{path}'."
-            ) from e
+            raise PermissionError(f"Permission denied to create file '{path}'.") from e
         except OSError as e:
-            raise OSError(f"Unable to create file at '{path}'.") from e
+            raise OSError(f"Unable to create file '{path}'.") from e
+
+    def init_json(self, path: Path, default: DataProvider | None) -> None:
+        self.create_file(path)
+        if path.stat().st_size == 0:
+            if default is not None:
+                self._atomic_write(path, default())
+            return
+        try:
+            self._read_json(path)
+        except ValueError as e:
+            raise OSError(f"File '{path}' exists but is not a valid JSON file.") from e
 
     def json_dumps(self, data: JSONData) -> str:
         return to_json(data, **self.DUMPS_CONFIG).decode(self.ENCODING)
-
-    def init_json_file(self, path: Path) -> None:
-        self.create_dir(path.parent)
-
-        if path.is_dir():
-            raise IsADirectoryError(f"Path '{path}' is a directory, not a file.")
-        if not path.exists() or path.stat().st_size == 0:
-            self._atomic_write(path, self.DEFAULT_JSON_CONTENT)
-            return
-        try:
-            from_json(path.read_text(encoding=self.ENCODING))
-        except ValueError as e:
-            raise OSError(f"File '{path}' exists but is not a valid JSON file.") from e
 
     def read_json(self, path: Path) -> JSONData:
         with self._lock:
             if path in self._pending_data_providers:
                 return self._pending_data_providers[path]()
+        return self._read_json(path)
+
+    def _read_json(self, path: Path) -> JSONData:
         return from_json(path.read_text(encoding=self.ENCODING))
 
     def write_json(self, path: Path, data_provider: DataProvider) -> None:
