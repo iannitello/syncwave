@@ -98,6 +98,13 @@ class Syncwave(MutableMapping[str, Any], Reactive):
             self.__data[meta.key] = (data, None)
         io.write_json(meta.path, lambda: self.__data[meta.key][0])
 
+    def __sync_registered(self, meta: _RMetadata) -> None:
+        with contextlib.suppress(FileNotFoundError, ValueError):
+            data = meta.type_adapter.validate_python(io.read_json(meta.path))
+        with self.__lock:
+            self.__data[meta.key] = (data, meta)
+        io.write_json(meta.path, lambda: data)
+
     # repr to be implemented
     # str to be implemented
 
@@ -127,6 +134,21 @@ class Syncwave(MutableMapping[str, Any], Reactive):
                 return cls
 
             return decorator
+
         # method usage
-        # implementation
-        pass
+        try:
+            ta = TypeAdapter(type)
+        except PydanticSchemaGenerationError as e:
+            raise ValueError(f"Type '{type}' is not supported.") from e
+        if name is None:
+            raise ValueError("A 'name' is required.")
+        name = str(name)
+        path = self.stores_dir / f"{name}.json"
+        meta = _RMetadata(name, path, ta)
+        with self.__lock:
+            if name in self:
+                raise ValueError(f"The name '{name}' has already been registered.")
+            default = default_provider.get(ta.json_schema()["type"])
+            self.__data[name] = (default() if default else _UNINITIALIZED, meta)
+            io.init_json(path, default)
+            watcher.watch(path, self.__sync_registered, meta=meta)
