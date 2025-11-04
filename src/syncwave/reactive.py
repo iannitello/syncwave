@@ -1,27 +1,45 @@
 from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod
-from typing import final
+from functools import wraps
+from threading import RLock
+from typing import Callable, ParamSpec, TypeVar, final
 
-
-class DeadReferenceError(RuntimeError):
-    """Exception raised for operations on a dead or stale reactive reference."""
-
-    def __init__(self, *, reference: Reactive) -> None:
-        message = f"Operation attempted on a dead reference: {reference!r}"
-        super().__init__(message)
+Callback = Callable[[], None]
 
 
 class Reactive(metaclass=ABCMeta):
-    """A mixin class that marks an object as part of the Syncwave reactive system."""
+    __syncwave_lock__: RLock
+    __syncwave_live__: bool = False
+    __syncwave_on_change__: Callback
 
-    __syncwave_live__ = False
+    @final
+    @property
+    def sync_live(self) -> bool:
+        with self.__syncwave_lock__:
+            return self.__syncwave_live__
 
     @abstractmethod
     def __syncwave_abc_marker__(self) -> None:
         raise NotImplementedError
 
-    @final
-    @property
-    def sync_live(self) -> bool:
-        return self.__syncwave_live__
+
+class DeadReferenceError(RuntimeError):
+    def __init__(self, *, reference: Reactive) -> None:
+        message = f"Operation attempted on a dead reference: {reference!r}"
+        super().__init__(message)
+
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+def live_only(func: Callable[P, R]) -> Callable[P, R]:
+    @wraps(func)
+    def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> R:
+        with self.__syncwave_lock__:
+            if not self.__syncwave_live__:
+                raise DeadReferenceError(reference=self)
+            return func(self, *args, **kwargs)
+
+    return wrapper
