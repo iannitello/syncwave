@@ -66,6 +66,27 @@ class SyncDict(MutableMapping[JSONKey, VT], Reactive):
     def __syncwave_abc_marker__(self) -> None:
         pass
 
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source: Any, handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        instance_schema = core_schema.is_instance_schema(cls)
+
+        args = get_args(source)
+        if args:
+            keys_schema, values_schema = handler(args[0]), handler(args[1])
+            dict_schema = core_schema.dict_schema(
+                keys_schema=keys_schema, values_schema=values_schema
+            )
+        else:
+            dict_schema = core_schema.dict_schema()
+
+        from_dict_schema = core_schema.no_info_after_validator_function(
+            cls.__syncwave_new__, dict_schema
+        )
+
+        return core_schema.union_schema([instance_schema, from_dict_schema])
+
     # repr to be implemented
     # str to be implemented
 
@@ -112,6 +133,25 @@ class SyncList(MutableSequence[VT], Reactive):
 
     def __syncwave_abc_marker__(self) -> None:
         pass
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source: Any, handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        instance_schema = core_schema.is_instance_schema(cls)
+
+        args = get_args(source)
+        if args:
+            items_schema = handler(args[0])
+            list_schema = core_schema.list_schema(items_schema=items_schema)
+        else:
+            list_schema = core_schema.list_schema()
+
+        from_list_schema = core_schema.no_info_after_validator_function(
+            cls.__syncwave_new__, list_schema
+        )
+
+        return core_schema.union_schema([instance_schema, from_list_schema])
 
     # repr to be implemented
     # str to be implemented
@@ -160,6 +200,25 @@ class SyncSet(MutableSet[VT], Reactive):
 
     def __syncwave_abc_marker__(self) -> None:
         pass
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source: Any, handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        instance_schema = core_schema.is_instance_schema(cls)
+
+        args = get_args(source)
+        if args:
+            items_schema = handler(args[0])
+            set_schema = core_schema.set_schema(items_schema=items_schema)
+        else:
+            set_schema = core_schema.set_schema()
+
+        from_set_schema = core_schema.no_info_after_validator_function(
+            cls.__syncwave_new__, set_schema
+        )
+
+        return core_schema.union_schema([instance_schema, from_set_schema])
 
     # repr to be implemented
     # str to be implemented
