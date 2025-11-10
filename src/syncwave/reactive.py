@@ -3,15 +3,14 @@ from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from functools import wraps
 from threading import RLock
-from typing import Callable, ParamSpec, TypeVar, final
+from typing import Any, Callable, ParamSpec, TypeVar, final
 
 Callback = Callable[[], None]
 
 
-class Reactive(metaclass=ABCMeta):
+class ReactiveBase(metaclass=ABCMeta):
     __syncwave_lock__: RLock
     __syncwave_live__: bool = False
-    __syncwave_on_change__: Callback
 
     @final
     @property
@@ -24,8 +23,16 @@ class Reactive(metaclass=ABCMeta):
         raise NotImplementedError
 
 
+class Reactive(ReactiveBase):
+    __syncwave_on_change__: Callback
+
+    @abstractmethod
+    def __syncwave_update__(self, new_data: Any) -> None:
+        raise NotImplementedError
+
+
 class DeadReferenceError(RuntimeError):
-    def __init__(self, *, reference: Reactive) -> None:
+    def __init__(self, *, reference: ReactiveBase) -> None:
         message = f"Operation attempted on a dead reference: {reference!r}"
         super().__init__(message)
 
@@ -34,9 +41,9 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-def live_only(func: Callable[P, R]) -> Callable[P, R]:
+def atomic(func: Callable[P, R]) -> Callable[P, R]:
     @wraps(func)
-    def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> R:
+    def wrapper(self: ReactiveBase, *args: P.args, **kwargs: P.kwargs) -> R:
         with self.__syncwave_lock__:
             if not self.__syncwave_live__:
                 raise DeadReferenceError(reference=self)
