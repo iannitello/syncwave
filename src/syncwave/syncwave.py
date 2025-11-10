@@ -11,7 +11,7 @@ from typing import Any, TypeVar, overload
 from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
 from .io import io
-from .reactive import Reactive
+from .reactive import ReactiveBase
 from .sync_model import SyncModel, SyncModelSupported
 from .watcher import watcher
 
@@ -38,7 +38,7 @@ class _RMetadata(_Metadata):
 
 
 # Has to be thread-safe, this is a temporary solution just to start the implementation.
-class Syncwave(MutableMapping[str, Any], Reactive):
+class Syncwave(MutableMapping[str, Any], ReactiveBase):
     def __init__(self, stores_dir: str | Path = "") -> None:
         stores_dir = (
             io.get_root_dir() / "syncstores"
