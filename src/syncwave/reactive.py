@@ -3,7 +3,8 @@ from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from functools import wraps
 from threading import RLock
-from typing import Any, Callable, ParamSpec, TypeVar, final
+from typing import Callable, ParamSpec, TypeVar, final
+from typing_extensions import Self
 
 Callback = Callable[[], None]
 
@@ -27,7 +28,7 @@ class Reactive(ReactiveBase):
     __syncwave_on_change__: Callback
 
     @abstractmethod
-    def __syncwave_update__(self, new_data: Any) -> None:
+    def __syncwave_update__(self, new: Self) -> None:
         raise NotImplementedError
 
 

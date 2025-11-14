@@ -1,14 +1,25 @@
 from __future__ import annotations
 
-from collections.abc import Iterator, MutableMapping, MutableSequence, MutableSet
-from threading import RLock
-from typing import Any, NoReturn, TypeVar, Union, final
+from collections.abc import (
+    Iterator,
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    MutableSet,
+    Sequence,
+    Set,
+)
+from typing import Any, NoReturn, TypeVar, final, get_args
 from typing_extensions import Self
 
-from .reactive import Reactive
+from pydantic import GetCoreSchemaHandler as Handler
+from pydantic import TypeAdapter
+from pydantic_core import core_schema as cs
 
-JSONKey = Union[str, int, float, bool, None]
-VT = TypeVar("VT")  # value type
+from .reactive import Reactive, atomic
+
+KT = TypeVar("KT", bound=str | int | float | bool | None)
+VT = TypeVar("VT")
 
 
 @final
@@ -22,206 +33,300 @@ class SyncCollection(Reactive):
 # This is a temporary solution just to make it easier to implement.
 
 
-class SyncDict(MutableMapping[JSONKey, VT], Reactive):
+class SyncDict(MutableMapping[KT, VT], Reactive):
+    __syncwave_data__: dict[KT, VT]
+    __type_adapter: TypeAdapter[SyncDict[KT, VT]]
+    __child_type_adapter: TypeAdapter[VT]
+    __holds_reactive: bool
+
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
         raise TypeError("SyncDict cannot be instantiated directly.")
 
     @classmethod
-    def __syncwave_new__(cls: type[SyncDict], data: dict[JSONKey, VT]) -> Self:
+    def __syncwave_new__(cls: type[SyncDict], data: dict[KT, VT]) -> Self:
         self: SyncDict = object.__new__(cls)
-        self.__syncwave_lock__ = RLock()
         self.__syncwave_data__ = data
-        self.__init__()
         return self
 
-    def __init__(self) -> None:
-        """
-        Initialization hook. Override this method to perform initialization logic.
+    def __syncwave_init__(self) -> None:
+        # TODO: Implement this for real
+        self.__type_adapter = TypeAdapter(...)
+        self.__child_type_adapter = TypeAdapter(...)
+        self.__holds_reactive = True
 
-        No parameters can be passed to this method.
-        """
-        pass
+    def __syncwave_update__(self, new: SyncDict[KT, VT] | Mapping[KT, VT]) -> None:
+        new = self.__type_adapter.validate_python(new)
 
-    def __getitem__(self, key: JSONKey) -> VT:
-        with self.__syncwave_lock__:
-            return self.__syncwave_data__[key]
+        if not self.__holds_reactive:
+            self.__syncwave_data__ = new.__syncwave_data__
+            return
 
-    def __setitem__(self, key: JSONKey, value: VT) -> None:
-        with self.__syncwave_lock__:
-            self.__syncwave_data__[key] = value
+        old_keys = set(self.__syncwave_data__.keys())
+        new_keys = set(new.__syncwave_data__.keys())
 
-    def __delitem__(self, key: JSONKey) -> None:
-        with self.__syncwave_lock__:
+        # items to update
+        for key in new_keys & old_keys:
+            new_item = new.__syncwave_data__[key]
+            self.__syncwave_data__[key].__syncwave_update__(new_item)
+
+        # items to add
+        for key in new_keys - old_keys:
+            self.__syncwave_data__[key] = new.__syncwave_data__[key]
+
+        # items to remove
+        for key in old_keys - new_keys:
+            old_item = self.__syncwave_data__.pop(key)
+            old_item.__syncwave_live__ = False
+
+    @atomic
+    def __getitem__(self, key: KT) -> VT:
+        return self.__syncwave_data__[key]
+
+    @atomic
+    def __setitem__(self, key: KT, value: VT) -> None:
+        new_item = self.__child_type_adapter.validate_python(value)
+
+        if not self.__holds_reactive:
+            self.__syncwave_data__[key] = new_item
+            self.__syncwave_on_change__()
+            return
+
+        if key in self.__syncwave_data__:
+            self.__syncwave_data__[key].__syncwave_update__(new_item)
+        else:
+            self.__syncwave_data__[key] = new_item
+        self.__syncwave_on_change__()
+
+    @atomic
+    def __delitem__(self, key: KT) -> None:
+        if not self.__holds_reactive:
             del self.__syncwave_data__[key]
+            self.__syncwave_on_change__()
+            return
 
-    def __iter__(self) -> Iterator[JSONKey]:
-        with self.__syncwave_lock__:
-            # first convert to a list so the iterator is over a frozen object
-            return iter(list(self.__syncwave_data__))
+        old_item = self.__syncwave_data__.pop(key)
+        old_item.__syncwave_live__ = False
+        self.__syncwave_on_change__()
 
+    @atomic
+    def __iter__(self) -> Iterator[KT]:
+        # first convert to a list so the iterator is over a frozen object
+        return iter(list(self.__syncwave_data__))
+
+    @atomic
     def __len__(self) -> int:
-        with self.__syncwave_lock__:
-            return len(self.__syncwave_data__)
+        return len(self.__syncwave_data__)
+
+    # __repr__ to be implemented
+    # __str__ to be implemented
+    # __eq__ to be implemented?
+    # __hash__ to be implemented?
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
+        instance_schema = cs.is_instance_schema(cls)
+        args = get_args(src)
+        if args:
+            mapping_t_schema = handler.generate_schema(MutableMapping[args[0], args[1]])
+        else:
+            mapping_t_schema = handler.generate_schema(MutableMapping)
+
+        non_instance_schema = cs.no_info_after_validator_function(
+            cls.__syncwave_new__, mapping_t_schema
+        )
+        return cs.union_schema([instance_schema, non_instance_schema])
 
     def __syncwave_abc_marker__(self) -> None:
         pass
 
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls, source: Any, handler: GetCoreSchemaHandler
-    ) -> core_schema.CoreSchema:
-        instance_schema = core_schema.is_instance_schema(cls)
-
-        args = get_args(source)
-        if args:
-            keys_schema, values_schema = handler(args[0]), handler(args[1])
-            dict_schema = core_schema.dict_schema(
-                keys_schema=keys_schema, values_schema=values_schema
-            )
-        else:
-            dict_schema = core_schema.dict_schema()
-
-        from_dict_schema = core_schema.no_info_after_validator_function(
-            cls.__syncwave_new__, dict_schema
-        )
-
-        return core_schema.union_schema([instance_schema, from_dict_schema])
-
-    # repr to be implemented
-    # str to be implemented
-
 
 class SyncList(MutableSequence[VT], Reactive):
+    __syncwave_data__: list[VT]
+    __type_adapter: TypeAdapter[SyncList[VT]]
+    __child_type_adapter: TypeAdapter[VT]
+    __holds_reactive: bool
+
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
         raise TypeError("SyncList cannot be instantiated directly.")
 
     @classmethod
     def __syncwave_new__(cls: type[SyncList], data: list[VT]) -> Self:
         self: SyncList = object.__new__(cls)
-        self.__syncwave_lock__ = RLock()
         self.__syncwave_data__ = data
-        self.__init__()
         return self
 
-    def __init__(self) -> None:
-        """
-        Initialization hook. Override this method to perform initialization logic.
+    def __syncwave_init__(self) -> None:
+        # TODO: Implement this for real
+        self.__type_adapter = TypeAdapter(...)
+        self.__child_type_adapter = TypeAdapter(...)
+        self.__holds_reactive = True
 
-        No parameters can be passed to this method.
-        """
-        pass
+    def __syncwave_update__(self, new: SyncList[VT] | Sequence[VT]) -> None:
+        new = self.__type_adapter.validate_python(new)
 
+        if not self.__holds_reactive:
+            self.__syncwave_data__ = new.__syncwave_data__
+            return
+
+        old_len = len(self.__syncwave_data__)
+        new_len = len(new.__syncwave_data__)
+
+        # items to update
+        for i in range(min(old_len, new_len)):
+            self.__syncwave_data__[i].__syncwave_update__(new.__syncwave_data__[i])
+
+        # items to add
+        if new_len > old_len:
+            for i in range(old_len, new_len):
+                self.__syncwave_data__.append(new.__syncwave_data__[i])
+
+        # items to remove
+        elif old_len > new_len:
+            for _ in range(old_len - new_len):
+                old_item = self.__syncwave_data__.pop()
+                old_item.__syncwave_live__ = False
+
+    @atomic
     def __getitem__(self, index: int) -> VT:
-        with self.__syncwave_lock__:
-            return self.__syncwave_data__[index]
+        return self.__syncwave_data__[index]
 
+    @atomic
     def __setitem__(self, index: int, value: VT) -> None:
-        with self.__syncwave_lock__:
-            self.__syncwave_data__[index] = value
+        new_item = self.__child_type_adapter.validate_python(value)
 
+        if not self.__holds_reactive:
+            self.__syncwave_data__[index] = new_item
+            self.__syncwave_on_change__()
+            return
+
+        self.__syncwave_data__[index].__syncwave_update__(new_item)
+        self.__syncwave_on_change__()
+
+    @atomic
     def __delitem__(self, index: int) -> None:
-        with self.__syncwave_lock__:
+        if not self.__holds_reactive:
             del self.__syncwave_data__[index]
+            self.__syncwave_on_change__()
+            return
 
+        data_copy = self.__syncwave_data__.copy()
+        del data_copy[index]
+        self.__syncwave_update__(data_copy)
+        self.__syncwave_on_change__()
+
+    @atomic
     def __len__(self) -> int:
-        with self.__syncwave_lock__:
-            return len(self.__syncwave_data__)
+        return len(self.__syncwave_data__)
 
+    @atomic
     def insert(self, index: int, value: VT) -> None:
-        with self.__syncwave_lock__:
-            self.__syncwave_data__.insert(index, value)
+        new_item = self.__child_type_adapter.validate_python(value)
+
+        if not self.__holds_reactive:
+            self.__syncwave_data__.insert(index, new_item)
+            self.__syncwave_on_change__()
+            return
+
+        data_copy = self.__syncwave_data__.copy()
+        data_copy.insert(index, new_item)
+        self.__syncwave_update__(data_copy)
+        self.__syncwave_on_change__()
+
+    # __repr__ to be implemented
+    # __str__ to be implemented
+    # __eq__ to be implemented?
+    # __hash__ to be implemented?
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
+        instance_schema = cs.is_instance_schema(cls)
+
+        args = get_args(src)
+        if args:
+            sequence_t_schema = handler.generate_schema(MutableSequence[args[0]])
+        else:
+            sequence_t_schema = handler.generate_schema(MutableSequence)
+
+        non_instance_schema = cs.no_info_after_validator_function(
+            cls.__syncwave_new__, sequence_t_schema
+        )
+        return cs.union_schema([instance_schema, non_instance_schema])
 
     def __syncwave_abc_marker__(self) -> None:
         pass
 
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls, source: Any, handler: GetCoreSchemaHandler
-    ) -> core_schema.CoreSchema:
-        instance_schema = core_schema.is_instance_schema(cls)
-
-        args = get_args(source)
-        if args:
-            items_schema = handler(args[0])
-            list_schema = core_schema.list_schema(items_schema=items_schema)
-        else:
-            list_schema = core_schema.list_schema()
-
-        from_list_schema = core_schema.no_info_after_validator_function(
-            cls.__syncwave_new__, list_schema
-        )
-
-        return core_schema.union_schema([instance_schema, from_list_schema])
-
-    # repr to be implemented
-    # str to be implemented
-
 
 class SyncSet(MutableSet[VT], Reactive):
+    # SyncSet cannot hold reactive items because a reactive item is mutable
+    __syncwave_data__: set[VT]
+    __type_adapter: TypeAdapter[SyncSet[VT]]
+    __child_type_adapter: TypeAdapter[VT]
+
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
         raise TypeError("SyncSet cannot be instantiated directly.")
 
     @classmethod
     def __syncwave_new__(cls: type[SyncSet], data: set[VT]) -> Self:
         self: SyncSet = object.__new__(cls)
-        self.__syncwave_lock__ = RLock()
         self.__syncwave_data__ = data
-        self.__init__()
         return self
 
-    def __init__(self) -> None:
-        """
-        Initialization hook. Override this method to perform initialization logic.
+    def __syncwave_init__(self) -> None:
+        # TODO: Implement this for real
+        self.__type_adapter = TypeAdapter(...)
+        self.__child_type_adapter = TypeAdapter(...)
 
-        No parameters can be passed to this method.
-        """
-        pass
+    def __syncwave_update__(self, new: SyncSet[VT] | Set[VT]) -> None:
+        new = self.__type_adapter.validate_python(new)
+        self.__syncwave_data__ = new.__syncwave_data__
 
-    def __contains__(self, value: VT) -> bool:
-        with self.__syncwave_lock__:
-            return value in self.__syncwave_data__
+    @atomic
+    def __contains__(self, value: object) -> bool:
+        return value in self.__syncwave_data__
 
+    @atomic
     def __iter__(self) -> Iterator[VT]:
-        with self.__syncwave_lock__:
-            # first convert to a list so the iterator is over a frozen object
-            return iter(list(self.__syncwave_data__))
+        # first convert to a list so the iterator is over a frozen object
+        return iter(list(self.__syncwave_data__))
 
+    @atomic
     def __len__(self) -> int:
-        with self.__syncwave_lock__:
-            return len(self.__syncwave_data__)
+        return len(self.__syncwave_data__)
 
+    @atomic
     def add(self, value: VT) -> None:
-        with self.__syncwave_lock__:
-            self.__syncwave_data__.add(value)
+        new_item = self.__child_type_adapter.validate_python(value)
+        self.__syncwave_data__.add(new_item)
+        self.__syncwave_on_change__()
 
+    @atomic
     def discard(self, value: VT) -> None:
-        with self.__syncwave_lock__:
+        if value in self.__syncwave_data__:
             self.__syncwave_data__.discard(value)
+            self.__syncwave_on_change__()
+
+    # __repr__ to be implemented
+    # __str__ to be implemented
+    # __eq__ to be implemented?
+    # __hash__ to be implemented?
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
+        instance_schema = cs.is_instance_schema(cls)
+
+        args = get_args(src)
+        if args:
+            set_t_schema = handler.generate_schema(MutableSet[args[0]])
+        else:
+            set_t_schema = handler.generate_schema(MutableSet)
+
+        non_instance_schema = cs.no_info_after_validator_function(
+            cls.__syncwave_new__, set_t_schema
+        )
+        return cs.union_schema([instance_schema, non_instance_schema])
 
     def __syncwave_abc_marker__(self) -> None:
         pass
-
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls, source: Any, handler: GetCoreSchemaHandler
-    ) -> core_schema.CoreSchema:
-        instance_schema = core_schema.is_instance_schema(cls)
-
-        args = get_args(source)
-        if args:
-            items_schema = handler(args[0])
-            set_schema = core_schema.set_schema(items_schema=items_schema)
-        else:
-            set_schema = core_schema.set_schema()
-
-        from_set_schema = core_schema.no_info_after_validator_function(
-            cls.__syncwave_new__, set_schema
-        )
-
-        return core_schema.union_schema([instance_schema, from_set_schema])
-
-    # repr to be implemented
-    # str to be implemented
 
 
 SyncCollection.register(SyncDict)
