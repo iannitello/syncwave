@@ -18,13 +18,13 @@ from pydantic_core import core_schema as cs
 
 from .reactive import Reactive, atomic
 
-KT = TypeVar("KT", bound=str | int | float | bool | None)
+KT = TypeVar("KT", bound=Union[str, int, float, bool, None])
 VT = TypeVar("VT")
 
 
 @final
 class SyncCollection(Reactive):
-    def __init_subclass__(cls: type[SyncCollection], /, **kwargs: Any) -> None:
+    def __init_subclass__(cls: type[SyncCollection], /, **kwargs: Any) -> NoReturn:
         raise TypeError("SyncCollection cannot be subclassed.")
 
 
@@ -332,3 +332,11 @@ class SyncSet(MutableSet[VT], Reactive):
 SyncCollection.register(SyncDict)
 SyncCollection.register(SyncList)
 SyncCollection.register(SyncSet)
+
+
+def register(*args: Any, **kwargs: Any) -> NoReturn:
+    """Cannot register a virtual subclass of SyncCollection."""
+    raise TypeError("Cannot register a virtual subclass of SyncCollection.")
+
+
+SyncCollection.register = register
