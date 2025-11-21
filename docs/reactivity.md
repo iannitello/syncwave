@@ -167,7 +167,7 @@ def create_customer(customer: Customer) -> Customer:
     return customer
 ```
 
-For advanced cases where a non-**reactive**, transient instance is needed, the user can define a plain model and then create a **reactive** version of it using `syncwave.make_reactive`:
+For advanced cases where a non-**reactive**, transient instance is needed, the user can define a plain model and then create a **reactive** version of it using `syncwave.reactive`:
 
 ```python
 # A normal, non-reactive BaseModel
@@ -177,7 +177,7 @@ class Customer(BaseModel):
 
 
 # A new, reactive version of the Customer class
-SyncCustomer = syncwave.make_reactive(Customer)
+SyncCustomer = syncwave.reactive(Customer)
 
 # The new class is used to register
 syncwave.register(SyncCustomer, name="customers", key="id")

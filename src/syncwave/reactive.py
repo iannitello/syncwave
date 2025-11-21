@@ -3,8 +3,8 @@ from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from functools import wraps
 from threading import RLock
-from typing import Callable, ParamSpec, TypeVar, final
-from typing_extensions import Self
+from typing import Callable, TypeVar, final
+from typing_extensions import ParamSpec, Self
 
 Callback = Callable[[], None]
 
