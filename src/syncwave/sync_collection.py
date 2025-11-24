@@ -9,6 +9,7 @@ from collections.abc import (
     Sequence,
     Set,
 )
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, NoReturn, TypeVar, Union, final, get_args
 from typing_extensions import Self
@@ -17,7 +18,7 @@ from pydantic import GetCoreSchemaHandler as Handler
 from pydantic import TypeAdapter
 from pydantic_core import core_schema as cs
 
-from .reactive import Reactive, atomic
+from .reactive import Context, Reactive, atomic
 
 KT = TypeVar("KT", bound=Union[str, int, float, bool, None])
 VT = TypeVar("VT")
@@ -41,10 +42,13 @@ class SyncCollection(Reactive):
 
 
 class SyncDict(MutableMapping[KT, VT], Reactive):
-    __syncwave_data__: dict[KT, VT]
-    __type_adapter: TypeAdapter[SyncDict[KT, VT]]
-    __child_type_adapter: TypeAdapter[VT]
-    __content: Content
+    @dataclass(frozen=True)
+    class DictContext(Context):
+        type_adapter: TypeAdapter[SyncDict[KT, VT]]
+        children_type_adapter: TypeAdapter[VT]
+
+    __ctx: DictContext
+    __data: dict[KT, VT]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
         raise TypeError("SyncDict cannot be instantiated directly.")
@@ -52,23 +56,24 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
     @classmethod
     def __syncwave_new__(cls: type[SyncDict], data: dict[KT, VT]) -> Self:
         self: SyncDict = object.__new__(cls)
-        self.__syncwave_data__ = data
+        self.__data = data
         return self
 
-    def __syncwave_init__(self) -> None:
-        # TODO: Implement this for real
-        self.__type_adapter = TypeAdapter(...)
-        self.__child_type_adapter = TypeAdapter(...)
+    def __syncwave_bind__(self, context: DictContext) -> None:
+        self.__ctx = context
 
-        if self.__content is Content.NON_REACTIVE:
+        # TODO: Implement content-type detection
+        content = Content.NON_REACTIVE
+
+        if content is Content.NON_REACTIVE:
             self.__syncwave_update__ = self.__update_non_reactive
             self.__setitem__ = self.__setitem_non_reactive
             self.__delitem__ = self.__delitem_non_reactive
-        elif self.__content is Content.REACTIVE:
+        elif content is Content.REACTIVE:
             self.__syncwave_update__ = self.__update_reactive
             self.__setitem__ = self.__setitem_reactive
             self.__delitem__ = self.__delitem_reactive
-        elif self.__content is Content.MIXED:
+        elif content is Content.MIXED:
             self.__syncwave_update__ = self.__update_mixed
             self.__setitem__ = self.__setitem_mixed
             self.__delitem__ = self.__delitem_mixed
@@ -76,126 +81,126 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
     def __syncwave_update__(self, new: Mapping[KT, VT]) -> None: ...
 
     def __update_non_reactive(self, new: Mapping[KT, VT]) -> None:
-        new = self.__type_adapter.validate_python(new)
-        self.__syncwave_data__ = new.__syncwave_data__
+        new = self.__ctx.type_adapter.validate_python(new)
+        self.__data = new.__data
 
     def __update_reactive(self, new: Mapping[KT, VT]) -> None:
-        new = self.__type_adapter.validate_python(new)
-
-        old_keys = set(self.__syncwave_data__.keys())
-        new_keys = set(new.__syncwave_data__.keys())
+        new = self.__ctx.type_adapter.validate_python(new)
+        old_keys, new_keys = set(self.__data.keys()), set(new.__data.keys())
 
         # items to update
         for key in new_keys & old_keys:
-            old_item, new_item = self.__syncwave_data__[key], new.__syncwave_data__[key]
+            old_item, new_item = self.__data[key], new.__data[key]
             old_item.__syncwave_update__(new_item)
 
         # items to add
         for key in new_keys - old_keys:
-            self.__syncwave_data__[key] = new.__syncwave_data__[key]
+            self.__data[key] = new.__data[key]
 
         # items to remove
         for key in old_keys - new_keys:
-            old_item = self.__syncwave_data__.pop(key)
+            old_item = self.__data.pop(key)
             old_item.__syncwave_live__ = False
 
     def __update_mixed(self, new: Mapping[KT, VT]) -> None:
-        new = self.__type_adapter.validate_python(new)
-
-        old_keys = set(self.__syncwave_data__.keys())
-        new_keys = set(new.__syncwave_data__.keys())
+        new = self.__ctx.type_adapter.validate_python(new)
+        old_keys, new_keys = set(self.__data.keys()), set(new.__data.keys())
 
         # items to update
         for key in new_keys & old_keys:
-            old_item, new_item = self.__syncwave_data__[key], new.__syncwave_data__[key]
+            old_item, new_item = self.__data[key], new.__data[key]
+
             old_is_reactive = isinstance(old_item, Reactive)
             safe_to_update = old_is_reactive and isinstance(new_item, type(old_item))
+
             if safe_to_update:
                 old_item.__syncwave_update__(new_item)
             else:
                 if old_is_reactive:
                     old_item.__syncwave_live__ = False
-                self.__syncwave_data__[key] = new_item
+                self.__data[key] = new_item
 
         # items to add
         for key in new_keys - old_keys:
-            self.__syncwave_data__[key] = new.__syncwave_data__[key]
+            self.__data[key] = new.__data[key]
 
         # items to remove
         for key in old_keys - new_keys:
-            old_item = self.__syncwave_data__.pop(key)
+            old_item = self.__data.pop(key)
             if isinstance(old_item, Reactive):
                 old_item.__syncwave_live__ = False
 
     @atomic
     def __getitem__(self, key: KT) -> VT:
-        return self.__syncwave_data__[key]
+        return self.__data[key]
 
     def __setitem__(self, key: KT, value: VT) -> None: ...
 
     @atomic
     def __setitem_non_reactive(self, key: KT, value: VT) -> None:
-        new_item = self.__child_type_adapter.validate_python(value)
-        self.__syncwave_data__[key] = new_item
-        self.__syncwave_on_change__()
+        new_item = self.__ctx.children_type_adapter.validate_python(value)
+        self.__data[key] = new_item
+        self.__ctx.on_change()
 
     @atomic
     def __setitem_reactive(self, key: KT, value: VT) -> None:
-        new_item = self.__child_type_adapter.validate_python(value)
-        if key not in self.__syncwave_data__:
-            self.__syncwave_data__[key] = new_item
+        new_item = self.__ctx.children_type_adapter.validate_python(value)
+        if key not in self.__data:
+            self.__data[key] = new_item
         else:
-            self.__syncwave_data__[key].__syncwave_update__(new_item)
-        self.__syncwave_on_change__()
+            self.__data[key].__syncwave_update__(new_item)
+        self.__ctx.on_change()
 
     @atomic
     def __setitem_mixed(self, key: KT, value: VT) -> None:
-        new_item = self.__child_type_adapter.validate_python(value)
+        new_item = self.__ctx.children_type_adapter.validate_python(value)
 
-        if key not in self.__syncwave_data__:
-            self.__syncwave_data__[key] = new_item
-            self.__syncwave_on_change__()
+        if key not in self.__data:
+            self.__data[key] = new_item
+            self.__ctx.on_change()
             return
 
-        old_item = self.__syncwave_data__[key]
+        old_item = self.__data[key]
+
         old_is_reactive = isinstance(old_item, Reactive)
         safe_to_update = old_is_reactive and isinstance(new_item, type(old_item))
+
         if safe_to_update:
             old_item.__syncwave_update__(new_item)
         else:
             if old_is_reactive:
                 old_item.__syncwave_live__ = False
-            self.__syncwave_data__[key] = new_item
-        self.__syncwave_on_change__()
+            self.__data[key] = new_item
+        self.__ctx.on_change()
 
     def __delitem__(self, key: KT) -> None: ...
 
     @atomic
     def __delitem_non_reactive(self, key: KT) -> None:
-        del self.__syncwave_data__[key]
-        self.__syncwave_on_change__()
+        del self.__data[key]
+        self.__ctx.on_change()
 
     @atomic
     def __delitem_reactive(self, key: KT) -> None:
-        old_item = self.__syncwave_data__.pop(key)
+        old_item = self.__data.pop(key)
         old_item.__syncwave_live__ = False
-        self.__syncwave_on_change__()
+        self.__ctx.on_change()
 
     @atomic
     def __delitem_mixed(self, key: KT) -> None:
-        old_item = self.__syncwave_data__.pop(key)
+        old_item = self.__data.pop(key)
         if isinstance(old_item, Reactive):
             old_item.__syncwave_live__ = False
-        self.__syncwave_on_change__()
+        self.__ctx.on_change()
 
     @atomic
     def __iter__(self) -> Iterator[KT]:
         # first convert to a list so the iterator is over a frozen object
-        return iter(list(self.__syncwave_data__))
+        return iter(list(self.__data))
 
     @atomic
     def __len__(self) -> int:
-        return len(self.__syncwave_data__)
+        return len(self.__data)
 
     # __repr__ to be implemented
     # __str__ to be implemented
@@ -204,27 +209,27 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
 
     @classmethod
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
-        instance_schema = cs.is_instance_schema(cls)
         args = get_args(src)
         if args:
-            mapping_t_schema = handler.generate_schema(MutableMapping[args[0], args[1]])
+            mapping_t_schema = handler.generate_schema(Mapping[args[0], args[1]])
         else:
-            mapping_t_schema = handler.generate_schema(MutableMapping)
+            mapping_t_schema = handler.generate_schema(Mapping)
 
         non_instance_schema = cs.no_info_after_validator_function(
             cls.__syncwave_new__, mapping_t_schema
         )
+        instance_schema = cs.is_instance_schema(cls)
         return cs.union_schema([instance_schema, non_instance_schema])
-
-    def __syncwave_abc_marker__(self) -> None:
-        pass
 
 
 class SyncList(MutableSequence[VT], Reactive):
-    __syncwave_data__: list[VT]
-    __type_adapter: TypeAdapter[SyncList[VT]]
-    __child_type_adapter: TypeAdapter[VT]
-    __content: Content
+    @dataclass(frozen=True)
+    class ListContext(Context):
+        type_adapter: TypeAdapter[SyncList[VT]]
+        children_type_adapter: TypeAdapter[VT]
+
+    __ctx: ListContext
+    __data: list[VT]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
         raise TypeError("SyncList cannot be instantiated directly.")
@@ -232,25 +237,26 @@ class SyncList(MutableSequence[VT], Reactive):
     @classmethod
     def __syncwave_new__(cls: type[SyncList], data: list[VT]) -> Self:
         self: SyncList = object.__new__(cls)
-        self.__syncwave_data__ = data
+        self.__data = data
         return self
 
-    def __syncwave_init__(self) -> None:
-        # TODO: Implement this for real
-        self.__type_adapter = TypeAdapter(...)
-        self.__child_type_adapter = TypeAdapter(...)
+    def __syncwave_bind__(self, context: ListContext) -> None:
+        self.__ctx = context
 
-        if self.__content is Content.NON_REACTIVE:
+        # TODO: Implement content-type detection
+        content = Content.NON_REACTIVE
+
+        if content is Content.NON_REACTIVE:
             self.__syncwave_update__ = self.__update_non_reactive
             self.__setitem__ = self.__setitem_non_reactive
             self.__delitem__ = self.__delitem_non_reactive
             self.insert = self.__insert_non_reactive
-        elif self.__content is Content.REACTIVE:
+        elif content is Content.REACTIVE:
             self.__syncwave_update__ = self.__update_reactive
             self.__setitem__ = self.__setitem_reactive
             self.__delitem__ = self.__delitem_reactive
             self.insert = self.__insert_reactive
-        elif self.__content is Content.MIXED:
+        elif content is Content.MIXED:
             self.__syncwave_update__ = self.__update_mixed
             self.__setitem__ = self.__setitem_mixed
             self.__delitem__ = self.__delitem_reactive  # same logic
@@ -259,126 +265,126 @@ class SyncList(MutableSequence[VT], Reactive):
     def __syncwave_update__(self, new: Sequence[VT]) -> None: ...
 
     def __update_non_reactive(self, new: Sequence[VT]) -> None:
-        new = self.__type_adapter.validate_python(new)
-        self.__syncwave_data__ = new.__syncwave_data__
+        new = self.__ctx.type_adapter.validate_python(new)
+        self.__data = new.__data
 
     def __update_reactive(self, new: Sequence[VT]) -> None:
-        new = self.__type_adapter.validate_python(new)
-
-        old_len = len(self.__syncwave_data__)
-        new_len = len(new.__syncwave_data__)
+        new = self.__ctx.type_adapter.validate_python(new)
+        old_len, new_len = len(self.__data), len(new.__data)
 
         # items to update
         for i in range(min(old_len, new_len)):
-            old_item, new_item = self.__syncwave_data__[i], new.__syncwave_data__[i]
+            old_item, new_item = self.__data[i], new.__data[i]
             old_item.__syncwave_update__(new_item)
 
         # items to add
         if new_len > old_len:
             for i in range(old_len, new_len):
-                self.__syncwave_data__.append(new.__syncwave_data__[i])
+                self.__data.append(new.__data[i])
 
         # items to remove
         elif old_len > new_len:
             for _ in range(old_len - new_len):
-                old_item = self.__syncwave_data__.pop()
+                old_item = self.__data.pop()
                 old_item.__syncwave_live__ = False
 
     def __update_mixed(self, new: Sequence[VT]) -> None:
-        new = self.__type_adapter.validate_python(new)
-
-        old_len = len(self.__syncwave_data__)
-        new_len = len(new.__syncwave_data__)
+        new = self.__ctx.type_adapter.validate_python(new)
+        old_len, new_len = len(self.__data), len(new.__data)
 
         # items to update
         for i in range(min(old_len, new_len)):
-            old_item, new_item = self.__syncwave_data__[i], new.__syncwave_data__[i]
+            old_item, new_item = self.__data[i], new.__data[i]
+
             old_is_reactive = isinstance(old_item, Reactive)
             safe_to_update = old_is_reactive and isinstance(new_item, type(old_item))
+
             if safe_to_update:
                 old_item.__syncwave_update__(new_item)
             else:
                 if old_is_reactive:
                     old_item.__syncwave_live__ = False
-                self.__syncwave_data__[i] = new_item
+                self.__data[i] = new_item
 
         # items to add
         if new_len > old_len:
             for i in range(old_len, new_len):
-                self.__syncwave_data__.append(new.__syncwave_data__[i])
+                self.__data.append(new.__data[i])
 
         # items to remove
         elif old_len > new_len:
             for _ in range(old_len - new_len):
-                old_item = self.__syncwave_data__.pop()
+                old_item = self.__data.pop()
                 if isinstance(old_item, Reactive):
                     old_item.__syncwave_live__ = False
 
     @atomic
     def __getitem__(self, index: int) -> VT:
-        return self.__syncwave_data__[index]
+        return self.__data[index]
 
     def __setitem__(self, index: int, value: VT) -> None: ...
 
     @atomic
     def __setitem_non_reactive(self, index: int, value: VT) -> None:
-        new_item = self.__child_type_adapter.validate_python(value)
-        self.__syncwave_data__[index] = new_item
-        self.__syncwave_on_change__()
+        new_item = self.__ctx.children_type_adapter.validate_python(value)
+        self.__data[index] = new_item
+        self.__ctx.on_change()
 
     @atomic
     def __setitem_reactive(self, index: int, value: VT) -> None:
-        new_item = self.__child_type_adapter.validate_python(value)
-        self.__syncwave_data__[index].__syncwave_update__(new_item)
-        self.__syncwave_on_change__()
+        new_item = self.__ctx.children_type_adapter.validate_python(value)
+        self.__data[index].__syncwave_update__(new_item)
+        self.__ctx.on_change()
 
     @atomic
     def __setitem_mixed(self, index: int, value: VT) -> None:
-        new_item = self.__child_type_adapter.validate_python(value)
-        old_item = self.__syncwave_data__[index]
+        new_item = self.__ctx.children_type_adapter.validate_python(value)
+        old_item = self.__data[index]
+
         old_is_reactive = isinstance(old_item, Reactive)
         safe_to_update = old_is_reactive and isinstance(new_item, type(old_item))
+
         if safe_to_update:
             old_item.__syncwave_update__(new_item)
         else:
             if old_is_reactive:
                 old_item.__syncwave_live__ = False
-            self.__syncwave_data__[index] = new_item
-        self.__syncwave_on_change__()
+            self.__data[index] = new_item
+        self.__ctx.on_change()
 
     def __delitem__(self, index: int) -> None: ...
 
     @atomic
     def __delitem_non_reactive(self, index: int) -> None:
-        del self.__syncwave_data__[index]
-        self.__syncwave_on_change__()
+        del self.__data[index]
+        self.__ctx.on_change()
 
     @atomic
     def __delitem_reactive(self, index: int) -> None:
-        data_copy = self.__syncwave_data__.copy()
+        data_copy = self.__data.copy()
         del data_copy[index]
         self.__syncwave_update__(data_copy)
-        self.__syncwave_on_change__()
+        self.__ctx.on_change()
 
     @atomic
     def __len__(self) -> int:
-        return len(self.__syncwave_data__)
+        return len(self.__data)
 
     def insert(self, index: int, value: VT) -> None: ...
 
     @atomic
     def __insert_non_reactive(self, index: int, value: VT) -> None:
-        new_item = self.__child_type_adapter.validate_python(value)
-        self.__syncwave_data__.insert(index, new_item)
-        self.__syncwave_on_change__()
+        new_item = self.__ctx.children_type_adapter.validate_python(value)
+        self.__data.insert(index, new_item)
+        self.__ctx.on_change()
 
     @atomic
     def __insert_reactive(self, index: int, value: VT) -> None:
-        new_item = self.__child_type_adapter.validate_python(value)
-        data_copy = self.__syncwave_data__.copy()
+        new_item = self.__ctx.children_type_adapter.validate_python(value)
+        data_copy = self.__data.copy()
         data_copy.insert(index, new_item)
         self.__syncwave_update__(data_copy)
-        self.__syncwave_on_change__()
+        self.__ctx.on_change()
 
     # __repr__ to be implemented
     # __str__ to be implemented
@@ -387,17 +393,16 @@ class SyncList(MutableSequence[VT], Reactive):
 
     @classmethod
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
-        instance_schema = cs.is_instance_schema(cls)
-
         args = get_args(src)
         if args:
-            sequence_t_schema = handler.generate_schema(MutableSequence[args[0]])
+            sequence_t_schema = handler.generate_schema(Sequence[args[0]])
         else:
-            sequence_t_schema = handler.generate_schema(MutableSequence)
+            sequence_t_schema = handler.generate_schema(Sequence)
 
         non_instance_schema = cs.no_info_after_validator_function(
             cls.__syncwave_new__, sequence_t_schema
         )
+        instance_schema = cs.is_instance_schema(cls)
         return cs.union_schema([instance_schema, non_instance_schema])
 
     def __syncwave_abc_marker__(self) -> None:
@@ -406,9 +411,13 @@ class SyncList(MutableSequence[VT], Reactive):
 
 class SyncSet(MutableSet[VT], Reactive):
     # SyncSet cannot hold reactive items because a reactive item is mutable
-    __syncwave_data__: set[VT]
-    __type_adapter: TypeAdapter[SyncSet[VT]]
-    __child_type_adapter: TypeAdapter[VT]
+    @dataclass(frozen=True)
+    class SetContext(Context):
+        type_adapter: TypeAdapter[SyncSet[VT]]
+        children_type_adapter: TypeAdapter[VT]
+
+    __ctx: SetContext
+    __data: set[VT]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
         raise TypeError("SyncSet cannot be instantiated directly.")
@@ -416,42 +425,40 @@ class SyncSet(MutableSet[VT], Reactive):
     @classmethod
     def __syncwave_new__(cls: type[SyncSet], data: set[VT]) -> Self:
         self: SyncSet = object.__new__(cls)
-        self.__syncwave_data__ = data
+        self.__data = data
         return self
 
-    def __syncwave_init__(self) -> None:
-        # TODO: Implement this for real
-        self.__type_adapter = TypeAdapter(...)
-        self.__child_type_adapter = TypeAdapter(...)
+    def __syncwave_bind__(self, context: SetContext) -> None:
+        self.__ctx = context
 
-    def __syncwave_update__(self, new: SyncSet[VT] | Set[VT]) -> None:
-        new = self.__type_adapter.validate_python(new)
-        self.__syncwave_data__ = new.__syncwave_data__
+    def __syncwave_update__(self, new: Set[VT]) -> None:
+        new = self.__ctx.type_adapter.validate_python(new)
+        self.__data = new.__data
 
     @atomic
     def __contains__(self, value: object) -> bool:
-        return value in self.__syncwave_data__
+        return value in self.__data
 
     @atomic
     def __iter__(self) -> Iterator[VT]:
         # first convert to a list so the iterator is over a frozen object
-        return iter(list(self.__syncwave_data__))
+        return iter(list(self.__data))
 
     @atomic
     def __len__(self) -> int:
-        return len(self.__syncwave_data__)
+        return len(self.__data)
 
     @atomic
     def add(self, value: VT) -> None:
-        new_item = self.__child_type_adapter.validate_python(value)
-        self.__syncwave_data__.add(new_item)
-        self.__syncwave_on_change__()
+        new_item = self.__ctx.children_type_adapter.validate_python(value)
+        self.__data.add(new_item)
+        self.__ctx.on_change()
 
     @atomic
     def discard(self, value: VT) -> None:
-        if value in self.__syncwave_data__:
-            self.__syncwave_data__.discard(value)
-            self.__syncwave_on_change__()
+        if value in self.__data:
+            self.__data.discard(value)
+            self.__ctx.on_change()
 
     # __repr__ to be implemented
     # __str__ to be implemented
@@ -460,17 +467,16 @@ class SyncSet(MutableSet[VT], Reactive):
 
     @classmethod
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
-        instance_schema = cs.is_instance_schema(cls)
-
         args = get_args(src)
         if args:
-            set_t_schema = handler.generate_schema(MutableSet[args[0]])
+            set_t_schema = handler.generate_schema(Set[args[0]])
         else:
-            set_t_schema = handler.generate_schema(MutableSet)
+            set_t_schema = handler.generate_schema(Set)
 
         non_instance_schema = cs.no_info_after_validator_function(
             cls.__syncwave_new__, set_t_schema
         )
+        instance_schema = cs.is_instance_schema(cls)
         return cs.union_schema([instance_schema, non_instance_schema])
 
     def __syncwave_abc_marker__(self) -> None:
