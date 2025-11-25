@@ -11,7 +11,7 @@ from collections.abc import (
 )
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, NoReturn, TypeVar, Union, final, get_args
+from typing import Any, Generic, NoReturn, TypeVar, Union, final, get_args
 from typing_extensions import Self
 
 from pydantic import GetCoreSchemaHandler as Handler
@@ -22,6 +22,24 @@ from .reactive import Context, Reactive, atomic
 
 KT = TypeVar("KT", bound=Union[str, int, float, bool, None])
 VT = TypeVar("VT")
+
+
+@dataclass(frozen=True)
+class SyncDictContext(Generic[KT, VT], Context):
+    type_adapter: TypeAdapter[SyncDict[KT, VT]]
+    children_type_adapter: TypeAdapter[VT]
+
+
+@dataclass(frozen=True)
+class SyncListContext(Generic[VT], Context):
+    type_adapter: TypeAdapter[SyncList[VT]]
+    children_type_adapter: TypeAdapter[VT]
+
+
+@dataclass(frozen=True)
+class SyncSetContext(Generic[VT], Context):
+    type_adapter: TypeAdapter[SyncSet[VT]]
+    children_type_adapter: TypeAdapter[VT]
 
 
 class Content(Enum):
@@ -42,12 +60,7 @@ class SyncCollection(Reactive):
 
 
 class SyncDict(MutableMapping[KT, VT], Reactive):
-    @dataclass(frozen=True)
-    class DictContext(Context):
-        type_adapter: TypeAdapter[SyncDict[KT, VT]]
-        children_type_adapter: TypeAdapter[VT]
-
-    __ctx: DictContext
+    __ctx: SyncDictContext[KT, VT]
     __data: dict[KT, VT]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
@@ -59,7 +72,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         self.__data = data
         return self
 
-    def __syncwave_bind__(self, context: DictContext) -> None:
+    def __syncwave_bind__(self, context: SyncDictContext) -> None:
         self.__ctx = context
 
         # TODO: Implement content-type detection
@@ -223,12 +236,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
 
 
 class SyncList(MutableSequence[VT], Reactive):
-    @dataclass(frozen=True)
-    class ListContext(Context):
-        type_adapter: TypeAdapter[SyncList[VT]]
-        children_type_adapter: TypeAdapter[VT]
-
-    __ctx: ListContext
+    __ctx: SyncListContext[VT]
     __data: list[VT]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
@@ -240,7 +248,7 @@ class SyncList(MutableSequence[VT], Reactive):
         self.__data = data
         return self
 
-    def __syncwave_bind__(self, context: ListContext) -> None:
+    def __syncwave_bind__(self, context: SyncListContext) -> None:
         self.__ctx = context
 
         # TODO: Implement content-type detection
@@ -411,12 +419,7 @@ class SyncList(MutableSequence[VT], Reactive):
 
 class SyncSet(MutableSet[VT], Reactive):
     # SyncSet cannot hold reactive items because a reactive item is mutable
-    @dataclass(frozen=True)
-    class SetContext(Context):
-        type_adapter: TypeAdapter[SyncSet[VT]]
-        children_type_adapter: TypeAdapter[VT]
-
-    __ctx: SetContext
+    __ctx: SyncSetContext[VT]
     __data: set[VT]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
@@ -428,7 +431,7 @@ class SyncSet(MutableSet[VT], Reactive):
         self.__data = data
         return self
 
-    def __syncwave_bind__(self, context: SetContext) -> None:
+    def __syncwave_bind__(self, context: SyncSetContext) -> None:
         self.__ctx = context
 
     def __syncwave_update__(self, new: Set[VT]) -> None:
