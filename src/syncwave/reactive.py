@@ -9,48 +9,26 @@ from typing_extensions import ParamSpec, Self
 
 from pydantic import TypeAdapter
 
-Callback = Callable[[], None]
-
 
 @dataclass(frozen=True)
 class Context:
     lock: RLock
-    on_change: Callback
+    on_change: Callable[[], None]
     type_adapter: TypeAdapter[Any]
 
 
-P = ParamSpec("P")
-R = TypeVar("R")
-
-
 class Reactive(metaclass=ABCMeta):
-    __ctx: Context
-    __syncwave_live__: bool = False
-
-    @staticmethod
-    def atomic(func: Callable[P, R]) -> Callable[P, R]:
-        @wraps(func)
-        def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> R:
-            with self.__ctx.lock:
-                if not self.__syncwave_live__:
-                    raise DeadReferenceError(reference=self)
-                return func(self, *args, **kwargs)
-
-        return wrapper
+    __syncwave_live__: bool
+    __syncwave_lock__: RLock
 
     @final
     @property
     def sync_live(self) -> bool:
-        with self.__ctx.lock:
+        with self.__syncwave_lock__:
             return self.__syncwave_live__
 
-    @final
-    def __syncwave_init__(self, context: Context) -> None:
-        self.__ctx = context
-        self.__syncwave_bind__(context)
-
     @abstractmethod
-    def __syncwave_bind__(self, context: Context) -> None:
+    def __syncwave_init__(self, context: Context) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -64,4 +42,17 @@ class DeadReferenceError(RuntimeError):
         super().__init__(message)
 
 
-atomic = Reactive.atomic
+P = ParamSpec("P")
+R = TypeVar("R")
+WrappedMethod = Callable[P, R]
+
+
+def atomic(func: WrappedMethod) -> WrappedMethod:
+    @wraps(func)
+    def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> R:
+        with self.__syncwave_lock__:
+            if not self.__syncwave_live__:
+                raise DeadReferenceError(reference=self)
+            return func(self, *args, **kwargs)
+
+    return wrapper
