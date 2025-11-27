@@ -3,7 +3,6 @@ from __future__ import annotations
 import dataclasses as dc
 from abc import ABCMeta
 from collections.abc import Mapping
-from dataclasses import dataclass
 from inspect import isclass
 from typing import (
     Annotated,
@@ -21,7 +20,8 @@ from typing_extensions import TypeGuard
 from pydantic import BaseModel, RootModel, TypeAdapter, create_model
 from pydantic import dataclasses as pdc
 
-from .reactive import Context, Reactive, StaticContext, atomic
+from .context import Context, SyncModelContext, SyncModelStaticContext
+from .reactive import Reactive, atomic
 from .sync_collection import SyncCollection, SyncDict, SyncList, SyncSet
 
 
@@ -48,19 +48,6 @@ class SyncModelSupported(metaclass=SyncModelSupportedMeta):
 
 
 T = TypeVar("T", bound=SyncModelSupported)
-
-
-@dataclass(frozen=True)
-class SyncModelStaticContext(Generic[T], StaticContext):
-    type_adapter: TypeAdapter[SyncModel[T]]
-    fields_ctx: dict[str, StaticContext]
-    fields_type_adapter: dict[str, TypeAdapter[Any]]
-
-
-@dataclass(frozen=True)
-class SyncModelContext(SyncModelStaticContext[T], Context):
-    fields_ctx: dict[str, Context]
-    on_create: Any  # Callable[[T], None]
 
 
 class SyncModel(Generic[T], Reactive):
