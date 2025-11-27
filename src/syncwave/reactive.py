@@ -4,17 +4,18 @@ from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
 from functools import wraps
 from threading import RLock
-from typing import Any, Callable, TypeVar, final
+from typing import Callable, TypeVar, final
 from typing_extensions import ParamSpec, Self
 
-from pydantic import TypeAdapter
+
+@dataclass(frozen=True)
+class Shape: ...
 
 
 @dataclass(frozen=True)
 class Context:
     lock: RLock
     on_change: Callable[[], None]
-    type_adapter: TypeAdapter[Any]
 
 
 class Reactive(metaclass=ABCMeta):
