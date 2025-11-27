@@ -21,14 +21,8 @@ from typing_extensions import TypeGuard
 from pydantic import BaseModel, RootModel, TypeAdapter, create_model
 from pydantic import dataclasses as pdc
 
-from .reactive import Context, Reactive, Shape, atomic
-from .sync_collection import (
-    SyncCollection,
-    SyncCollectionContext,
-    SyncDict,
-    SyncList,
-    SyncSet,
-)
+from .reactive import Context, Reactive, StaticContext, atomic
+from .sync_collection import SyncCollection, SyncDict, SyncList, SyncSet
 
 
 class SyncModelSupportedMeta(ABCMeta):
@@ -57,23 +51,24 @@ T = TypeVar("T", bound=SyncModelSupported)
 
 
 @dataclass(frozen=True)
-class SyncModelShape(Generic[T], Shape):
+class SyncModelStaticContext(Generic[T], StaticContext):
     type_adapter: TypeAdapter[SyncModel[T]]
+    fields_ctx: dict[str, StaticContext]
     fields_type_adapter: dict[str, TypeAdapter[Any]]
 
 
 @dataclass(frozen=True)
-class SyncModelContext(SyncModelShape[T], Context):
+class SyncModelContext(SyncModelStaticContext[T], Context):
+    fields_ctx: dict[str, Context]
     on_create: Any  # Callable[[T], None]
-    fields_ctx: dict[str, SyncCollectionContext]
 
 
 class SyncModel(Generic[T], Reactive):
-    __syncwave_shape__: SyncModelShape[T]
+    __syncwave_static_ctx__: SyncModelStaticContext[T]
     __ctx: SyncModelContext[T]
 
     @property
-    def _fields_ctx(self) -> dict[str, SyncCollectionContext]:
+    def _fields_ctx(self) -> dict[str, Context]:
         return self.__ctx.fields_ctx
 
     def __syncwave_init__(self, context: SyncModelContext) -> None:
@@ -126,13 +121,13 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
         self: SyncModel[T_BM],
         new: SyncModel[T_BM] | T_BM | Mapping[str, Any],
     ) -> None:
-        shape = self.__class__.__syncwave_shape__
-        new = shape.type_adapter.validate_python(new)
+        static_ctx = self.__class__.__syncwave_static_ctx__
+        new = static_ctx.type_adapter.validate_python(new)
 
         for name in cls.model_fields:
             new_value = getattr(new, name, None)
 
-            if name not in shape.fields_type_adapter:
+            if name not in static_ctx.fields_type_adapter:
                 original_setattr(self, name, new_value)
                 continue
 
@@ -153,15 +148,15 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
 
     @atomic
     def new_setattr(self: SyncModel[T_BM], name: str, new_value: Any) -> None:
-        shape = self.__class__.__syncwave_shape__
+        static_ctx = self.__class__.__syncwave_static_ctx__
         old_value = getattr(self, name, None)
 
-        if name not in shape.fields_type_adapter:
+        if name not in static_ctx.fields_type_adapter:
             original_setattr(self, name, new_value)
             self.__ctx.on_change()
             return
 
-        new_value = shape.fields_type_adapter[name].validate_python(new_value)
+        new_value = static_ctx.fields_type_adapter[name].validate_python(new_value)
 
         old_is_reactive = isinstance(old_value, Reactive)
         safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
@@ -194,7 +189,7 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
     }
 
     new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
-    new_cls.__syncwave_shape__ = SyncModelShape(
+    new_cls.__syncwave_static_ctx__ = SyncModelStaticContext(
         type_adapter=TypeAdapter(new_cls),
         fields_type_adapter=fields_type_adapter,
     )
@@ -219,11 +214,11 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
         self: SyncModel[T_RM],
         new: SyncModel[T_RM] | T_RM | Any,
     ) -> None:
-        shape = self.__class__.__syncwave_shape__
-        new = shape.type_adapter.validate_python(new)
+        static_ctx = self.__class__.__syncwave_static_ctx__
+        new = static_ctx.type_adapter.validate_python(new)
         new_value = new.root
 
-        if not shape.fields_type_adapter:
+        if not static_ctx.fields_type_adapter:
             original_setattr(self, "root", new_value)
             return
 
@@ -244,14 +239,14 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
 
     @atomic
     def new_setattr(self: SyncModel[T_RM], name: str, new_value: Any) -> None:
-        shape = self.__class__.__syncwave_shape__
-        if name != "root" or not shape.fields_type_adapter:
+        static_ctx = self.__class__.__syncwave_static_ctx__
+        if name != "root" or not static_ctx.fields_type_adapter:
             original_setattr(self, name, new_value)
             self.__ctx.on_change()
             return
 
         old_value = self.root
-        new_value = shape.fields_type_adapter["root"].validate_python(new_value)
+        new_value = static_ctx.fields_type_adapter["root"].validate_python(new_value)
 
         old_is_reactive = isinstance(old_value, Reactive)
         safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
@@ -284,7 +279,7 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
     }
 
     new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
-    new_cls.__syncwave_shape__ = SyncModelShape(
+    new_cls.__syncwave_static_ctx__ = SyncModelStaticContext(
         type_adapter=TypeAdapter(new_cls),
         fields_type_adapter=fields_type_adapter,
     )
@@ -313,13 +308,13 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
         self: SyncModel[T_DC],
         new: SyncModel[T_DC] | T_DC | Mapping[str, Any],
     ) -> None:
-        shape = self.__class__.__syncwave_shape__
-        new = shape.type_adapter.validate_python(new)
+        static_ctx = self.__class__.__syncwave_static_ctx__
+        new = static_ctx.type_adapter.validate_python(new)
 
         for name in cls.__pydantic_fields__:
             new_value = getattr(new, name, None)
 
-            if name not in shape.fields_type_adapter:
+            if name not in static_ctx.fields_type_adapter:
                 original_setattr(self, name, new_value)
                 continue
 
@@ -340,15 +335,15 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
 
     @atomic
     def new_setattr(self: SyncModel[T_DC], name: str, new_value: Any) -> None:
-        shape = self.__class__.__syncwave_shape__
+        static_ctx = self.__class__.__syncwave_static_ctx__
         old_value = getattr(self, name, None)
 
-        if name not in shape.fields_type_adapter:
+        if name not in static_ctx.fields_type_adapter:
             original_setattr(self, name, new_value)
             self.__ctx.on_change()
             return
 
-        new_value = shape.fields_type_adapter[name].validate_python(new_value)
+        new_value = static_ctx.fields_type_adapter[name].validate_python(new_value)
 
         old_is_reactive = isinstance(old_value, Reactive)
         safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
@@ -382,7 +377,7 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
 
     new_cls = type(cls_name, (cls, SyncModel), new_cls_dict)
 
-    new_cls.__syncwave_shape__ = SyncModelShape(
+    new_cls.__syncwave_static_ctx__ = SyncModelStaticContext(
         type_adapter=TypeAdapter(new_cls),
         fields_type_adapter=fields_type_adapter,
     )

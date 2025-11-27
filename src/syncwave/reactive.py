@@ -9,7 +9,7 @@ from typing_extensions import ParamSpec, Self
 
 
 @dataclass(frozen=True)
-class Shape: ...
+class StaticContext: ...
 
 
 @dataclass(frozen=True)
