@@ -21,8 +21,14 @@ from typing_extensions import TypeGuard
 from pydantic import BaseModel, RootModel, TypeAdapter, create_model
 from pydantic import dataclasses as pdc
 
-from .reactive import Context, Reactive, atomic
-from .sync_collection import SyncCollection, SyncDict, SyncList, SyncSet
+from .reactive import Context, Reactive, Shape, atomic
+from .sync_collection import (
+    SyncCollection,
+    SyncCollectionContext,
+    SyncDict,
+    SyncList,
+    SyncSet,
+)
 
 
 class SyncModelSupportedMeta(ABCMeta):
@@ -50,9 +56,25 @@ class SyncModelSupported(metaclass=SyncModelSupportedMeta):
 T = TypeVar("T", bound=SyncModelSupported)
 
 
+@dataclass(frozen=True)
+class SyncModelShape(Generic[T], Shape):
+    type_adapter: TypeAdapter[SyncModel[T]]
+    fields_type_adapter: dict[str, TypeAdapter[Any]]
+
+
+@dataclass(frozen=True)
+class SyncModelContext(SyncModelShape[T], Context):
+    on_create: Any  # Callable[[T], None]
+    fields_ctx: dict[str, SyncCollectionContext]
+
+
 class SyncModel(Generic[T], Reactive):
-    __ctx: SyncModelContext[SyncModel[T]]
-    __syncwave_info__: SyncModelInfo[SyncModel[T]]
+    __syncwave_shape__: SyncModelShape[T]
+    __ctx: SyncModelContext[T]
+
+    @property
+    def _fields_ctx(self) -> dict[str, SyncCollectionContext]:
+        return self.__ctx.fields_ctx
 
     def __syncwave_init__(self, context: SyncModelContext) -> None:
         self.__ctx = context
@@ -61,22 +83,9 @@ class SyncModel(Generic[T], Reactive):
         self.__ctx.on_create(self)
 
 
-T_SM = TypeVar("T_SM", bound=SyncModel)
 T_BM = TypeVar("T_BM", bound=BaseModel)
 T_RM = TypeVar("T_RM", bound=RootModel)
 T_DC = TypeVar("T_DC")  # dataclass
-
-
-@dataclass(frozen=True)
-class SyncModelInfo(Generic[T_SM]):
-    type_adapter: TypeAdapter[T_SM]
-    fields_type_adapter: dict[str, TypeAdapter[Any]]
-
-
-@dataclass(frozen=True)
-class SyncModelContext(Context, Generic[T_SM]):
-    on_create: Any  # Callable[[T_SM], None]
-    fields_type_adapter: dict[str, TypeAdapter[Any]]
 
 
 def reactive(cls: type[T], /, *, cls_name: str | None = None) -> type[SyncModel[T]]:
@@ -117,13 +126,13 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
         self: SyncModel[T_BM],
         new: SyncModel[T_BM] | T_BM | Mapping[str, Any],
     ) -> None:
-        info = self.__class__.__syncwave_info__
-        new = info.type_adapter.validate_python(new)
+        shape = self.__class__.__syncwave_shape__
+        new = shape.type_adapter.validate_python(new)
 
         for name in cls.model_fields:
             new_value = getattr(new, name, None)
 
-            if name not in info.fields_type_adapter:
+            if name not in shape.fields_type_adapter:
                 original_setattr(self, name, new_value)
                 continue
 
@@ -139,20 +148,20 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
                 if old_is_reactive:
                     old_value.__syncwave_live__ = False
                 if isinstance(new_value, Reactive):
-                    new_value.__syncwave_init__(...)  # TODO: get the context
+                    new_value.__syncwave_init__(self._fields_ctx[name])
                 original_setattr(self, name, new_value)
 
     @atomic
     def new_setattr(self: SyncModel[T_BM], name: str, new_value: Any) -> None:
-        info = self.__class__.__syncwave_info__
+        shape = self.__class__.__syncwave_shape__
         old_value = getattr(self, name, None)
 
-        if name not in info.fields_type_adapter:
+        if name not in shape.fields_type_adapter:
             original_setattr(self, name, new_value)
             self.__ctx.on_change()
             return
 
-        new_value = info.fields_type_adapter[name].validate_python(new_value)
+        new_value = shape.fields_type_adapter[name].validate_python(new_value)
 
         old_is_reactive = isinstance(old_value, Reactive)
         safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
@@ -164,7 +173,7 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
             if old_is_reactive:
                 old_value.__syncwave_live__ = False
             if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(...)  # TODO: get the context
+                new_value.__syncwave_init__(self._fields_ctx[name])
             original_setattr(self, name, new_value)
         self.__ctx.on_change()
 
@@ -185,7 +194,7 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
     }
 
     new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
-    new_cls.__syncwave_info__ = SyncModelInfo(
+    new_cls.__syncwave_shape__ = SyncModelShape(
         type_adapter=TypeAdapter(new_cls),
         fields_type_adapter=fields_type_adapter,
     )
@@ -210,11 +219,11 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
         self: SyncModel[T_RM],
         new: SyncModel[T_RM] | T_RM | Any,
     ) -> None:
-        info = self.__class__.__syncwave_info__
-        new = info.type_adapter.validate_python(new)
+        shape = self.__class__.__syncwave_shape__
+        new = shape.type_adapter.validate_python(new)
         new_value = new.root
 
-        if not info.fields_type_adapter:
+        if not shape.fields_type_adapter:
             original_setattr(self, "root", new_value)
             return
 
@@ -230,19 +239,19 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
             if old_is_reactive:
                 old_value.__syncwave_live__ = False
             if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(...)  # TODO: get the context
+                new_value.__syncwave_init__(self._fields_ctx["root"])
             original_setattr(self, "root", new_value)
 
     @atomic
     def new_setattr(self: SyncModel[T_RM], name: str, new_value: Any) -> None:
-        info = self.__class__.__syncwave_info__
-        if name != "root" or not info.fields_type_adapter:
+        shape = self.__class__.__syncwave_shape__
+        if name != "root" or not shape.fields_type_adapter:
             original_setattr(self, name, new_value)
             self.__ctx.on_change()
             return
 
         old_value = self.root
-        new_value = info.fields_type_adapter["root"].validate_python(new_value)
+        new_value = shape.fields_type_adapter["root"].validate_python(new_value)
 
         old_is_reactive = isinstance(old_value, Reactive)
         safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
@@ -254,7 +263,7 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
             if old_is_reactive:
                 old_value.__syncwave_live__ = False
             if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(...)  # TODO: get the context
+                new_value.__syncwave_init__(self._fields_ctx["root"])
             original_setattr(self, "root", new_value)
         self.__ctx.on_change()
 
@@ -275,7 +284,7 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
     }
 
     new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
-    new_cls.__syncwave_info__ = SyncModelInfo(
+    new_cls.__syncwave_shape__ = SyncModelShape(
         type_adapter=TypeAdapter(new_cls),
         fields_type_adapter=fields_type_adapter,
     )
@@ -304,13 +313,13 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
         self: SyncModel[T_DC],
         new: SyncModel[T_DC] | T_DC | Mapping[str, Any],
     ) -> None:
-        info = self.__class__.__syncwave_info__
-        new = info.type_adapter.validate_python(new)
+        shape = self.__class__.__syncwave_shape__
+        new = shape.type_adapter.validate_python(new)
 
         for name in cls.__pydantic_fields__:
             new_value = getattr(new, name, None)
 
-            if name not in info.fields_type_adapter:
+            if name not in shape.fields_type_adapter:
                 original_setattr(self, name, new_value)
                 continue
 
@@ -326,20 +335,20 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
                 if old_is_reactive:
                     old_value.__syncwave_live__ = False
                 if isinstance(new_value, Reactive):
-                    new_value.__syncwave_init__(...)  # TODO: get the context
+                    new_value.__syncwave_init__(self._fields_ctx[name])
                 original_setattr(self, name, new_value)
 
     @atomic
     def new_setattr(self: SyncModel[T_DC], name: str, new_value: Any) -> None:
-        info = self.__class__.__syncwave_info__
+        shape = self.__class__.__syncwave_shape__
         old_value = getattr(self, name, None)
 
-        if name not in info.fields_type_adapter:
+        if name not in shape.fields_type_adapter:
             original_setattr(self, name, new_value)
             self.__ctx.on_change()
             return
 
-        new_value = info.fields_type_adapter[name].validate_python(new_value)
+        new_value = shape.fields_type_adapter[name].validate_python(new_value)
 
         old_is_reactive = isinstance(old_value, Reactive)
         safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
@@ -351,7 +360,7 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
             if old_is_reactive:
                 old_value.__syncwave_live__ = False
             if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(...)  # TODO: get the context
+                new_value.__syncwave_init__(self._fields_ctx[name])
             original_setattr(self, name, new_value)
         self.__ctx.on_change()
 
@@ -373,7 +382,7 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
 
     new_cls = type(cls_name, (cls, SyncModel), new_cls_dict)
 
-    new_cls.__syncwave_info__ = SyncModelInfo(
+    new_cls.__syncwave_shape__ = SyncModelShape(
         type_adapter=TypeAdapter(new_cls),
         fields_type_adapter=fields_type_adapter,
     )

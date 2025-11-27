@@ -1,3 +1,8 @@
+# There's a problem with implementing SyncDict, SyncList, and SyncSet using the abstract
+# collections.abc classes because the "free" mixins are not thread-safe.
+# This is a temporary solution just to make it easier to implement.
+
+
 from __future__ import annotations
 
 from collections.abc import (
@@ -11,58 +16,72 @@ from collections.abc import (
 )
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Generic, NoReturn, TypeVar, Union, final, get_args
+from typing import Any, Generic, Literal, NoReturn, TypeVar, Union, final, get_args
 from typing_extensions import Self
 
 from pydantic import GetCoreSchemaHandler as Handler
 from pydantic import TypeAdapter
 from pydantic_core import core_schema as cs
 
-from .reactive import Context, Reactive, atomic
+from .reactive import Context, Reactive, Shape, atomic
 
 KT = TypeVar("KT", bound=Union[str, int, float, bool, None])
 VT = TypeVar("VT")
 
 
-class Content(Enum):
+class ContentCategory(Enum):
     NON_REACTIVE = auto()
     REACTIVE = auto()
     MIXED = auto()
 
 
 @dataclass(frozen=True)
-class SyncDictContext(Generic[KT, VT], Context):
+class SyncDictShape(Generic[KT, VT], Shape):
     type_adapter: TypeAdapter[SyncDict[KT, VT]]
-    content: Content
-    content_ctx: Context | None
     content_type_adapter: TypeAdapter[VT]
+    content_ctg: ContentCategory
 
 
 @dataclass(frozen=True)
-class SyncListContext(Generic[VT], Context):
+class SyncDictContext(SyncDictShape[KT, VT], Context):
+    content_ctx: Context | None
+
+
+@dataclass(frozen=True)
+class SyncListShape(Generic[VT], Shape):
     type_adapter: TypeAdapter[SyncList[VT]]
-    content: Content
-    content_ctx: Context | None
     content_type_adapter: TypeAdapter[VT]
+    content_ctg: ContentCategory
 
 
 @dataclass(frozen=True)
-class SyncSetContext(Generic[VT], Context):
-    # SyncSet cannot hold reactive items because a reactive item is mutable
-    # `content` and `content_ctx` are not needed for that reason
+class SyncListContext(SyncListShape[VT], Context):
+    content_ctx: Context | None
+
+
+@dataclass(frozen=True)
+class SyncSetShape(Generic[VT], Shape):
     type_adapter: TypeAdapter[SyncSet[VT]]
     content_type_adapter: TypeAdapter[VT]
+    content_ctg: Literal[ContentCategory.NON_REACTIVE]  # never holds reactive items
+
+
+@dataclass(frozen=True)
+class SyncSetContext(SyncSetShape[VT], Context):
+    content_ctx: None  # never holds reactive items
+
+
+SyncCollectionContext = Union[
+    SyncDictContext[KT, VT],
+    SyncListContext[VT],
+    SyncSetContext[VT],
+]
 
 
 @final
 class SyncCollection(Reactive):
     def __init_subclass__(cls: type[SyncCollection], /, **kwargs: Any) -> NoReturn:
         raise TypeError("SyncCollection cannot be subclassed.")
-
-
-# There's a problem with implementing SyncDict, SyncList, and SyncSet using the abstract
-# collections.abc classes because the "free" mixins are not thread-safe.
-# This is a temporary solution just to make it easier to implement.
 
 
 class SyncDict(MutableMapping[KT, VT], Reactive):
@@ -78,16 +97,16 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         self.__data = data
         return self
 
-    def __syncwave_init__(self, context: SyncDictContext) -> None:
-        if context.content is Content.NON_REACTIVE:
+    def __syncwave_init__(self, context: SyncDictContext[KT, VT]) -> None:
+        if context.content_ctg is ContentCategory.NON_REACTIVE:
             self.__syncwave_update__ = self.__update_non_reactive
             self.__setitem__ = self.__setitem_non_reactive
             self.__delitem__ = self.__delitem_non_reactive
-        elif context.content is Content.REACTIVE:
+        elif context.content_ctg is ContentCategory.REACTIVE:
             self.__syncwave_update__ = self.__update_reactive
             self.__setitem__ = self.__setitem_reactive
             self.__delitem__ = self.__delitem_reactive
-        elif context.content is Content.MIXED:
+        elif context.content_ctg is ContentCategory.MIXED:
             self.__syncwave_update__ = self.__update_mixed
             self.__setitem__ = self.__setitem_mixed
             self.__delitem__ = self.__delitem_mixed
@@ -263,18 +282,18 @@ class SyncList(MutableSequence[VT], Reactive):
         self.__data = data
         return self
 
-    def __syncwave_init__(self, context: SyncListContext) -> None:
-        if context.content is Content.NON_REACTIVE:
+    def __syncwave_init__(self, context: SyncListContext[VT]) -> None:
+        if context.content_ctg is ContentCategory.NON_REACTIVE:
             self.__syncwave_update__ = self.__update_non_reactive
             self.__setitem__ = self.__setitem_non_reactive
             self.__delitem__ = self.__delitem_non_reactive
             self.insert = self.__insert_non_reactive
-        elif context.content is Content.REACTIVE:
+        elif context.content_ctg is ContentCategory.REACTIVE:
             self.__syncwave_update__ = self.__update_reactive
             self.__setitem__ = self.__setitem_reactive
             self.__delitem__ = self.__delitem_reactive
             self.insert = self.__insert_reactive
-        elif context.content is Content.MIXED:
+        elif context.content_ctg is ContentCategory.MIXED:
             self.__syncwave_update__ = self.__update_mixed
             self.__setitem__ = self.__setitem_mixed
             self.__delitem__ = self.__delitem_reactive  # same logic
@@ -453,7 +472,7 @@ class SyncSet(MutableSet[VT], Reactive):
         self.__data = data
         return self
 
-    def __syncwave_init__(self, context: SyncSetContext) -> None:
+    def __syncwave_init__(self, context: SyncSetContext[VT]) -> None:
         self.__ctx = context
         self.__syncwave_lock__ = context.lock
         self.__syncwave_live__ = True
