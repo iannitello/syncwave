@@ -1,21 +1,12 @@
 from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod
-from dataclasses import dataclass
 from functools import wraps
 from threading import RLock
 from typing import Callable, TypeVar, final
 from typing_extensions import ParamSpec, Self
 
-
-@dataclass(frozen=True)
-class StaticContext: ...
-
-
-@dataclass(frozen=True)
-class Context:
-    lock: RLock
-    on_change: Callable[[], None]
+from .context import Context
 
 
 class Reactive(metaclass=ABCMeta):

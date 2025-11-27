@@ -14,64 +14,17 @@ from collections.abc import (
     Sequence,
     Set,
 )
-from dataclasses import dataclass
-from enum import Enum, auto
-from typing import Any, Generic, Literal, NoReturn, TypeVar, Union, final, get_args
+from typing import Any, NoReturn, TypeVar, Union, final, get_args
 from typing_extensions import Self
 
 from pydantic import GetCoreSchemaHandler as Handler
-from pydantic import TypeAdapter
 from pydantic_core import core_schema as cs
 
-from .reactive import Context, Reactive, StaticContext, atomic
+from .context import ContentCategory, SyncDictContext, SyncListContext, SyncSetContext
+from .reactive import Reactive, atomic
 
 KT = TypeVar("KT", bound=Union[str, int, float, bool, None])
 VT = TypeVar("VT")
-
-
-class ContentCategory(Enum):
-    NON_REACTIVE = auto()
-    REACTIVE = auto()
-    MIXED = auto()
-
-
-@dataclass(frozen=True)
-class SyncDictStaticContext(Generic[KT, VT], StaticContext):
-    type_adapter: TypeAdapter[SyncDict[KT, VT]]
-    content_type_adapter: TypeAdapter[VT]
-    content_ctx: StaticContext | None
-    content_ctg: ContentCategory
-
-
-@dataclass(frozen=True)
-class SyncDictContext(SyncDictStaticContext[KT, VT], Context):
-    content_ctx: Context | None
-
-
-@dataclass(frozen=True)
-class SyncListStaticContext(Generic[VT], StaticContext):
-    type_adapter: TypeAdapter[SyncList[VT]]
-    content_type_adapter: TypeAdapter[VT]
-    content_ctx: StaticContext | None
-    content_ctg: ContentCategory
-
-
-@dataclass(frozen=True)
-class SyncListContext(SyncListStaticContext[VT], Context):
-    content_ctx: Context | None
-
-
-@dataclass(frozen=True)
-class SyncSetStaticContext(Generic[VT], StaticContext):
-    type_adapter: TypeAdapter[SyncSet[VT]]
-    content_type_adapter: TypeAdapter[VT]
-    content_ctx: None  # never holds reactive items
-    content_ctg: Literal[ContentCategory.NON_REACTIVE]  # never holds reactive items
-
-
-@dataclass(frozen=True)
-class SyncSetContext(SyncSetStaticContext[VT], Context):
-    content_ctx: None  # never holds reactive items
 
 
 @final
