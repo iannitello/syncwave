@@ -20,8 +20,8 @@ from typing_extensions import Self
 from pydantic import GetCoreSchemaHandler as Handler
 from pydantic_core import core_schema as cs
 
-from .context import ContentCategory, SyncDictContext, SyncListContext, SyncSetContext
-from .reactive import Reactive, atomic
+from .context import SyncDictContext, SyncListContext, SyncSetContext
+from .reactive import Reactive, Reactivity, atomic
 
 KT = TypeVar("KT", bound=Union[str, int, float, bool, None])
 VT = TypeVar("VT")
@@ -47,15 +47,15 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         return self
 
     def __syncwave_init__(self, context: SyncDictContext[KT, VT]) -> None:
-        if context.content_ctg is ContentCategory.NON_REACTIVE:
+        if context.inner_reactivity is Reactivity.NON_REACTIVE:
             self.__syncwave_update__ = self.__update_non_reactive
             self.__setitem__ = self.__setitem_non_reactive
             self.__delitem__ = self.__delitem_non_reactive
-        elif context.content_ctg is ContentCategory.REACTIVE:
+        elif context.inner_reactivity is Reactivity.REACTIVE:
             self.__syncwave_update__ = self.__update_reactive
             self.__setitem__ = self.__setitem_reactive
             self.__delitem__ = self.__delitem_reactive
-        elif context.content_ctg is ContentCategory.MIXED:
+        elif context.inner_reactivity is Reactivity.MIXED:
             self.__syncwave_update__ = self.__update_mixed
             self.__setitem__ = self.__setitem_mixed
             self.__delitem__ = self.__delitem_mixed
@@ -82,7 +82,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         # items to add
         for key in new_keys - old_keys:
             new_item = new.__data[key]
-            new_item.__syncwave_init__(self.__ctx.content_ctx)
+            new_item.__syncwave_init__(self.__ctx.inner_ctx)
             self.__data[key] = new_item
 
         # items to remove
@@ -107,14 +107,14 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
                 if old_is_reactive:
                     old_item.__syncwave_live__ = False
                 if isinstance(new_item, Reactive):
-                    new_item.__syncwave_init__(self.__ctx.content_ctx)
+                    new_item.__syncwave_init__(self.__ctx.inner_ctx)
                 self.__data[key] = new_item
 
         # items to add
         for key in new_keys - old_keys:
             new_item = new.__data[key]
             if isinstance(new_item, Reactive):
-                new_item.__syncwave_init__(self.__ctx.content_ctx)
+                new_item.__syncwave_init__(self.__ctx.inner_ctx)
             self.__data[key] = new_item
 
         # items to remove
@@ -131,14 +131,14 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
 
     @atomic
     def __setitem_non_reactive(self, key: KT, value: VT) -> None:
-        new_item = self.__ctx.content_type_adapter.validate_python(value)
+        new_item = self.__ctx.inner_type_adapter.validate_python(value)
         self.__data[key] = new_item
         self.__ctx.on_change()
 
     @atomic
     def __setitem_reactive(self, key: KT, value: VT) -> None:
-        new_item = self.__ctx.content_type_adapter.validate_python(value)
-        new_item.__syncwave_init__(self.__ctx.content_ctx)
+        new_item = self.__ctx.inner_type_adapter.validate_python(value)
+        new_item.__syncwave_init__(self.__ctx.inner_ctx)
         if key not in self.__data:
             self.__data[key] = new_item
         else:
@@ -147,9 +147,9 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
 
     @atomic
     def __setitem_mixed(self, key: KT, value: VT) -> None:
-        new_item = self.__ctx.content_type_adapter.validate_python(value)
+        new_item = self.__ctx.inner_type_adapter.validate_python(value)
         if isinstance(new_item, Reactive):
-            new_item.__syncwave_init__(self.__ctx.content_ctx)
+            new_item.__syncwave_init__(self.__ctx.inner_ctx)
 
         if key not in self.__data:
             self.__data[key] = new_item
@@ -232,17 +232,17 @@ class SyncList(MutableSequence[VT], Reactive):
         return self
 
     def __syncwave_init__(self, context: SyncListContext[VT]) -> None:
-        if context.content_ctg is ContentCategory.NON_REACTIVE:
+        if context.inner_reactivity is Reactivity.NON_REACTIVE:
             self.__syncwave_update__ = self.__update_non_reactive
             self.__setitem__ = self.__setitem_non_reactive
             self.__delitem__ = self.__delitem_non_reactive
             self.insert = self.__insert_non_reactive
-        elif context.content_ctg is ContentCategory.REACTIVE:
+        elif context.inner_reactivity is Reactivity.REACTIVE:
             self.__syncwave_update__ = self.__update_reactive
             self.__setitem__ = self.__setitem_reactive
             self.__delitem__ = self.__delitem_reactive
             self.insert = self.__insert_reactive
-        elif context.content_ctg is ContentCategory.MIXED:
+        elif context.inner_reactivity is Reactivity.MIXED:
             self.__syncwave_update__ = self.__update_mixed
             self.__setitem__ = self.__setitem_mixed
             self.__delitem__ = self.__delitem_reactive  # same logic
@@ -271,7 +271,7 @@ class SyncList(MutableSequence[VT], Reactive):
         if new_len > old_len:
             for i in range(old_len, new_len):
                 new_item = new.__data[i]
-                new_item.__syncwave_init__(self.__ctx.content_ctx)
+                new_item.__syncwave_init__(self.__ctx.inner_ctx)
                 self.__data.append(new_item)
 
         # items to remove
@@ -297,7 +297,7 @@ class SyncList(MutableSequence[VT], Reactive):
                 if old_is_reactive:
                     old_item.__syncwave_live__ = False
                 if isinstance(new_item, Reactive):
-                    new_item.__syncwave_init__(self.__ctx.content_ctx)
+                    new_item.__syncwave_init__(self.__ctx.inner_ctx)
                 self.__data[i] = new_item
 
         # items to add
@@ -305,7 +305,7 @@ class SyncList(MutableSequence[VT], Reactive):
             for i in range(old_len, new_len):
                 new_item = new.__data[i]
                 if isinstance(new_item, Reactive):
-                    new_item.__syncwave_init__(self.__ctx.content_ctx)
+                    new_item.__syncwave_init__(self.__ctx.inner_ctx)
                 self.__data.append(new_item)
 
         # items to remove
@@ -323,22 +323,22 @@ class SyncList(MutableSequence[VT], Reactive):
 
     @atomic
     def __setitem_non_reactive(self, index: int, value: VT) -> None:
-        new_item = self.__ctx.content_type_adapter.validate_python(value)
+        new_item = self.__ctx.inner_type_adapter.validate_python(value)
         self.__data[index] = new_item
         self.__ctx.on_change()
 
     @atomic
     def __setitem_reactive(self, index: int, value: VT) -> None:
-        new_item = self.__ctx.content_type_adapter.validate_python(value)
-        new_item.__syncwave_init__(self.__ctx.content_ctx)
+        new_item = self.__ctx.inner_type_adapter.validate_python(value)
+        new_item.__syncwave_init__(self.__ctx.inner_ctx)
         self.__data[index].__syncwave_update__(new_item)
         self.__ctx.on_change()
 
     @atomic
     def __setitem_mixed(self, index: int, value: VT) -> None:
-        new_item = self.__ctx.content_type_adapter.validate_python(value)
+        new_item = self.__ctx.inner_type_adapter.validate_python(value)
         if isinstance(new_item, Reactive):
-            new_item.__syncwave_init__(self.__ctx.content_ctx)
+            new_item.__syncwave_init__(self.__ctx.inner_ctx)
 
         old_item = self.__data[index]
 
@@ -375,13 +375,13 @@ class SyncList(MutableSequence[VT], Reactive):
 
     @atomic
     def __insert_non_reactive(self, index: int, value: VT) -> None:
-        new_item = self.__ctx.content_type_adapter.validate_python(value)
+        new_item = self.__ctx.inner_type_adapter.validate_python(value)
         self.__data.insert(index, new_item)
         self.__ctx.on_change()
 
     @atomic
     def __insert_reactive(self, index: int, value: VT) -> None:
-        new_item = self.__ctx.content_type_adapter.validate_python(value)
+        new_item = self.__ctx.inner_type_adapter.validate_python(value)
         data_copy = self.__data.copy()
         data_copy.insert(index, new_item)
         self.__syncwave_update__(data_copy)
@@ -445,7 +445,7 @@ class SyncSet(MutableSet[VT], Reactive):
 
     @atomic
     def add(self, value: VT) -> None:
-        new_item = self.__ctx.content_type_adapter.validate_python(value)
+        new_item = self.__ctx.inner_type_adapter.validate_python(value)
         self.__data.add(new_item)
         self.__ctx.on_change()
 

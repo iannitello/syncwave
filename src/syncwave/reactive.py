@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod
+from enum import Enum, auto
 from functools import wraps
 from threading import RLock
 from typing import Callable, TypeVar, final
 from typing_extensions import ParamSpec, Self
 
 from .context import Context
+
+
+class Reactivity(Enum):
+    NON_REACTIVE = auto()
+    REACTIVE = auto()
+    MIXED = auto()
 
 
 class Reactive(metaclass=ABCMeta):
