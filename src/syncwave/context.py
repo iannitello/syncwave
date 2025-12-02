@@ -131,11 +131,11 @@ def get_static_ctx(
                 return origin.__syncwave_static_ctx__
             raise TypeError("SyncModel types cannot be nested.")
         if issubclass(origin, SyncDict):
-            return _get_sync_dict_sctx(tp)
+            return _get_sync_dict_sctx(tp, root_level)
         if issubclass(origin, SyncList):
-            return _get_sync_list_sctx(tp)
+            return _get_sync_list_sctx(tp, root_level)
         if issubclass(origin, SyncSet):
-            return _get_sync_set_sctx(tp)
+            return _get_sync_set_sctx(tp, root_level)
         raise TypeError(f"Unknown reactive type: {origin.__name__}")  # shouldn't happen
 
     if origin is Annotated:
@@ -152,13 +152,16 @@ def get_static_ctx(
     return None
 
 
-def _get_sync_dict_sctx(tp: type[SyncDict[KT, VT]]) -> SyncDictStaticContext[KT, VT]:
+def _get_sync_dict_sctx(
+    tp: type[SyncDict[KT, VT]],
+    root_level: bool,
+) -> SyncDictStaticContext[KT, VT]:
     args = get_args(tp)
     len_args = len(args)
 
     if len_args == 2:
         vt = args[1]
-        inner_ctx = get_static_ctx(vt, reactive_allowed=True)
+        inner_ctx = get_static_ctx(vt, root_level, reactive_allowed=True)
         inner_type_adapter = TypeAdapter(vt)
     elif len_args == 0:
         inner_ctx = None
@@ -175,13 +178,16 @@ def _get_sync_dict_sctx(tp: type[SyncDict[KT, VT]]) -> SyncDictStaticContext[KT,
     )
 
 
-def _get_sync_list_sctx(tp: type[SyncList[VT]]) -> SyncListStaticContext[VT]:
+def _get_sync_list_sctx(
+    tp: type[SyncList[VT]],
+    root_level: bool,
+) -> SyncListStaticContext[VT]:
     args = get_args(tp)
     len_args = len(args)
 
     if len_args == 1:
         vt = args[0]
-        inner_ctx = get_static_ctx(vt, reactive_allowed=True)
+        inner_ctx = get_static_ctx(vt, root_level, reactive_allowed=True)
         inner_type_adapter = TypeAdapter(vt)
     elif len_args == 0:
         inner_ctx = None
@@ -198,13 +204,16 @@ def _get_sync_list_sctx(tp: type[SyncList[VT]]) -> SyncListStaticContext[VT]:
     )
 
 
-def _get_sync_set_sctx(tp: type[SyncSet[VT]]) -> SyncSetStaticContext[VT]:
+def _get_sync_set_sctx(
+    tp: type[SyncSet[VT]],
+    root_level: bool,
+) -> SyncSetStaticContext[VT]:
     args = get_args(tp)
     len_args = len(args)
 
     if len_args == 1:
         vt = args[0]
-        get_static_ctx(vt, reactive_allowed=False)  # will raise an error if reactive
+        get_static_ctx(vt, root_level, reactive_allowed=False)  # will raise if reactive
         inner_type_adapter = TypeAdapter(vt)
     elif len_args == 0:
         inner_type_adapter = TypeAdapter(Any)
