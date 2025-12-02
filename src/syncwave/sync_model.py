@@ -4,25 +4,13 @@ import dataclasses as dc
 from abc import ABCMeta
 from collections.abc import Mapping
 from inspect import isclass
-from typing import (
-    Annotated,
-    Any,
-    Generic,
-    NoReturn,
-    TypeVar,
-    Union,
-    final,
-    get_args,
-    get_origin,
-)
-from typing_extensions import TypeGuard
+from typing import Any, Generic, NoReturn, TypeVar, final
 
 from pydantic import BaseModel, RootModel, TypeAdapter, create_model
 from pydantic import dataclasses as pdc
 
-from .context import Context, SyncModelContext, SyncModelStaticContext
+from .context import Context, SyncModelContext, SyncModelStaticContext, get_static_ctx
 from .reactive import Reactive, atomic
-from .sync_collection import SyncCollection, SyncDict, SyncList, SyncSet
 
 
 class SyncModelSupportedMeta(ABCMeta):
@@ -93,12 +81,14 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
     if cls.model_config.get("frozen"):
         raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
 
+    fields_ctx: dict[str, Context] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     for name, field in cls.model_fields.items():
-        field_is_reactive = _drill_field(name, field.annotation, reactive_allowed=True)
-        if field_is_reactive:
+        ctx = get_static_ctx(field.annotation, root_level=False, reactive_allowed=True)
+        if ctx is not None:
             if field.frozen:
                 raise TypeError(f"Field '{name}': frozen fields cannot be reactive.")
+            fields_ctx[name] = ctx
             fields_type_adapter[name] = TypeAdapter(field.annotation)
 
     original_setattr = cls.__setattr__
@@ -176,10 +166,14 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
     }
 
     new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
+
     new_cls.__syncwave_static_ctx__ = SyncModelStaticContext(
+        tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
+        fields_ctx=fields_ctx,
         fields_type_adapter=fields_type_adapter,
     )
+
     return new_cls
 
 
@@ -187,11 +181,14 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
     if cls.model_config.get("frozen"):
         raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
 
+    fields_ctx: dict[str, Context] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     root_field = cls.model_fields["root"]
-    if _drill_field("root", root_field.annotation, reactive_allowed=True):
+    ctx = get_static_ctx(root_field.annotation, root_level=False, reactive_allowed=True)
+    if ctx is not None:
         if root_field.frozen:
             raise TypeError("Field 'root': frozen fields cannot be reactive.")
+        fields_ctx["root"] = ctx
         fields_type_adapter["root"] = TypeAdapter(root_field.annotation)
 
     original_setattr = cls.__setattr__
@@ -266,10 +263,14 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
     }
 
     new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
+
     new_cls.__syncwave_static_ctx__ = SyncModelStaticContext(
+        tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
+        fields_ctx=fields_ctx,
         fields_type_adapter=fields_type_adapter,
     )
+
     return new_cls
 
 
@@ -280,12 +281,14 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
     if not pdc.is_pydantic_dataclass(cls):
         cls = pdc.dataclass(cls)
 
-    fields_type_adapter = {}
+    fields_ctx: dict[str, Context] = {}
+    fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     for name, field in cls.__pydantic_fields__.items():
-        field_is_reactive = _drill_field(name, field.annotation, reactive_allowed=True)
-        if field_is_reactive:
+        ctx = get_static_ctx(field.annotation, root_level=False, reactive_allowed=True)
+        if ctx is not None:
             if field.frozen:
                 raise TypeError(f"Field '{name}': frozen fields cannot be reactive.")
+            fields_ctx[name] = ctx
             fields_type_adapter[name] = TypeAdapter(field.annotation)
 
     original_setattr = cls.__setattr__
@@ -365,54 +368,10 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
     new_cls = type(cls_name, (cls, SyncModel), new_cls_dict)
 
     new_cls.__syncwave_static_ctx__ = SyncModelStaticContext(
+        tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
+        fields_ctx=fields_ctx,
         fields_type_adapter=fields_type_adapter,
     )
+
     return pdc.dataclass(new_cls)
-
-
-def _drill_field(name: str, tp: Any, reactive_allowed: bool) -> TypeGuard[Reactive]:
-    # Drills down a type on a model field into its components.
-    # Returns True if the field is a Reactive type, False otherwise.
-    # Raises an error if a SyncModel is present at any level,
-    # or if a Reactive type is nested in a non-reactive container.
-    origin = get_origin(tp) or tp
-    args = get_args(tp)
-    len_args = len(args)
-
-    if isclass(origin):
-        if issubclass(origin, SyncModel):
-            raise TypeError(f"Field '{name}': SyncModel types cannot be nested.")
-
-        if issubclass(origin, SyncCollection):
-            # if not SyncModel, the only Reactive types left are SyncCollection types
-            if not reactive_allowed:
-                raise TypeError(f"Field '{name}': Cannot break the reactivity chain.")
-
-            if issubclass(origin, SyncDict):
-                if len_args == 2:
-                    _drill_field(name, args[1], reactive_allowed=True)
-                elif len_args != 0:
-                    raise TypeError(f"Field '{name}': 0 or 2 arguments allowed.")
-            elif issubclass(origin, (SyncList, SyncSet)):
-                if len_args == 1:
-                    _drill_field(name, args[0], reactive_allowed=True)
-                elif len_args != 0:
-                    raise TypeError(f"Field '{name}': 0 or 1 arguments allowed.")
-            return True
-
-    if origin is Annotated:
-        if len_args < 1:
-            raise ValueError(f"Field '{name}': Annotated must have arguments.")
-        return _drill_field(name, args[0], reactive_allowed)
-
-    if origin is Union or str(origin) == "typing.Union":
-        if len_args < 1:
-            raise ValueError(f"Field '{name}': Union must have arguments.")
-        results = [_drill_field(name, tp, reactive_allowed) for tp in args]
-        return any(results)
-
-    for arg in args:
-        _drill_field(name, arg, reactive_allowed=False)
-
-    return False
