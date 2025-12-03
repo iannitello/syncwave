@@ -6,10 +6,23 @@ from collections.abc import Mapping
 from inspect import isclass
 from typing import Any, Generic, NoReturn, TypeVar, final
 
-from pydantic import BaseModel, RootModel, TypeAdapter, create_model
+from pydantic import (
+    BaseModel,
+    RootModel,
+    TypeAdapter,
+    ValidationInfo,
+    create_model,
+    model_validator,
+)
 from pydantic import dataclasses as pdc
 
-from .context import Context, SyncModelContext, SyncModelStaticContext, get_static_ctx
+from .context import (
+    Context,
+    StaticContext,
+    SyncModelContext,
+    SyncModelStaticContext,
+    get_static_ctx,
+)
 from .reactive import Reactive, atomic
 
 
@@ -50,7 +63,6 @@ class SyncModel(Generic[T], Reactive):
         self.__ctx = context
         self.__syncwave_lock__ = context.lock
         self.__syncwave_live__ = True
-        self.__ctx.on_create(self)
 
 
 T_BM = TypeVar("T_BM", bound=BaseModel)
@@ -81,7 +93,7 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
     if cls.model_config.get("frozen"):
         raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
 
-    fields_ctx: dict[str, Context] = {}
+    fields_ctx: dict[str, StaticContext] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     for name, field in cls.model_fields.items():
         ctx = get_static_ctx(field.annotation, root_level=False, reactive_allowed=True)
@@ -93,6 +105,12 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
 
     original_setattr = cls.__setattr__
     original_delattr = cls.__delattr__
+
+    @model_validator(mode="after")
+    def auto_attach(self: SyncModel[T_BM], info: ValidationInfo) -> SyncModel[T_BM]:
+        if not info.context or not info.context.get("suppress_auto_attach"):
+            self.__ctx.on_create(self)
+        return self
 
     def syncwave_update(
         self: SyncModel[T_BM],
@@ -165,7 +183,12 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
         "__module__": cls.__module__,
     }
 
-    new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
+    new_cls = create_model(
+        cls_name,
+        __base__=(cls, SyncModel),
+        __validators__={"__syncwave_auto_attach__": auto_attach},
+        **new_cls_dict,
+    )
 
     new_cls.__syncwave_static_ctx__ = SyncModelStaticContext(
         tp=new_cls,
@@ -181,7 +204,7 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
     if cls.model_config.get("frozen"):
         raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
 
-    fields_ctx: dict[str, Context] = {}
+    fields_ctx: dict[str, StaticContext] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     root_field = cls.model_fields["root"]
     ctx = get_static_ctx(root_field.annotation, root_level=False, reactive_allowed=True)
@@ -193,6 +216,12 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
 
     original_setattr = cls.__setattr__
     original_delattr = cls.__delattr__
+
+    @model_validator(mode="after")
+    def auto_attach(self: SyncModel[T_RM], info: ValidationInfo) -> SyncModel[T_RM]:
+        if not info.context or not info.context.get("suppress_auto_attach"):
+            self.__ctx.on_create(self)
+        return self
 
     def syncwave_update(
         self: SyncModel[T_RM],
@@ -262,7 +291,12 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
         "__module__": cls.__module__,
     }
 
-    new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
+    new_cls = create_model(
+        cls_name,
+        __base__=(cls, SyncModel),
+        __validators__={"__syncwave_auto_attach__": auto_attach},
+        **new_cls_dict,
+    )
 
     new_cls.__syncwave_static_ctx__ = SyncModelStaticContext(
         tp=new_cls,
@@ -281,7 +315,7 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
     if not pdc.is_pydantic_dataclass(cls):
         cls = pdc.dataclass(cls)
 
-    fields_ctx: dict[str, Context] = {}
+    fields_ctx: dict[str, StaticContext] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     for name, field in cls.__pydantic_fields__.items():
         ctx = get_static_ctx(field.annotation, root_level=False, reactive_allowed=True)
@@ -293,6 +327,12 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
 
     original_setattr = cls.__setattr__
     original_delattr = cls.__delattr__
+
+    @model_validator(mode="after")
+    def auto_attach(self: SyncModel[T_DC], info: ValidationInfo) -> SyncModel[T_DC]:
+        if not info.context or not info.context.get("suppress_auto_attach"):
+            self.__ctx.on_create(self)
+        return self
 
     def syncwave_update(
         self: SyncModel[T_DC],
@@ -362,6 +402,7 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
         "__syncwave_update__": syncwave_update,
         "__setattr__": new_setattr,
         "__delattr__": new_delattr,
+        "__syncwave_auto_attach__": auto_attach,
         "__module__": cls.__module__,
     }
 
