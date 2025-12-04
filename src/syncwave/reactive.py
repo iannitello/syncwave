@@ -3,7 +3,6 @@ from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from enum import Enum, auto
 from functools import wraps
-from threading import RLock
 from typing import Callable, TypeVar, final
 from typing_extensions import ParamSpec, Self
 
@@ -17,18 +16,14 @@ class Reactivity(Enum):
 
 
 class Reactive(metaclass=ABCMeta):
+    __syncwave_ctx__: Context
     __syncwave_live__: bool
-    __syncwave_lock__: RLock
 
     @final
     @property
     def sync_live(self) -> bool:
-        with self.__syncwave_lock__:
+        with self.__syncwave_ctx__.lock:
             return self.__syncwave_live__
-
-    @abstractmethod
-    def __syncwave_init__(self, context: Context) -> None:
-        raise NotImplementedError
 
     @abstractmethod
     def __syncwave_update__(self, new: Self) -> None:
@@ -49,7 +44,7 @@ WrappedMethod = Callable[P, R]
 def atomic(func: WrappedMethod) -> WrappedMethod:
     @wraps(func)
     def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> R:
-        with self.__syncwave_lock__:
+        with self.__syncwave_ctx__.lock:
             if not self.__syncwave_live__:
                 raise DeadReferenceError(reference=self)
             return func(self, *args, **kwargs)

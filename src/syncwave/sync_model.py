@@ -17,7 +17,6 @@ from pydantic import (
 from pydantic import dataclasses as pdc
 
 from .context import (
-    Context,
     StaticContext,
     SyncModelContext,
     SyncModelStaticContext,
@@ -52,17 +51,7 @@ T = TypeVar("T", bound=SyncModelSupported)
 
 
 class SyncModel(Generic[T], Reactive):
-    __syncwave_static_ctx__: SyncModelStaticContext[T]
-    __ctx: SyncModelContext[T]
-
-    @property
-    def _fields_ctx(self) -> dict[str, Context]:
-        return self.__ctx.fields_ctx
-
-    def __syncwave_init__(self, context: SyncModelContext) -> None:
-        self.__ctx = context
-        self.__syncwave_lock__ = context.lock
-        self.__syncwave_live__ = True
+    __syncwave_ctx__: SyncModelContext[T]
 
 
 T_BM = TypeVar("T_BM", bound=BaseModel)
@@ -70,7 +59,12 @@ T_RM = TypeVar("T_RM", bound=RootModel)
 T_DC = TypeVar("T_DC")  # dataclass
 
 
-def reactive(cls: type[T], /, *, cls_name: str | None = None) -> type[SyncModel[T]]:
+def reactive(
+    cls: type[T],
+    /,
+    *,
+    cls_name: str | None = None,
+) -> tuple[type[SyncModel[T]], SyncModelStaticContext[T]]:
     if not isclass(cls):
         raise TypeError(f"'{cls}' is not a valid type.")
 
@@ -89,18 +83,21 @@ def reactive(cls: type[T], /, *, cls_name: str | None = None) -> type[SyncModel[
         return _patch_dataclass(cls, cls_name)
 
 
-def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
+def _patch_base_model(
+    cls: type[T_BM],
+    cls_name: str,
+) -> tuple[type[SyncModel[T_BM]], SyncModelStaticContext[T_BM]]:
     if cls.model_config.get("frozen"):
         raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
 
     fields_ctx: dict[str, StaticContext] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     for name, field in cls.model_fields.items():
-        ctx = get_static_ctx(field.annotation, root_level=False, reactive_allowed=True)
-        if ctx is not None:
+        sctx = get_static_ctx(field.annotation, False, True)
+        if sctx is not None:
             if field.frozen:
                 raise TypeError(f"Field '{name}': frozen fields cannot be reactive.")
-            fields_ctx[name] = ctx
+            fields_ctx[name] = sctx
             fields_type_adapter[name] = TypeAdapter(field.annotation)
 
     original_setattr = cls.__setattr__
@@ -116,13 +113,13 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
         self: SyncModel[T_BM],
         new: SyncModel[T_BM] | T_BM | Mapping[str, Any],
     ) -> None:
-        static_ctx = self.__class__.__syncwave_static_ctx__
-        new = static_ctx.type_adapter.validate_python(new)
+        ctx = self.__syncwave_ctx__
+        new = ctx.type_adapter.validate_python(new)
 
         for name in cls.model_fields:
             new_value = getattr(new, name, None)
 
-            if name not in static_ctx.fields_type_adapter:
+            if name not in ctx.fields_type_adapter:
                 original_setattr(self, name, new_value)
                 continue
 
@@ -138,20 +135,20 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
                 if old_is_reactive:
                     old_value.__syncwave_live__ = False
                 if isinstance(new_value, Reactive):
-                    new_value.__syncwave_init__(self._fields_ctx[name])
+                    new_value.__syncwave_init__(ctx.fields_ctx[name])
                 original_setattr(self, name, new_value)
 
     @atomic
     def new_setattr(self: SyncModel[T_BM], name: str, new_value: Any) -> None:
-        static_ctx = self.__class__.__syncwave_static_ctx__
+        ctx = self.__syncwave_ctx__
         old_value = getattr(self, name, None)
 
-        if name not in static_ctx.fields_type_adapter:
+        if name not in ctx.fields_type_adapter:
             original_setattr(self, name, new_value)
-            self.__ctx.on_change()
+            ctx.on_change()
             return
 
-        new_value = static_ctx.fields_type_adapter[name].validate_python(new_value)
+        new_value = ctx.fields_type_adapter[name].validate_python(new_value)
 
         old_is_reactive = isinstance(old_value, Reactive)
         safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
@@ -163,9 +160,9 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
             if old_is_reactive:
                 old_value.__syncwave_live__ = False
             if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(self._fields_ctx[name])
+                new_value.__syncwave_init__(ctx.fields_ctx[name])
             original_setattr(self, name, new_value)
-        self.__ctx.on_change()
+        ctx.on_change()
 
     @atomic
     def new_delattr(self: SyncModel[T_BM], name: str) -> None:
@@ -174,7 +171,7 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
         if isinstance(old_value, Reactive):
             old_value.__syncwave_live__ = False
         original_delattr(self, name)
-        self.__ctx.on_change()
+        self.__syncwave_ctx__.on_change()
 
     new_cls_dict = {
         "__syncwave_update__": syncwave_update,
@@ -190,28 +187,31 @@ def _patch_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
         **new_cls_dict,
     )
 
-    new_cls.__syncwave_static_ctx__ = SyncModelStaticContext(
+    sctx = SyncModelStaticContext(
         tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
         fields_ctx=fields_ctx,
         fields_type_adapter=fields_type_adapter,
     )
 
-    return new_cls
+    return new_cls, sctx
 
 
-def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
+def _patch_root_model(
+    cls: type[T_RM],
+    cls_name: str,
+) -> tuple[type[SyncModel[T_RM]], SyncModelStaticContext[T_RM]]:
     if cls.model_config.get("frozen"):
         raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
 
     fields_ctx: dict[str, StaticContext] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     root_field = cls.model_fields["root"]
-    ctx = get_static_ctx(root_field.annotation, root_level=False, reactive_allowed=True)
-    if ctx is not None:
+    sctx = get_static_ctx(root_field.annotation, False, True)
+    if sctx is not None:
         if root_field.frozen:
             raise TypeError("Field 'root': frozen fields cannot be reactive.")
-        fields_ctx["root"] = ctx
+        fields_ctx["root"] = sctx
         fields_type_adapter["root"] = TypeAdapter(root_field.annotation)
 
     original_setattr = cls.__setattr__
@@ -227,11 +227,11 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
         self: SyncModel[T_RM],
         new: SyncModel[T_RM] | T_RM | Any,
     ) -> None:
-        static_ctx = self.__class__.__syncwave_static_ctx__
-        new = static_ctx.type_adapter.validate_python(new)
+        ctx = self.__syncwave_ctx__
+        new = ctx.type_adapter.validate_python(new)
         new_value = new.root
 
-        if not static_ctx.fields_type_adapter:
+        if not ctx.fields_type_adapter:
             original_setattr(self, "root", new_value)
             return
 
@@ -247,19 +247,19 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
             if old_is_reactive:
                 old_value.__syncwave_live__ = False
             if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(self._fields_ctx["root"])
+                new_value.__syncwave_init__(ctx.fields_ctx["root"])
             original_setattr(self, "root", new_value)
 
     @atomic
     def new_setattr(self: SyncModel[T_RM], name: str, new_value: Any) -> None:
-        static_ctx = self.__class__.__syncwave_static_ctx__
-        if name != "root" or not static_ctx.fields_type_adapter:
+        ctx = self.__syncwave_ctx__
+        if name != "root" or not ctx.fields_type_adapter:
             original_setattr(self, name, new_value)
-            self.__ctx.on_change()
+            ctx.on_change()
             return
 
         old_value = self.root
-        new_value = static_ctx.fields_type_adapter["root"].validate_python(new_value)
+        new_value = ctx.fields_type_adapter["root"].validate_python(new_value)
 
         old_is_reactive = isinstance(old_value, Reactive)
         safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
@@ -271,9 +271,9 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
             if old_is_reactive:
                 old_value.__syncwave_live__ = False
             if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(self._fields_ctx["root"])
+                new_value.__syncwave_init__(ctx.fields_ctx["root"])
             original_setattr(self, "root", new_value)
-        self.__ctx.on_change()
+        ctx.on_change()
 
     @atomic
     def new_delattr(self: SyncModel[T_RM], name: str) -> None:
@@ -282,7 +282,7 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
         if isinstance(old_value, Reactive):
             old_value.__syncwave_live__ = False
         original_delattr(self, name)
-        self.__ctx.on_change()
+        self.__syncwave_ctx__.on_change()
 
     new_cls_dict = {
         "__syncwave_update__": syncwave_update,
@@ -298,17 +298,20 @@ def _patch_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
         **new_cls_dict,
     )
 
-    new_cls.__syncwave_static_ctx__ = SyncModelStaticContext(
+    sctx = SyncModelStaticContext(
         tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
         fields_ctx=fields_ctx,
         fields_type_adapter=fields_type_adapter,
     )
 
-    return new_cls
+    return new_cls, sctx
 
 
-def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
+def _patch_dataclass(
+    cls: type[T_DC],
+    cls_name: str,
+) -> tuple[type[SyncModel[T_DC]], SyncModelStaticContext[T_DC]]:
     if cls.__dataclass_params__.frozen:
         raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
 
@@ -318,11 +321,11 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
     fields_ctx: dict[str, StaticContext] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     for name, field in cls.__pydantic_fields__.items():
-        ctx = get_static_ctx(field.annotation, root_level=False, reactive_allowed=True)
-        if ctx is not None:
+        sctx = get_static_ctx(field.annotation, False, True)
+        if sctx is not None:
             if field.frozen:
                 raise TypeError(f"Field '{name}': frozen fields cannot be reactive.")
-            fields_ctx[name] = ctx
+            fields_ctx[name] = sctx
             fields_type_adapter[name] = TypeAdapter(field.annotation)
 
     original_setattr = cls.__setattr__
@@ -338,13 +341,13 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
         self: SyncModel[T_DC],
         new: SyncModel[T_DC] | T_DC | Mapping[str, Any],
     ) -> None:
-        static_ctx = self.__class__.__syncwave_static_ctx__
-        new = static_ctx.type_adapter.validate_python(new)
+        ctx = self.__syncwave_ctx__
+        new = ctx.type_adapter.validate_python(new)
 
         for name in cls.__pydantic_fields__:
             new_value = getattr(new, name, None)
 
-            if name not in static_ctx.fields_type_adapter:
+            if name not in ctx.fields_type_adapter:
                 original_setattr(self, name, new_value)
                 continue
 
@@ -360,20 +363,20 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
                 if old_is_reactive:
                     old_value.__syncwave_live__ = False
                 if isinstance(new_value, Reactive):
-                    new_value.__syncwave_init__(self._fields_ctx[name])
+                    new_value.__syncwave_init__(ctx.fields_ctx[name])
                 original_setattr(self, name, new_value)
 
     @atomic
     def new_setattr(self: SyncModel[T_DC], name: str, new_value: Any) -> None:
-        static_ctx = self.__class__.__syncwave_static_ctx__
+        ctx = self.__syncwave_ctx__
         old_value = getattr(self, name, None)
 
-        if name not in static_ctx.fields_type_adapter:
+        if name not in ctx.fields_type_adapter:
             original_setattr(self, name, new_value)
-            self.__ctx.on_change()
+            ctx.on_change()
             return
 
-        new_value = static_ctx.fields_type_adapter[name].validate_python(new_value)
+        new_value = ctx.fields_type_adapter[name].validate_python(new_value)
 
         old_is_reactive = isinstance(old_value, Reactive)
         safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
@@ -385,9 +388,9 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
             if old_is_reactive:
                 old_value.__syncwave_live__ = False
             if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(self._fields_ctx[name])
+                new_value.__syncwave_init__(ctx.fields_ctx[name])
             original_setattr(self, name, new_value)
-        self.__ctx.on_change()
+        ctx.on_change()
 
     @atomic
     def new_delattr(self: SyncModel[T_DC], name: str) -> None:
@@ -396,7 +399,7 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
         if isinstance(old_value, Reactive):
             old_value.__syncwave_live__ = False
         original_delattr(self, name)
-        self.__ctx.on_change()
+        self.__syncwave_ctx__.on_change()
 
     new_cls_dict = {
         "__syncwave_update__": syncwave_update,
@@ -408,11 +411,11 @@ def _patch_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
 
     new_cls = type(cls_name, (cls, SyncModel), new_cls_dict)
 
-    new_cls.__syncwave_static_ctx__ = SyncModelStaticContext(
+    sctx = SyncModelStaticContext(
         tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
         fields_ctx=fields_ctx,
         fields_type_adapter=fields_type_adapter,
     )
 
-    return pdc.dataclass(new_cls)
+    return pdc.dataclass(new_cls), sctx
