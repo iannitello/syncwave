@@ -6,14 +6,7 @@ from collections.abc import Mapping
 from inspect import isclass
 from typing import Any, Generic, NoReturn, TypeVar, final
 
-from pydantic import (
-    BaseModel,
-    RootModel,
-    TypeAdapter,
-    ValidationInfo,
-    create_model,
-    model_validator,
-)
+from pydantic import BaseModel, RootModel, TypeAdapter, create_model
 from pydantic import dataclasses as pdc
 
 from .context import (
@@ -52,6 +45,10 @@ T = TypeVar("T", bound=SyncModelSupported)
 
 class SyncModel(Generic[T], Reactive):
     __syncwave_ctx__: SyncModelContext[T]
+
+    def __syncwave_init__(self, context: SyncModelContext[T]) -> None:
+        self.__syncwave_ctx__ = context
+        self.__syncwave_live__ = True
 
 
 T_BM = TypeVar("T_BM", bound=BaseModel)
@@ -102,12 +99,6 @@ def _patch_base_model(
 
     original_setattr = cls.__setattr__
     original_delattr = cls.__delattr__
-
-    @model_validator(mode="after")
-    def auto_attach(self: SyncModel[T_BM], info: ValidationInfo) -> SyncModel[T_BM]:
-        if not info.context or not info.context.get("suppress_auto_attach"):
-            self.__ctx.on_create(self)
-        return self
 
     def syncwave_update(
         self: SyncModel[T_BM],
@@ -180,12 +171,7 @@ def _patch_base_model(
         "__module__": cls.__module__,
     }
 
-    new_cls = create_model(
-        cls_name,
-        __base__=(cls, SyncModel),
-        __validators__={"__syncwave_auto_attach__": auto_attach},
-        **new_cls_dict,
-    )
+    new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
 
     sctx = SyncModelStaticContext(
         tp=new_cls,
@@ -216,12 +202,6 @@ def _patch_root_model(
 
     original_setattr = cls.__setattr__
     original_delattr = cls.__delattr__
-
-    @model_validator(mode="after")
-    def auto_attach(self: SyncModel[T_RM], info: ValidationInfo) -> SyncModel[T_RM]:
-        if not info.context or not info.context.get("suppress_auto_attach"):
-            self.__ctx.on_create(self)
-        return self
 
     def syncwave_update(
         self: SyncModel[T_RM],
@@ -291,12 +271,7 @@ def _patch_root_model(
         "__module__": cls.__module__,
     }
 
-    new_cls = create_model(
-        cls_name,
-        __base__=(cls, SyncModel),
-        __validators__={"__syncwave_auto_attach__": auto_attach},
-        **new_cls_dict,
-    )
+    new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
 
     sctx = SyncModelStaticContext(
         tp=new_cls,
@@ -330,12 +305,6 @@ def _patch_dataclass(
 
     original_setattr = cls.__setattr__
     original_delattr = cls.__delattr__
-
-    @model_validator(mode="after")
-    def auto_attach(self: SyncModel[T_DC], info: ValidationInfo) -> SyncModel[T_DC]:
-        if not info.context or not info.context.get("suppress_auto_attach"):
-            self.__ctx.on_create(self)
-        return self
 
     def syncwave_update(
         self: SyncModel[T_DC],
@@ -405,7 +374,6 @@ def _patch_dataclass(
         "__syncwave_update__": syncwave_update,
         "__setattr__": new_setattr,
         "__delattr__": new_delattr,
-        "__syncwave_auto_attach__": auto_attach,
         "__module__": cls.__module__,
     }
 
