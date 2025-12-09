@@ -26,6 +26,10 @@ class Reactive(metaclass=ABCMeta):
             return self.__syncwave_live__
 
     @abstractmethod
+    def __syncwave_init__(self, context: Context) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def __syncwave_update__(self, new: Self) -> None:
         raise NotImplementedError
 

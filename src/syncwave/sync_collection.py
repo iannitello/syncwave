@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from abc import abstractmethod
 from collections.abc import (
     Iterator,
     Mapping,
@@ -21,7 +20,7 @@ from typing_extensions import Self
 from pydantic import GetCoreSchemaHandler as Handler
 from pydantic_core import core_schema as cs
 
-from .context import Context, SyncDictContext, SyncListContext, SyncSetContext
+from .context import SyncDictContext, SyncListContext, SyncSetContext
 from .reactive import Reactive, Reactivity, atomic
 
 KT = TypeVar("KT", bound=Union[str, int, float, bool, None])
@@ -32,10 +31,6 @@ VT = TypeVar("VT")
 class SyncCollection(Reactive):
     def __init_subclass__(cls: type[SyncCollection], /, **kwargs: Any) -> NoReturn:
         raise TypeError("SyncCollection cannot be subclassed.")
-
-    @abstractmethod
-    def __syncwave_init__(self, context: Context) -> None:
-        raise NotImplementedError
 
 
 class SyncDict(MutableMapping[KT, VT], Reactive):
