@@ -9,12 +9,7 @@ from typing import Any, Generic, NoReturn, TypeVar, final
 from pydantic import BaseModel, RootModel, TypeAdapter, create_model
 from pydantic import dataclasses as pdc
 
-from .context import (
-    StaticContext,
-    SyncModelContext,
-    SyncModelStaticContext,
-    get_static_ctx,
-)
+from .context import PartialContext, SyncModelCtx, SyncModelPCtx, get_static_ctx
 from .reactive import Reactive, atomic
 
 
@@ -44,9 +39,9 @@ T = TypeVar("T", bound=SyncModelSupported)
 
 
 class SyncModel(Generic[T], Reactive):
-    __syncwave_ctx__: SyncModelContext[T]
+    __syncwave_ctx__: SyncModelCtx[T]
 
-    def __syncwave_init__(self, context: SyncModelContext[T]) -> None:
+    def __syncwave_init__(self, context: SyncModelCtx[T]) -> None:
         self.__syncwave_ctx__ = context
         self.__syncwave_live__ = True
 
@@ -61,7 +56,7 @@ def reactive(
     /,
     *,
     cls_name: str | None = None,
-) -> tuple[type[SyncModel[T]], SyncModelStaticContext[T]]:
+) -> tuple[type[SyncModel[T]], SyncModelPCtx[T]]:
     if not isclass(cls):
         raise TypeError(f"'{cls}' is not a valid type.")
 
@@ -83,11 +78,11 @@ def reactive(
 def _patch_base_model(
     cls: type[T_BM],
     cls_name: str,
-) -> tuple[type[SyncModel[T_BM]], SyncModelStaticContext[T_BM]]:
+) -> tuple[type[SyncModel[T_BM]], SyncModelPCtx[T_BM]]:
     if cls.model_config.get("frozen"):
         raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
 
-    fields_ctx: dict[str, StaticContext] = {}
+    fields_ctx: dict[str, PartialContext] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     for name, field in cls.model_fields.items():
         sctx = get_static_ctx(field.annotation, False, True)
@@ -173,7 +168,7 @@ def _patch_base_model(
 
     new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
 
-    sctx = SyncModelStaticContext(
+    sctx = SyncModelPCtx(
         tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
         fields_ctx=fields_ctx,
@@ -186,11 +181,11 @@ def _patch_base_model(
 def _patch_root_model(
     cls: type[T_RM],
     cls_name: str,
-) -> tuple[type[SyncModel[T_RM]], SyncModelStaticContext[T_RM]]:
+) -> tuple[type[SyncModel[T_RM]], SyncModelPCtx[T_RM]]:
     if cls.model_config.get("frozen"):
         raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
 
-    fields_ctx: dict[str, StaticContext] = {}
+    fields_ctx: dict[str, PartialContext] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     root_field = cls.model_fields["root"]
     sctx = get_static_ctx(root_field.annotation, False, True)
@@ -273,7 +268,7 @@ def _patch_root_model(
 
     new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
 
-    sctx = SyncModelStaticContext(
+    sctx = SyncModelPCtx(
         tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
         fields_ctx=fields_ctx,
@@ -286,14 +281,14 @@ def _patch_root_model(
 def _patch_dataclass(
     cls: type[T_DC],
     cls_name: str,
-) -> tuple[type[SyncModel[T_DC]], SyncModelStaticContext[T_DC]]:
+) -> tuple[type[SyncModel[T_DC]], SyncModelPCtx[T_DC]]:
     if cls.__dataclass_params__.frozen:
         raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
 
     if not pdc.is_pydantic_dataclass(cls):
         cls = pdc.dataclass(cls)
 
-    fields_ctx: dict[str, StaticContext] = {}
+    fields_ctx: dict[str, PartialContext] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     for name, field in cls.__pydantic_fields__.items():
         sctx = get_static_ctx(field.annotation, False, True)
@@ -379,7 +374,7 @@ def _patch_dataclass(
 
     new_cls = type(cls_name, (cls, SyncModel), new_cls_dict)
 
-    sctx = SyncModelStaticContext(
+    sctx = SyncModelPCtx(
         tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
         fields_ctx=fields_ctx,

@@ -8,7 +8,6 @@ from typing import (
     Any,
     Callable,
     Generic,
-    Literal,
     TypeVar,
     Union,
     get_args,
@@ -17,7 +16,7 @@ from typing import (
 
 from pydantic import TypeAdapter
 
-from .reactive import Reactive, Reactivity
+from .reactive import Reactive
 from .sync_collection import SyncDict, SyncList, SyncSet
 from .sync_model import SyncModel, SyncModelSupported
 
@@ -25,55 +24,52 @@ KT = TypeVar("KT", bound=Union[str, int, float, bool, None])  # key type
 VT = TypeVar("VT")  # value type
 MT = TypeVar("MT", bound=SyncModelSupported)  # model type
 
+
 # --------------------------------- Static Contexts ---------------------------------- #
 
 
-@dataclass(frozen=True)
-class StaticContext: ...
+@dataclass
+class PartialContext:
+    tp: type[Reactive]
+    type_adapter: TypeAdapter[Reactive]
 
 
-@dataclass(frozen=True)
-class UnionStaticContext(StaticContext):
-    inner_reactivity: Literal[Reactivity.REACTIVE, Reactivity.MIXED]
-    inner_ctx_map: dict[type[Reactive], StaticContext]
+class UnionPCtx(dict[type[Reactive], PartialContext]): ...
 
 
-@dataclass(frozen=True)
-class SyncDictStaticContext(Generic[KT, VT], StaticContext):
+@dataclass
+class SyncDictPCtx(Generic[KT, VT], PartialContext):
     tp: type[SyncDict]
     type_adapter: TypeAdapter[SyncDict[KT, VT]]
 
-    inner_ctx: StaticContext | None
-    inner_reactivity: Reactivity
+    inner_ctx: PartialContext | UnionPCtx | None
     inner_type_adapter: TypeAdapter[VT]
 
 
-@dataclass(frozen=True)
-class SyncListStaticContext(Generic[VT], StaticContext):
+@dataclass
+class SyncListPCtx(Generic[VT], PartialContext):
     tp: type[SyncList]
     type_adapter: TypeAdapter[SyncList[VT]]
 
-    inner_ctx: StaticContext | None
-    inner_reactivity: Reactivity
+    inner_ctx: PartialContext | UnionPCtx | None
     inner_type_adapter: TypeAdapter[VT]
 
 
-@dataclass(frozen=True)
-class SyncSetStaticContext(Generic[VT], StaticContext):
+@dataclass
+class SyncSetPCtx(Generic[VT], PartialContext):
     tp: type[SyncSet]
     type_adapter: TypeAdapter[SyncSet[VT]]
 
     inner_ctx: None  # never holds reactive items
-    inner_reactivity: Literal[Reactivity.NON_REACTIVE]  # never holds reactive items
     inner_type_adapter: TypeAdapter[VT]
 
 
-@dataclass(frozen=True)
-class SyncModelStaticContext(Generic[MT], StaticContext):
-    tp: type[SyncModel[MT]]
+@dataclass
+class SyncModelPCtx(Generic[MT], PartialContext):
+    tp: type[SyncModel]
     type_adapter: TypeAdapter[SyncModel[MT]]
 
-    fields_ctx: dict[str, StaticContext]
+    fields_ctx: dict[str, PartialContext | UnionPCtx]
     fields_type_adapter: dict[str, TypeAdapter[Any]]
 
 
@@ -86,40 +82,33 @@ class Context:
     on_change: Callable[[], None]
 
 
-@dataclass(frozen=True)
-class UnionContext(UnionStaticContext, Context):
-    inner_ctx_map: dict[type[Reactive], Context]
+class UnionCtx(dict[type[Reactive], Context]): ...
 
 
 @dataclass(frozen=True)
-class SyncDictContext(SyncDictStaticContext[KT, VT], Context):
-    inner_ctx: Context | None
+class SyncDictCtx(SyncDictPCtx[KT, VT], Context):
+    inner_ctx: Context | UnionCtx | None
 
 
 @dataclass(frozen=True)
-class SyncListContext(SyncListStaticContext[VT], Context):
-    inner_ctx: Context | None
+class SyncListCtx(SyncListPCtx[VT], Context):
+    inner_ctx: Context | UnionCtx | None
 
 
 @dataclass(frozen=True)
-class SyncSetContext(SyncSetStaticContext[VT], Context):
+class SyncSetCtx(SyncSetPCtx[VT], Context):
     inner_ctx: None  # never holds reactive items
 
 
 @dataclass(frozen=True)
-class SyncModelContext(SyncModelStaticContext[MT], Context):
-    on_create: Callable[[SyncModel[MT]], None]
-    fields_ctx: dict[str, Context]
+class SyncModelCtx(SyncModelPCtx[MT], Context):
+    fields_ctx: dict[str, Context | UnionCtx]
 
 
 # ------------------------------------- Helpers -------------------------------------- #
 
 
-def get_static_ctx(
-    tp: type[Any],
-    root_level: bool,
-    reactive_allowed: bool,
-) -> StaticContext | None:
+def get_pctx(tp: Any, reactive_allowed: bool) -> PartialContext | UnionPCtx | None:
     origin = get_origin(tp) or tp
     args = get_args(tp)
 
@@ -127,41 +116,36 @@ def get_static_ctx(
         if not reactive_allowed:
             raise TypeError("Cannot break the reactivity chain.")
         if issubclass(origin, SyncModel):
-            if root_level:
-                return origin.__syncwave_static_ctx__
-            raise TypeError("SyncModel types cannot be nested.")
+            pass  # TODO: implement
         if issubclass(origin, SyncDict):
-            return _get_sync_dict_sctx(tp, root_level)
+            return _get_sync_dict_pctx(tp)
         if issubclass(origin, SyncList):
-            return _get_sync_list_sctx(tp, root_level)
+            return _get_sync_list_pctx(tp)
         if issubclass(origin, SyncSet):
-            return _get_sync_set_sctx(tp, root_level)
+            return _get_sync_set_pctx(tp)
         raise TypeError(f"Unknown reactive type: {origin.__name__}")  # shouldn't happen
 
     if origin is Annotated:
         if len(args) < 1:
             raise ValueError("Annotated must have arguments.")
-        return get_static_ctx(args[0], root_level, reactive_allowed)
+        return get_pctx(args[0], reactive_allowed)
 
     if origin is Union or str(origin) == "typing.Union":
-        return _get_union_sctx(args, root_level, reactive_allowed)
+        return _get_union_pctx(args, reactive_allowed)
 
     for arg in args:
-        get_static_ctx(arg, root_level, reactive_allowed=False)
+        get_pctx(arg, reactive_allowed=False)
 
     return None
 
 
-def _get_sync_dict_sctx(
-    tp: type[SyncDict[KT, VT]],
-    root_level: bool,
-) -> SyncDictStaticContext[KT, VT]:
+def _get_sync_dict_pctx(tp: type[SyncDict[KT, VT]]) -> SyncDictPCtx[KT, VT]:
     args = get_args(tp)
     len_args = len(args)
 
     if len_args == 2:
         vt = args[1]
-        inner_ctx = get_static_ctx(vt, root_level, reactive_allowed=True)
+        inner_ctx = get_pctx(vt, reactive_allowed=True)
         inner_type_adapter = TypeAdapter(vt)
     elif len_args == 0:
         inner_ctx = None
@@ -169,25 +153,21 @@ def _get_sync_dict_sctx(
     else:
         raise TypeError("SyncDict must have 0 or 2 arguments.")
 
-    return SyncDictStaticContext(
+    return SyncDictPCtx(
         tp=SyncDict,
         type_adapter=TypeAdapter(tp),
         inner_ctx=inner_ctx,
-        inner_reactivity=_get_inner_reactivity(inner_ctx),
         inner_type_adapter=inner_type_adapter,
     )
 
 
-def _get_sync_list_sctx(
-    tp: type[SyncList[VT]],
-    root_level: bool,
-) -> SyncListStaticContext[VT]:
+def _get_sync_list_pctx(tp: type[SyncList[VT]]) -> SyncListPCtx[VT]:
     args = get_args(tp)
     len_args = len(args)
 
     if len_args == 1:
         vt = args[0]
-        inner_ctx = get_static_ctx(vt, root_level, reactive_allowed=True)
+        inner_ctx = get_pctx(vt, reactive_allowed=True)
         inner_type_adapter = TypeAdapter(vt)
     elif len_args == 0:
         inner_ctx = None
@@ -195,64 +175,43 @@ def _get_sync_list_sctx(
     else:
         raise TypeError("SyncList must have 0 or 1 argument.")
 
-    return SyncListStaticContext(
+    return SyncListPCtx(
         tp=SyncList,
         type_adapter=TypeAdapter(tp),
         inner_ctx=inner_ctx,
-        inner_reactivity=_get_inner_reactivity(inner_ctx),
         inner_type_adapter=inner_type_adapter,
     )
 
 
-def _get_sync_set_sctx(
-    tp: type[SyncSet[VT]],
-    root_level: bool,
-) -> SyncSetStaticContext[VT]:
+def _get_sync_set_pctx(tp: type[SyncSet[VT]]) -> SyncSetPCtx[VT]:
     args = get_args(tp)
     len_args = len(args)
 
     if len_args == 1:
         vt = args[0]
-        get_static_ctx(vt, root_level, reactive_allowed=False)  # will raise if reactive
+        get_pctx(vt, reactive_allowed=False)  # will raise if reactive
         inner_type_adapter = TypeAdapter(vt)
     elif len_args == 0:
         inner_type_adapter = TypeAdapter(Any)
     else:
         raise TypeError("SyncSet must have 0 or 1 argument.")
 
-    return SyncSetStaticContext(
+    return SyncSetPCtx(
         tp=SyncSet,
         type_adapter=TypeAdapter(tp),
         inner_ctx=None,
-        inner_reactivity=Reactivity.NON_REACTIVE,
         inner_type_adapter=inner_type_adapter,
     )
 
 
-def _get_union_sctx(
-    args: tuple[Any, ...],
-    root_level: bool,
-    reactive_allowed: bool,
-) -> UnionStaticContext | None:
+def _get_union_pctx(args: tuple[Any, ...], reactive_allowed: bool) -> UnionPCtx | None:
     if not args:
         raise ValueError("Union must have arguments.")
 
-    contexts = [get_static_ctx(tp, root_level, reactive_allowed) for tp in args]
-    inner_ctx_map = {ctx.tp: ctx for ctx in contexts if ctx is not None}
+    contexts = [get_pctx(tp, reactive_allowed) for tp in args]
+    pctx_map = {pctx.tp: pctx for pctx in contexts if pctx is not None}
 
-    if not inner_ctx_map:
+    if not pctx_map:
         return None
 
-    is_mixed = None in contexts
-    return UnionStaticContext(
-        inner_reactivity=Reactivity.MIXED if is_mixed else Reactivity.REACTIVE,
-        inner_ctx_map=inner_ctx_map,
-    )
-
-
-def _get_inner_reactivity(context: StaticContext | None) -> Reactivity:
-    if context is None:
-        return Reactivity.NON_REACTIVE
-    if context.inner_reactivity is Reactivity.MIXED:
-        return Reactivity.MIXED
-    return Reactivity.REACTIVE
+    return UnionPCtx(pctx_map)

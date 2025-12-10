@@ -20,7 +20,7 @@ from typing_extensions import Self
 from pydantic import GetCoreSchemaHandler as Handler
 from pydantic_core import core_schema as cs
 
-from .context import SyncDictContext, SyncListContext, SyncSetContext
+from .context import SyncDictCtx, SyncListCtx, SyncSetCtx
 from .reactive import Reactive, Reactivity, atomic
 
 KT = TypeVar("KT", bound=Union[str, int, float, bool, None])
@@ -34,7 +34,7 @@ class SyncCollection(Reactive):
 
 
 class SyncDict(MutableMapping[KT, VT], Reactive):
-    __syncwave_ctx__: SyncDictContext[KT, VT]
+    __syncwave_ctx__: SyncDictCtx[KT, VT]
     __data: dict[KT, VT]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
@@ -46,7 +46,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         self.__data = data
         return self
 
-    def __syncwave_init__(self, context: SyncDictContext[KT, VT]) -> None:
+    def __syncwave_init__(self, context: SyncDictCtx[KT, VT]) -> None:
         if context.inner_reactivity is Reactivity.NON_REACTIVE:
             self.__syncwave_update__ = self.__update_non_reactive
             self.__setitem__ = self.__setitem_non_reactive
@@ -223,7 +223,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
 
 
 class SyncList(MutableSequence[VT], Reactive):
-    __syncwave_ctx__: SyncListContext[VT]
+    __syncwave_ctx__: SyncListCtx[VT]
     __data: list[VT]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
@@ -235,7 +235,7 @@ class SyncList(MutableSequence[VT], Reactive):
         self.__data = data
         return self
 
-    def __syncwave_init__(self, context: SyncListContext[VT]) -> None:
+    def __syncwave_init__(self, context: SyncListCtx[VT]) -> None:
         if context.inner_reactivity is Reactivity.NON_REACTIVE:
             self.__syncwave_update__ = self.__update_non_reactive
             self.__setitem__ = self.__setitem_non_reactive
@@ -419,7 +419,7 @@ class SyncList(MutableSequence[VT], Reactive):
 
 class SyncSet(MutableSet[VT], Reactive):
     # SyncSet cannot hold reactive items because a reactive item is mutable
-    __syncwave_ctx__: SyncSetContext[VT]
+    __syncwave_ctx__: SyncSetCtx[VT]
     __data: set[VT]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
@@ -431,7 +431,7 @@ class SyncSet(MutableSet[VT], Reactive):
         self.__data = data
         return self
 
-    def __syncwave_init__(self, context: SyncSetContext[VT]) -> None:
+    def __syncwave_init__(self, context: SyncSetCtx[VT]) -> None:
         self.__syncwave_ctx__ = context
         self.__syncwave_live__ = True
 
