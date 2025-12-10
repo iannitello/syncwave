@@ -20,7 +20,7 @@ from typing_extensions import Self
 from pydantic import GetCoreSchemaHandler as Handler
 from pydantic_core import core_schema as cs
 
-from .context import SyncDictCtx, SyncListCtx, SyncSetCtx
+from .context import Context, SyncDictCtx, SyncListCtx, SyncSetCtx, UnionCtx
 from .reactive import Reactive, Reactivity, atomic
 
 KT = TypeVar("KT", bound=Union[str, int, float, bool, None])
@@ -47,147 +47,67 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         return self
 
     def __syncwave_init__(self, context: SyncDictCtx[KT, VT]) -> None:
-        if context.inner_reactivity is Reactivity.NON_REACTIVE:
-            self.__syncwave_update__ = self.__update_non_reactive
-            self.__setitem__ = self.__setitem_non_reactive
-            self.__delitem__ = self.__delitem_non_reactive
-        elif context.inner_reactivity is Reactivity.REACTIVE:
-            self.__syncwave_update__ = self.__update_reactive
-            self.__setitem__ = self.__setitem_reactive
-            self.__delitem__ = self.__delitem_reactive
-        elif context.inner_reactivity is Reactivity.MIXED:
-            self.__syncwave_update__ = self.__update_mixed
-            self.__setitem__ = self.__setitem_mixed
-            self.__delitem__ = self.__delitem_mixed
-
         self.__syncwave_ctx__ = context
         self.__syncwave_live__ = True
 
-    def __syncwave_update__(self, new: Mapping[KT, VT]) -> None: ...
-
-    def __update_non_reactive(self, new: Mapping[KT, VT]) -> None:
+    def __syncwave_update__(self, new: Mapping[KT, VT]) -> None:
+        inner_ctx = self.__syncwave_ctx__.inner_ctx
         new = self.__syncwave_ctx__.type_adapter.validate_python(new)
-        self.__data = new.__data
 
-    def __update_reactive(self, new: Mapping[KT, VT]) -> None:
-        ctx = self.__syncwave_ctx__
-        new = ctx.type_adapter.validate_python(new)
-        old_keys, new_keys = set(self.__data.keys()), set(new.__data.keys())
-
-        # items to update
-        for key in new_keys & old_keys:
-            old_item, new_item = self.__data[key], new.__data[key]
-            old_item.__syncwave_update__(new_item)
-
-        # items to add
-        for key in new_keys - old_keys:
-            new_item = new.__data[key]
-            new_item.__syncwave_init__(ctx.inner_ctx)
-            self.__data[key] = new_item
-
-        # items to remove
-        for key in old_keys - new_keys:
-            old_item = self.__data.pop(key)
-            old_item.__syncwave_live__ = False
-
-    def __update_mixed(self, new: Mapping[KT, VT]) -> None:
-        ctx = self.__syncwave_ctx__
-        new = ctx.type_adapter.validate_python(new)
-        old_keys, new_keys = set(self.__data.keys()), set(new.__data.keys())
-
-        # items to update
-        for key in new_keys & old_keys:
-            old_item, new_item = self.__data[key], new.__data[key]
-
-            old_is_reactive = isinstance(old_item, Reactive)
-            safe_to_update = old_is_reactive and isinstance(new_item, type(old_item))
-
-            if safe_to_update:
-                old_item.__syncwave_update__(new_item)
-            else:
-                if old_is_reactive:
-                    old_item.__syncwave_live__ = False
-                if isinstance(new_item, Reactive):
-                    new_item.__syncwave_init__(ctx.inner_ctx)
-                self.__data[key] = new_item
-
-        # items to add
-        for key in new_keys - old_keys:
-            new_item = new.__data[key]
-            if isinstance(new_item, Reactive):
-                new_item.__syncwave_init__(ctx.inner_ctx)
-            self.__data[key] = new_item
-
-        # items to remove
-        for key in old_keys - new_keys:
-            old_item = self.__data.pop(key)
-            if isinstance(old_item, Reactive):
+        # case 1: non-reactive content type
+        if inner_ctx is None:
+            self.__data = new.__data
+        # case 2: fixed reactive content type
+        elif isinstance(inner_ctx, Context):
+            old_keys, new_keys = set(self.__data.keys()), set(new.__data.keys())
+            # items to add and update
+            for key in new_keys:
+                old_item, new_item = self.__data.get(key), new.__data[key]
+                self.__update_reactive_item(key, old_item, new_item, inner_ctx)
+            # items to remove
+            for key in old_keys - new_keys:
+                old_item = self.__data.pop(key)
                 old_item.__syncwave_live__ = False
+        # case 3: union content type
+        elif isinstance(inner_ctx, UnionCtx):
+            # items to add and update
+            for key in new_keys:
+                old_item, new_item = self.__data.get(key), new.__data[key]
+                self.__update_union_item(key, old_item, new_item, inner_ctx)
+            # items to remove
+            for key in old_keys - new_keys:
+                old_item = self.__data.pop(key)
+                if isinstance(old_item, Reactive):
+                    old_item.__syncwave_live__ = False
+        else:
+            raise TypeError("Invalid syncwave context.")
 
     @atomic
     def __getitem__(self, key: KT) -> VT:
         return self.__data[key]
 
-    def __setitem__(self, key: KT, value: VT) -> None: ...
-
     @atomic
-    def __setitem_non_reactive(self, key: KT, value: VT) -> None:
-        ctx = self.__syncwave_ctx__
-        new_item = ctx.inner_type_adapter.validate_python(value)
-        self.__data[key] = new_item
-        ctx.on_change()
+    def __setitem__(self, key: KT, value: VT) -> None:
+        inner_ctx = self.__syncwave_ctx__.inner_ctx
+        on_change = self.__syncwave_ctx__.on_change
+        new_item = self.__syncwave_ctx__.inner_type_adapter.validate_python(value)
 
-    @atomic
-    def __setitem_reactive(self, key: KT, value: VT) -> None:
-        ctx = self.__syncwave_ctx__
-        new_item = ctx.inner_type_adapter.validate_python(value)
-        new_item.__syncwave_init__(ctx.inner_ctx)
-        if key not in self.__data:
+        # case 1: non-reactive content type
+        if inner_ctx is None:
             self.__data[key] = new_item
+        # case 2: fixed reactive content type
+        elif isinstance(inner_ctx, Context):
+            old_item = self.__data.get(key)
+            self.__update_reactive_item(key, old_item, new_item, inner_ctx)
+        # case 3: union content type
+        elif isinstance(inner_ctx, UnionCtx):
+            self.__update_union_item(key, old_item, new_item, inner_ctx)
         else:
-            self.__data[key].__syncwave_update__(new_item)
-        ctx.on_change()
+            raise TypeError("Invalid syncwave context.")
+        on_change()
 
     @atomic
-    def __setitem_mixed(self, key: KT, value: VT) -> None:
-        ctx = self.__syncwave_ctx__
-        new_item = ctx.inner_type_adapter.validate_python(value)
-        if isinstance(new_item, Reactive):
-            new_item.__syncwave_init__(ctx.inner_ctx)
-
-        if key not in self.__data:
-            self.__data[key] = new_item
-            ctx.on_change()
-            return
-
-        old_item = self.__data[key]
-
-        old_is_reactive = isinstance(old_item, Reactive)
-        safe_to_update = old_is_reactive and isinstance(new_item, type(old_item))
-
-        if safe_to_update:
-            old_item.__syncwave_update__(new_item)
-        else:
-            if old_is_reactive:
-                old_item.__syncwave_live__ = False
-            self.__data[key] = new_item
-        ctx.on_change()
-
-    def __delitem__(self, key: KT) -> None: ...
-
-    @atomic
-    def __delitem_non_reactive(self, key: KT) -> None:
-        del self.__data[key]
-        self.__syncwave_ctx__.on_change()
-
-    @atomic
-    def __delitem_reactive(self, key: KT) -> None:
-        old_item = self.__data.pop(key)
-        old_item.__syncwave_live__ = False
-        self.__syncwave_ctx__.on_change()
-
-    @atomic
-    def __delitem_mixed(self, key: KT) -> None:
+    def __delitem__(self, key: KT) -> None:
         old_item = self.__data.pop(key)
         if isinstance(old_item, Reactive):
             old_item.__syncwave_live__ = False
@@ -206,6 +126,29 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
     # __str__ to be implemented
     # __eq__ to be implemented?
     # __hash__ to be implemented?
+
+    def __update_reactive_item(self, k: KT, o: VT | None, n: VT, ctx: Context) -> None:
+        if o is not None:
+            o.__syncwave_update__(n)
+        else:
+            n.__syncwave_init__(ctx)
+            self.__data[k] = n
+
+    def __update_union_item(self, k: KT, o: VT | None, n: VT, u_ctx: UnionCtx) -> None:
+        old_is_reactive = isinstance(o, Reactive)
+        new_is_reactive = isinstance(n, Reactive)
+        same_type = type(o) is (new_type := type(n))
+
+        if old_is_reactive and new_is_reactive and same_type:
+            o.__syncwave_update__(n)
+        else:
+            if old_is_reactive:
+                o.__syncwave_live__ = False
+            if new_is_reactive:
+                if new_type not in u_ctx:
+                    raise TypeError("Invalid syncwave context.")
+                n.__syncwave_init__(u_ctx[new_type])
+            self.__data[k] = n
 
     @classmethod
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
