@@ -28,7 +28,7 @@ MT = TypeVar("MT", bound=SyncModelSupported)  # model type
 # --------------------------------- Static Contexts ---------------------------------- #
 
 
-@dataclass
+@dataclass(frozen=True)
 class PartialContext:
     tp: type[Reactive]
     type_adapter: TypeAdapter[Reactive]
@@ -37,7 +37,7 @@ class PartialContext:
 class UnionPCtx(dict[type[Reactive], PartialContext]): ...
 
 
-@dataclass
+@dataclass(frozen=True)
 class SyncDictPCtx(Generic[KT, VT], PartialContext):
     tp: type[SyncDict]
     type_adapter: TypeAdapter[SyncDict[KT, VT]]
@@ -46,7 +46,7 @@ class SyncDictPCtx(Generic[KT, VT], PartialContext):
     inner_type_adapter: TypeAdapter[VT]
 
 
-@dataclass
+@dataclass(frozen=True)
 class SyncListPCtx(Generic[VT], PartialContext):
     tp: type[SyncList]
     type_adapter: TypeAdapter[SyncList[VT]]
@@ -55,7 +55,7 @@ class SyncListPCtx(Generic[VT], PartialContext):
     inner_type_adapter: TypeAdapter[VT]
 
 
-@dataclass
+@dataclass(frozen=True)
 class SyncSetPCtx(Generic[VT], PartialContext):
     tp: type[SyncSet]
     type_adapter: TypeAdapter[SyncSet[VT]]
@@ -64,7 +64,7 @@ class SyncSetPCtx(Generic[VT], PartialContext):
     inner_type_adapter: TypeAdapter[VT]
 
 
-@dataclass
+@dataclass(frozen=True)
 class SyncModelPCtx(Generic[MT], PartialContext):
     tp: type[SyncModel]
     type_adapter: TypeAdapter[SyncModel[MT]]
@@ -116,7 +116,13 @@ def get_pctx(tp: Any, reactive_allowed: bool) -> PartialContext | UnionPCtx | No
         if not reactive_allowed:
             raise TypeError("Cannot break the reactivity chain.")
         if issubclass(origin, SyncModel):
-            pass  # TODO: implement
+            pctx = getattr(origin, "__syncwave_pctx__", None)
+            if pctx is None:
+                raise TypeError(
+                    f"'{origin.__name__}' is a SyncModel but has no partial context. "
+                    f"Ensure dependent models are made reactive first."
+                )
+            return pctx
         if issubclass(origin, SyncDict):
             return _get_sync_dict_pctx(tp)
         if issubclass(origin, SyncList):
