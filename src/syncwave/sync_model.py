@@ -3,14 +3,15 @@ from __future__ import annotations
 import dataclasses as dc
 from abc import ABCMeta
 from collections.abc import Mapping
+from dataclasses import dataclass
 from inspect import isclass
 from typing import Any, Generic, NoReturn, TypeVar, final
 
 from pydantic import BaseModel, RootModel, TypeAdapter, create_model
 from pydantic import dataclasses as pdc
 
-from .context import PartialContext, SyncModelCtx, SyncModelPCtx, UnionPCtx, get_pctx
-from .reactive import Reactive, atomic
+from .context import get_ctx
+from .reactive import Context, ContextMap, Reactive, StoreRef, atomic
 
 
 class SyncModelSupportedMeta(ABCMeta):
@@ -41,8 +42,9 @@ T = TypeVar("T", bound=SyncModelSupported)
 class SyncModel(Generic[T], Reactive):
     __syncwave_ctx__: SyncModelCtx[T]
 
-    def __syncwave_init__(self, context: SyncModelCtx[T]) -> None:
-        self.__syncwave_ctx__ = context
+    def __syncwave_init__(self, sref: StoreRef, ctx: SyncModelCtx[T]) -> None:
+        self.__syncwave_sref__ = sref
+        self.__syncwave_ctx__ = ctx
         self.__syncwave_live__ = True
 
 
@@ -74,14 +76,14 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
     if cls.model_config.get("frozen"):
         raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
 
-    fields_ctx: dict[str, PartialContext | UnionPCtx] = {}
+    fields_ctx: dict[str, Context | ContextMap] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     for name, field in cls.model_fields.items():
-        pctx = get_pctx(field.annotation, reactive_allowed=True)
-        if pctx is not None:
+        ctx = get_ctx(field.annotation, reactive_allowed=True)
+        if ctx is not None:
             if field.frozen:
                 raise TypeError(f"Field '{name}': frozen fields cannot be reactive.")
-            fields_ctx[name] = pctx
+            fields_ctx[name] = ctx
             fields_type_adapter[name] = TypeAdapter(field.annotation)
 
     original_setattr = cls.__setattr__
@@ -113,7 +115,10 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
                 if old_is_reactive:
                     old_value.__syncwave_live__ = False
                 if isinstance(new_value, Reactive):
-                    new_value.__syncwave_init__(ctx.fields_ctx[name])
+                    new_value.__syncwave_init__(
+                        self.__syncwave_sref__,
+                        ctx.fields_ctx[name],
+                    )
                 original_setattr(self, name, new_value)
 
     @atomic
@@ -123,7 +128,7 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
 
         if name not in ctx.fields_type_adapter:
             original_setattr(self, name, new_value)
-            ctx.on_change()
+            self.__syncwave_sref__.on_change()
             return
 
         new_value = ctx.fields_type_adapter[name].validate_python(new_value)
@@ -138,9 +143,12 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
             if old_is_reactive:
                 old_value.__syncwave_live__ = False
             if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(ctx.fields_ctx[name])
+                new_value.__syncwave_init__(
+                    self.__syncwave_sref__,
+                    ctx.fields_ctx[name],
+                )
             original_setattr(self, name, new_value)
-        ctx.on_change()
+        self.__syncwave_sref__.on_change()
 
     @atomic
     def new_delattr(self: SyncModel[T_BM], name: str) -> None:
@@ -149,7 +157,7 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
         if isinstance(old_value, Reactive):
             old_value.__syncwave_live__ = False
         original_delattr(self, name)
-        self.__syncwave_ctx__.on_change()
+        self.__syncwave_sref__.on_change()
 
     new_cls_dict = {
         "__syncwave_update__": syncwave_update,
@@ -160,13 +168,13 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
 
     new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
 
-    pctx = SyncModelPCtx(
+    ctx = SyncModelCtx(
         tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
         fields_ctx=fields_ctx,
         fields_type_adapter=fields_type_adapter,
     )
-    new_cls.__syncwave_pctx__ = pctx
+    new_cls.__syncwave_ctx__ = ctx
 
     return new_cls
 
@@ -175,14 +183,14 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
     if cls.model_config.get("frozen"):
         raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
 
-    fields_ctx: dict[str, PartialContext | UnionPCtx] = {}
+    fields_ctx: dict[str, Context | ContextMap] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     root_field = cls.model_fields["root"]
-    pctx = get_pctx(root_field.annotation, reactive_allowed=True)
-    if pctx is not None:
+    ctx = get_ctx(root_field.annotation, reactive_allowed=True)
+    if ctx is not None:
         if root_field.frozen:
             raise TypeError("Field 'root': frozen fields cannot be reactive.")
-        fields_ctx["root"] = pctx
+        fields_ctx["root"] = ctx
         fields_type_adapter["root"] = TypeAdapter(root_field.annotation)
 
     original_setattr = cls.__setattr__
@@ -212,7 +220,10 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
             if old_is_reactive:
                 old_value.__syncwave_live__ = False
             if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(ctx.fields_ctx["root"])
+                new_value.__syncwave_init__(
+                    self.__syncwave_sref__,
+                    ctx.fields_ctx["root"],
+                )
             original_setattr(self, "root", new_value)
 
     @atomic
@@ -220,7 +231,7 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
         ctx = self.__syncwave_ctx__
         if name != "root" or not ctx.fields_type_adapter:
             original_setattr(self, name, new_value)
-            ctx.on_change()
+            self.__syncwave_sref__.on_change()
             return
 
         old_value = self.root
@@ -236,9 +247,12 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
             if old_is_reactive:
                 old_value.__syncwave_live__ = False
             if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(ctx.fields_ctx["root"])
+                new_value.__syncwave_init__(
+                    self.__syncwave_sref__,
+                    ctx.fields_ctx["root"],
+                )
             original_setattr(self, "root", new_value)
-        ctx.on_change()
+        self.__syncwave_sref__.on_change()
 
     @atomic
     def new_delattr(self: SyncModel[T_RM], name: str) -> None:
@@ -247,7 +261,7 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
         if isinstance(old_value, Reactive):
             old_value.__syncwave_live__ = False
         original_delattr(self, name)
-        self.__syncwave_ctx__.on_change()
+        self.__syncwave_sref__.on_change()
 
     new_cls_dict = {
         "__syncwave_update__": syncwave_update,
@@ -258,13 +272,13 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
 
     new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
 
-    pctx = SyncModelPCtx(
+    ctx = SyncModelCtx(
         tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
         fields_ctx=fields_ctx,
         fields_type_adapter=fields_type_adapter,
     )
-    new_cls.__syncwave_pctx__ = pctx
+    new_cls.__syncwave_ctx__ = ctx
 
     return new_cls
 
@@ -276,14 +290,14 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
     if not pdc.is_pydantic_dataclass(cls):
         cls = pdc.dataclass(cls)
 
-    fields_ctx: dict[str, PartialContext | UnionPCtx] = {}
+    fields_ctx: dict[str, Context | ContextMap] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
     for name, field in cls.__pydantic_fields__.items():
-        pctx = get_pctx(field.annotation, reactive_allowed=True)
-        if pctx is not None:
+        ctx = get_ctx(field.annotation, reactive_allowed=True)
+        if ctx is not None:
             if field.frozen:
                 raise TypeError(f"Field '{name}': frozen fields cannot be reactive.")
-            fields_ctx[name] = pctx
+            fields_ctx[name] = ctx
             fields_type_adapter[name] = TypeAdapter(field.annotation)
 
     original_setattr = cls.__setattr__
@@ -315,7 +329,10 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
                 if old_is_reactive:
                     old_value.__syncwave_live__ = False
                 if isinstance(new_value, Reactive):
-                    new_value.__syncwave_init__(ctx.fields_ctx[name])
+                    new_value.__syncwave_init__(
+                        self.__syncwave_sref__,
+                        ctx.fields_ctx[name],
+                    )
                 original_setattr(self, name, new_value)
 
     @atomic
@@ -325,7 +342,7 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
 
         if name not in ctx.fields_type_adapter:
             original_setattr(self, name, new_value)
-            ctx.on_change()
+            self.__syncwave_sref__.on_change()
             return
 
         new_value = ctx.fields_type_adapter[name].validate_python(new_value)
@@ -340,9 +357,12 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
             if old_is_reactive:
                 old_value.__syncwave_live__ = False
             if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(ctx.fields_ctx[name])
+                new_value.__syncwave_init__(
+                    self.__syncwave_sref__,
+                    ctx.fields_ctx[name],
+                )
             original_setattr(self, name, new_value)
-        ctx.on_change()
+        self.__syncwave_sref__.on_change()
 
     @atomic
     def new_delattr(self: SyncModel[T_DC], name: str) -> None:
@@ -351,7 +371,7 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
         if isinstance(old_value, Reactive):
             old_value.__syncwave_live__ = False
         original_delattr(self, name)
-        self.__syncwave_ctx__.on_change()
+        self.__syncwave_sref__.on_change()
 
     new_cls_dict = {
         "__syncwave_update__": syncwave_update,
@@ -363,12 +383,20 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
     new_cls = type(cls_name, (cls, SyncModel), new_cls_dict)
     new_cls = pdc.dataclass(new_cls)
 
-    pctx = SyncModelPCtx(
+    ctx = SyncModelCtx(
         tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
         fields_ctx=fields_ctx,
         fields_type_adapter=fields_type_adapter,
     )
-    new_cls.__syncwave_pctx__ = pctx
+    new_cls.__syncwave_ctx__ = ctx
 
     return new_cls
+
+
+@dataclass(frozen=True)
+class SyncModelCtx(Generic[T], Context):
+    tp: type[SyncModel]
+    type_adapter: TypeAdapter[SyncModel[T]]
+    fields_ctx: dict[str, Context | ContextMap]
+    fields_type_adapter: dict[str, TypeAdapter[Any]]
