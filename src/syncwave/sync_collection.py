@@ -14,14 +14,15 @@ from collections.abc import (
     Sequence,
     Set,
 )
-from typing import Any, NoReturn, TypeVar, Union, final, get_args
+from dataclasses import dataclass
+from typing import Any, Generic, NoReturn, TypeVar, Union, final, get_args
 from typing_extensions import Self
 
 from pydantic import GetCoreSchemaHandler as Handler
+from pydantic import TypeAdapter
 from pydantic_core import core_schema as cs
 
-from .context import Context, SyncDictCtx, SyncListCtx, SyncSetCtx, UnionCtx
-from .reactive import Reactive, atomic
+from .reactive import Context, ContextMap, Reactive, StoreRef, atomic
 
 KT = TypeVar("KT", bound=Union[str, int, float, bool, None])
 VT = TypeVar("VT")
@@ -46,8 +47,9 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         self.__data = data
         return self
 
-    def __syncwave_init__(self, context: SyncDictCtx[KT, VT]) -> None:
-        self.__syncwave_ctx__ = context
+    def __syncwave_init__(self, sref: StoreRef, ctx: SyncDictCtx[KT, VT]) -> None:
+        self.__syncwave_sref__ = sref
+        self.__syncwave_ctx__ = ctx
         self.__syncwave_live__ = True
 
     def __syncwave_update__(self, new: Mapping[KT, VT]) -> None:
@@ -69,7 +71,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
                 old_item = self.__data.pop(key)
                 old_item.__syncwave_live__ = False
         # case 3: union content type
-        elif isinstance(inner_ctx, UnionCtx):
+        elif isinstance(inner_ctx, ContextMap):
             old_keys, new_keys = set(self.__data.keys()), set(new.__data.keys())
             # items to add and update
             for key in new_keys:
@@ -100,13 +102,13 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
             old_item = self.__data.get(key)
             self.__setitem_reactive(key, old_item, new_item, inner_ctx)
         # case 3: union content type
-        elif isinstance(inner_ctx, UnionCtx):
+        elif isinstance(inner_ctx, ContextMap):
             old_item = self.__data.get(key)
             self.__setitem_union(key, old_item, new_item, inner_ctx)
         else:
             raise TypeError("Invalid syncwave context.")
 
-        self.__syncwave_ctx__.on_change()
+        self.__syncwave_sref__.on_change()
 
     @atomic
     def __delitem__(self, key: KT) -> None:
@@ -114,7 +116,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         if isinstance(old_item, Reactive):
             old_item.__syncwave_live__ = False
 
-        self.__syncwave_ctx__.on_change()
+        self.__syncwave_sref__.on_change()
 
     @atomic
     def __iter__(self) -> Iterator[KT]:
@@ -134,10 +136,10 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         if o is not None:
             o.__syncwave_update__(n)
         else:
-            n.__syncwave_init__(ctx)
+            n.__syncwave_init__(self.__syncwave_sref__, ctx)
             self.__data[k] = n
 
-    def __setitem_union(self, k: KT, o: VT | None, n: VT, u_ctx: UnionCtx) -> None:
+    def __setitem_union(self, k: KT, o: VT | None, n: VT, u_ctx: ContextMap) -> None:
         old_is_reactive = isinstance(o, Reactive)
         new_is_reactive = isinstance(n, Reactive)
         same_type = type(o) is (new_type := type(n))
@@ -150,7 +152,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
             if new_is_reactive:
                 if new_type not in u_ctx:
                     raise TypeError("Invalid syncwave context.")
-                n.__syncwave_init__(u_ctx[new_type])
+                n.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
             self.__data[k] = n
 
     @classmethod
@@ -168,6 +170,14 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         return cs.union_schema([instance_schema, non_instance_schema])
 
 
+@dataclass(frozen=True)
+class SyncDictCtx(Generic[KT, VT], Context):
+    tp: type[SyncDict]
+    type_adapter: TypeAdapter[SyncDict[KT, VT]]
+    inner_ctx: Context | ContextMap | None
+    inner_type_adapter: TypeAdapter[VT]
+
+
 class SyncList(MutableSequence[VT], Reactive):
     __syncwave_ctx__: SyncListCtx[VT]
     __data: list[VT]
@@ -181,8 +191,9 @@ class SyncList(MutableSequence[VT], Reactive):
         self.__data = data
         return self
 
-    def __syncwave_init__(self, context: SyncListCtx[VT]) -> None:
-        self.__syncwave_ctx__ = context
+    def __syncwave_init__(self, sref: StoreRef, ctx: SyncListCtx[VT]) -> None:
+        self.__syncwave_sref__ = sref
+        self.__syncwave_ctx__ = ctx
         self.__syncwave_live__ = True
 
     def __syncwave_update__(self, new: Sequence[VT]) -> None:
@@ -203,7 +214,7 @@ class SyncList(MutableSequence[VT], Reactive):
             if new_len > old_len:
                 for i in range(old_len, new_len):
                     new_item = new.__data[i]
-                    new_item.__syncwave_init__(inner_ctx)
+                    new_item.__syncwave_init__(self.__syncwave_sref__, inner_ctx)
                     self.__data.append(new_item)
             # items to remove
             elif old_len > new_len:
@@ -211,7 +222,7 @@ class SyncList(MutableSequence[VT], Reactive):
                     old_item = self.__data.pop()
                     old_item.__syncwave_live__ = False
         # case 3: union content type
-        elif isinstance(inner_ctx, UnionCtx):
+        elif isinstance(inner_ctx, ContextMap):
             old_len, new_len = len(self.__data), len(new.__data)
             # items to update
             for i in range(min(old_len, new_len)):
@@ -225,7 +236,10 @@ class SyncList(MutableSequence[VT], Reactive):
                         new_type = type(new_item)
                         if new_type not in inner_ctx:
                             raise TypeError("Invalid syncwave context.")
-                        new_item.__syncwave_init__(inner_ctx[new_type])
+                        new_item.__syncwave_init__(
+                            self.__syncwave_sref__,
+                            inner_ctx[new_type],
+                        )
                     self.__data.append(new_item)
             # items to remove
             elif old_len > new_len:
@@ -252,13 +266,13 @@ class SyncList(MutableSequence[VT], Reactive):
         elif isinstance(inner_ctx, Context):
             self.__data[index].__syncwave_update__(new_item)
         # case 3: union content type
-        elif isinstance(inner_ctx, UnionCtx):
+        elif isinstance(inner_ctx, ContextMap):
             old_item = self.__data[index]
             self.__setitem_union(index, old_item, new_item, inner_ctx)
         else:
             raise TypeError("Invalid syncwave context.")
 
-        self.__syncwave_ctx__.on_change()
+        self.__syncwave_sref__.on_change()
 
     @atomic
     def __delitem__(self, index: int) -> None:
@@ -269,7 +283,7 @@ class SyncList(MutableSequence[VT], Reactive):
             del data_copy[index]
             self.__syncwave_update__(data_copy)
 
-        self.__syncwave_ctx__.on_change()
+        self.__syncwave_sref__.on_change()
 
     @atomic
     def __len__(self) -> int:
@@ -287,14 +301,14 @@ class SyncList(MutableSequence[VT], Reactive):
             data_copy.insert(index, new_item)
             self.__syncwave_update__(data_copy)
 
-        self.__syncwave_ctx__.on_change()
+        self.__syncwave_sref__.on_change()
 
     # __repr__ to be implemented
     # __str__ to be implemented
     # __eq__ to be implemented?
     # __hash__ to be implemented?
 
-    def __setitem_union(self, i: int, o: VT, n: VT, u_ctx: UnionCtx) -> None:
+    def __setitem_union(self, i: int, o: VT, n: VT, u_ctx: ContextMap) -> None:
         old_is_reactive = isinstance(o, Reactive)
         new_is_reactive = isinstance(n, Reactive)
         same_type = type(o) is (new_type := type(n))
@@ -307,7 +321,7 @@ class SyncList(MutableSequence[VT], Reactive):
             if new_is_reactive:
                 if new_type not in u_ctx:
                     raise TypeError("Invalid syncwave context.")
-                n.__syncwave_init__(u_ctx[new_type])
+                n.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
             self.__data[i] = n
 
     @classmethod
@@ -325,6 +339,14 @@ class SyncList(MutableSequence[VT], Reactive):
         return cs.union_schema([instance_schema, non_instance_schema])
 
 
+@dataclass(frozen=True)
+class SyncListCtx(Generic[VT], Context):
+    tp: type[SyncList]
+    type_adapter: TypeAdapter[SyncList[VT]]
+    inner_ctx: Context | ContextMap | None
+    inner_type_adapter: TypeAdapter[VT]
+
+
 class SyncSet(MutableSet[VT], Reactive):
     # SyncSet cannot hold reactive items because a reactive item is mutable
     __syncwave_ctx__: SyncSetCtx[VT]
@@ -339,8 +361,9 @@ class SyncSet(MutableSet[VT], Reactive):
         self.__data = data
         return self
 
-    def __syncwave_init__(self, context: SyncSetCtx[VT]) -> None:
-        self.__syncwave_ctx__ = context
+    def __syncwave_init__(self, sref: StoreRef, ctx: SyncSetCtx[VT]) -> None:
+        self.__syncwave_sref__ = sref
+        self.__syncwave_ctx__ = ctx
         self.__syncwave_live__ = True
 
     def __syncwave_update__(self, new: Set[VT]) -> None:
@@ -364,13 +387,13 @@ class SyncSet(MutableSet[VT], Reactive):
     def add(self, value: VT) -> None:
         new_item = self.__syncwave_ctx__.inner_type_adapter.validate_python(value)
         self.__data.add(new_item)
-        self.__syncwave_ctx__.on_change()
+        self.__syncwave_sref__.on_change()
 
     @atomic
     def discard(self, value: VT) -> None:
         if value in self.__data:
             self.__data.discard(value)
-            self.__syncwave_ctx__.on_change()
+            self.__syncwave_sref__.on_change()
 
     # __repr__ to be implemented
     # __str__ to be implemented
@@ -390,6 +413,14 @@ class SyncSet(MutableSet[VT], Reactive):
         )
         instance_schema = cs.is_instance_schema(cls)
         return cs.union_schema([instance_schema, non_instance_schema])
+
+
+@dataclass(frozen=True)
+class SyncSetCtx(Generic[VT], Context):
+    tp: type[SyncSet]
+    type_adapter: TypeAdapter[SyncSet[VT]]
+    inner_ctx: None  # never holds reactive items
+    inner_type_adapter: TypeAdapter[VT]
 
 
 SyncCollection.register(SyncDict)
