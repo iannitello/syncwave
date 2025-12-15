@@ -5,7 +5,7 @@ from abc import ABCMeta
 from collections.abc import Mapping
 from dataclasses import dataclass
 from inspect import isclass
-from typing import Any, Generic, NoReturn, TypeVar, final
+from typing import Any, Callable, Generic, NoReturn, TypeVar, final
 
 from pydantic import BaseModel, RootModel, TypeAdapter, create_model
 from pydantic import dataclasses as pdc
@@ -37,6 +37,9 @@ class SyncModelSupported(metaclass=SyncModelSupportedMeta):
 
 
 T = TypeVar("T", bound=SyncModelSupported)
+T_BM = TypeVar("T_BM", bound=BaseModel)
+T_RM = TypeVar("T_RM", bound=RootModel)
+T_DC = TypeVar("T_DC")  # dataclass
 
 
 class SyncModel(Generic[T], Reactive):
@@ -46,11 +49,6 @@ class SyncModel(Generic[T], Reactive):
         self.__syncwave_sref__ = sref
         self.__syncwave_ctx__ = ctx
         self.__syncwave_live__ = True
-
-
-T_BM = TypeVar("T_BM", bound=BaseModel)
-T_RM = TypeVar("T_RM", bound=RootModel)
-T_DC = TypeVar("T_DC")  # dataclass
 
 
 def create_sync_model(cls: type[T], cls_name: str | None = None) -> type[SyncModel[T]]:
@@ -78,85 +76,79 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
 
     fields_ctx: dict[str, Context | ContextMap] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
+
     for name, field in cls.model_fields.items():
-        ctx = get_ctx(field.annotation, reactive_allowed=True)
-        if ctx is not None:
+        field_ctx = get_ctx(field.annotation, reactive_allowed=True)
+        if field_ctx is not None:
             if field.frozen:
                 raise TypeError(f"Field '{name}': frozen fields cannot be reactive.")
-            fields_ctx[name] = ctx
-            fields_type_adapter[name] = TypeAdapter(field.annotation)
+            fields_ctx[name] = field_ctx
+        fields_type_adapter[name] = TypeAdapter(field.annotation)
 
-    original_setattr = cls.__setattr__
-    original_delattr = cls.__delattr__
+    o_setattr = cls.__setattr__
+    o_delattr = cls.__delattr__
 
     def syncwave_update(
         self: SyncModel[T_BM],
         new: SyncModel[T_BM] | T_BM | Mapping[str, Any],
     ) -> None:
-        ctx = self.__syncwave_ctx__
-        new = ctx.type_adapter.validate_python(new)
+        new = self.__syncwave_ctx__.type_adapter.validate_python(new)
 
         for name in cls.model_fields:
+            field_ctx = self.__syncwave_ctx__.fields_ctx.get(name)
             new_value = getattr(new, name, None)
 
-            if name not in ctx.fields_type_adapter:
-                original_setattr(self, name, new_value)
-                continue
-
-            old_value = getattr(self, name, None)
-
-            old_is_reactive = isinstance(old_value, Reactive)
-            safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
-
-            if safe_to_update:
+            # case 1: non-reactive content type
+            if field_ctx is None:
+                o_setattr(self, name, new_value)
+            # case 2: fixed reactive content type
+            elif isinstance(field_ctx, Context):
+                old_value = getattr(self, name)  # can't be None
                 old_value.__syncwave_update__(new_value)
-                original_setattr(self, name, old_value)
+                o_setattr(self, name, old_value)
+            # case 3: union content type
+            elif isinstance(field_ctx, ContextMap):
+                old_value = getattr(self, name, None)
+                _setattr_union(self, name, old_value, new_value, field_ctx, o_setattr)
             else:
-                if old_is_reactive:
-                    old_value.__syncwave_live__ = False
-                if isinstance(new_value, Reactive):
-                    new_value.__syncwave_init__(
-                        self.__syncwave_sref__,
-                        ctx.fields_ctx[name],
-                    )
-                original_setattr(self, name, new_value)
+                raise TypeError("Internal Error: Invalid syncwave context.")
 
     @atomic
     def new_setattr(self: SyncModel[T_BM], name: str, new_value: Any) -> None:
-        ctx = self.__syncwave_ctx__
-        old_value = getattr(self, name, None)
-
-        if name not in ctx.fields_type_adapter:
-            original_setattr(self, name, new_value)
+        field_ta = self.__syncwave_ctx__.fields_type_adapter.get(name)
+        # case for a non-model field
+        if field_ta is None:
+            o_setattr(self, name, new_value)
             self.__syncwave_sref__.on_change()
             return
 
-        new_value = ctx.fields_type_adapter[name].validate_python(new_value)
+        field_ctx = self.__syncwave_ctx__.fields_ctx.get(name)
+        new_value = field_ta.validate_python(new_value)
 
-        old_is_reactive = isinstance(old_value, Reactive)
-        safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
-
-        if safe_to_update:
+        # case 1: non-reactive content type
+        if field_ctx is None:
+            o_setattr(self, name, new_value)
+        # case 2: fixed reactive content type
+        elif isinstance(field_ctx, Context):
+            old_value = getattr(self, name)  # can't be None
             old_value.__syncwave_update__(new_value)
-            original_setattr(self, name, old_value)
+            o_setattr(self, name, old_value)
+        # case 3: union content type
+        elif isinstance(field_ctx, ContextMap):
+            old_value = getattr(self, name, None)
+            _setattr_union(self, name, old_value, new_value, field_ctx, o_setattr)
         else:
-            if old_is_reactive:
-                old_value.__syncwave_live__ = False
-            if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(
-                    self.__syncwave_sref__,
-                    ctx.fields_ctx[name],
-                )
-            original_setattr(self, name, new_value)
+            raise TypeError("Internal Error: Invalid syncwave context.")
+
         self.__syncwave_sref__.on_change()
 
     @atomic
     def new_delattr(self: SyncModel[T_BM], name: str) -> None:
         old_value = getattr(self, name, None)
-
         if isinstance(old_value, Reactive):
             old_value.__syncwave_live__ = False
-        original_delattr(self, name)
+        o_delattr(self, name)
+
         self.__syncwave_sref__.on_change()
 
     new_cls_dict = {
@@ -168,13 +160,12 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
 
     new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
 
-    ctx = SyncModelCtx(
+    new_cls.__syncwave_ctx__ = SyncModelCtx(
         tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
         fields_ctx=fields_ctx,
         fields_type_adapter=fields_type_adapter,
     )
-    new_cls.__syncwave_ctx__ = ctx
 
     return new_cls
 
@@ -185,82 +176,77 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
 
     fields_ctx: dict[str, Context | ContextMap] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
+
     root_field = cls.model_fields["root"]
-    ctx = get_ctx(root_field.annotation, reactive_allowed=True)
-    if ctx is not None:
+    field_ctx = get_ctx(root_field.annotation, reactive_allowed=True)
+    if field_ctx is not None:
         if root_field.frozen:
             raise TypeError("Field 'root': frozen fields cannot be reactive.")
-        fields_ctx["root"] = ctx
-        fields_type_adapter["root"] = TypeAdapter(root_field.annotation)
+        fields_ctx["root"] = field_ctx
+    fields_type_adapter["root"] = TypeAdapter(root_field.annotation)
 
-    original_setattr = cls.__setattr__
-    original_delattr = cls.__delattr__
+    o_setattr = cls.__setattr__
+    o_delattr = cls.__delattr__
 
     def syncwave_update(
         self: SyncModel[T_RM],
         new: SyncModel[T_RM] | T_RM | Any,
     ) -> None:
-        ctx = self.__syncwave_ctx__
-        new = ctx.type_adapter.validate_python(new)
+        new = self.__syncwave_ctx__.type_adapter.validate_python(new)
+
+        field_ctx = self.__syncwave_ctx__.fields_ctx.get("root")
         new_value = new.root
 
-        if not ctx.fields_type_adapter:
-            original_setattr(self, "root", new_value)
-            return
-
-        old_value = self.root
-
-        old_is_reactive = isinstance(old_value, Reactive)
-        safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
-
-        if safe_to_update:
+        # case 1: non-reactive content type
+        if field_ctx is None:
+            o_setattr(self, "root", new_value)
+        # case 2: fixed reactive content type
+        elif isinstance(field_ctx, Context):
+            old_value = self.root  # can't be None
             old_value.__syncwave_update__(new_value)
-            original_setattr(self, "root", old_value)
+            o_setattr(self, "root", old_value)
+        # case 3: union content type
+        elif isinstance(field_ctx, ContextMap):
+            old_value = getattr(self, "root", None)
+            _setattr_union(self, "root", old_value, new_value, field_ctx, o_setattr)
         else:
-            if old_is_reactive:
-                old_value.__syncwave_live__ = False
-            if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(
-                    self.__syncwave_sref__,
-                    ctx.fields_ctx["root"],
-                )
-            original_setattr(self, "root", new_value)
+            raise TypeError("Internal Error: Invalid syncwave context.")
 
     @atomic
     def new_setattr(self: SyncModel[T_RM], name: str, new_value: Any) -> None:
-        ctx = self.__syncwave_ctx__
-        if name != "root" or not ctx.fields_type_adapter:
-            original_setattr(self, name, new_value)
+        if name != "root":
+            o_setattr(self, name, new_value)
             self.__syncwave_sref__.on_change()
             return
 
-        old_value = self.root
-        new_value = ctx.fields_type_adapter["root"].validate_python(new_value)
+        field_ctx = self.__syncwave_ctx__.fields_ctx.get("root")
+        root_ta = self.__syncwave_ctx__.fields_type_adapter["root"]
+        new_value = root_ta.validate_python(new_value)
 
-        old_is_reactive = isinstance(old_value, Reactive)
-        safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
-
-        if safe_to_update:
+        # case 1: non-reactive content type
+        if field_ctx is None:
+            o_setattr(self, "root", new_value)
+        # case 2: fixed reactive content type
+        elif isinstance(field_ctx, Context):
+            old_value = self.root  # can't be None
             old_value.__syncwave_update__(new_value)
-            original_setattr(self, "root", old_value)
+            o_setattr(self, "root", old_value)
+        # case 3: union content type
+        elif isinstance(field_ctx, ContextMap):
+            old_value = getattr(self, "root", None)
+            _setattr_union(self, "root", old_value, new_value, field_ctx, o_setattr)
         else:
-            if old_is_reactive:
-                old_value.__syncwave_live__ = False
-            if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(
-                    self.__syncwave_sref__,
-                    ctx.fields_ctx["root"],
-                )
-            original_setattr(self, "root", new_value)
+            raise TypeError("Internal Error: Invalid syncwave context.")
+
         self.__syncwave_sref__.on_change()
 
     @atomic
     def new_delattr(self: SyncModel[T_RM], name: str) -> None:
         old_value = getattr(self, name, None)
-
         if isinstance(old_value, Reactive):
             old_value.__syncwave_live__ = False
-        original_delattr(self, name)
+        o_delattr(self, name)
+
         self.__syncwave_sref__.on_change()
 
     new_cls_dict = {
@@ -272,13 +258,12 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
 
     new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
 
-    ctx = SyncModelCtx(
+    new_cls.__syncwave_ctx__ = SyncModelCtx(
         tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
         fields_ctx=fields_ctx,
         fields_type_adapter=fields_type_adapter,
     )
-    new_cls.__syncwave_ctx__ = ctx
 
     return new_cls
 
@@ -292,85 +277,79 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
 
     fields_ctx: dict[str, Context | ContextMap] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
+
     for name, field in cls.__pydantic_fields__.items():
-        ctx = get_ctx(field.annotation, reactive_allowed=True)
-        if ctx is not None:
+        field_ctx = get_ctx(field.annotation, reactive_allowed=True)
+        if field_ctx is not None:
             if field.frozen:
                 raise TypeError(f"Field '{name}': frozen fields cannot be reactive.")
-            fields_ctx[name] = ctx
-            fields_type_adapter[name] = TypeAdapter(field.annotation)
+            fields_ctx[name] = field_ctx
+        fields_type_adapter[name] = TypeAdapter(field.annotation)
 
-    original_setattr = cls.__setattr__
-    original_delattr = cls.__delattr__
+    o_setattr = cls.__setattr__
+    o_delattr = cls.__delattr__
 
     def syncwave_update(
         self: SyncModel[T_DC],
         new: SyncModel[T_DC] | T_DC | Mapping[str, Any],
     ) -> None:
-        ctx = self.__syncwave_ctx__
-        new = ctx.type_adapter.validate_python(new)
+        new = self.__syncwave_ctx__.type_adapter.validate_python(new)
 
         for name in cls.__pydantic_fields__:
+            field_ctx = self.__syncwave_ctx__.fields_ctx.get(name)
             new_value = getattr(new, name, None)
 
-            if name not in ctx.fields_type_adapter:
-                original_setattr(self, name, new_value)
-                continue
-
-            old_value = getattr(self, name, None)
-
-            old_is_reactive = isinstance(old_value, Reactive)
-            safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
-
-            if safe_to_update:
+            # case 1: non-reactive content type
+            if field_ctx is None:
+                o_setattr(self, name, new_value)
+            # case 2: fixed reactive content type
+            elif isinstance(field_ctx, Context):
+                old_value = getattr(self, name)  # can't be None
                 old_value.__syncwave_update__(new_value)
-                original_setattr(self, name, old_value)
+                o_setattr(self, name, old_value)
+            # case 3: union content type
+            elif isinstance(field_ctx, ContextMap):
+                old_value = getattr(self, name, None)
+                _setattr_union(self, name, old_value, new_value, field_ctx, o_setattr)
             else:
-                if old_is_reactive:
-                    old_value.__syncwave_live__ = False
-                if isinstance(new_value, Reactive):
-                    new_value.__syncwave_init__(
-                        self.__syncwave_sref__,
-                        ctx.fields_ctx[name],
-                    )
-                original_setattr(self, name, new_value)
+                raise TypeError("Internal Error: Invalid syncwave context.")
 
     @atomic
     def new_setattr(self: SyncModel[T_DC], name: str, new_value: Any) -> None:
-        ctx = self.__syncwave_ctx__
-        old_value = getattr(self, name, None)
-
-        if name not in ctx.fields_type_adapter:
-            original_setattr(self, name, new_value)
+        field_ta = self.__syncwave_ctx__.fields_type_adapter.get(name)
+        # case for a non-model field
+        if field_ta is None:
+            o_setattr(self, name, new_value)
             self.__syncwave_sref__.on_change()
             return
 
-        new_value = ctx.fields_type_adapter[name].validate_python(new_value)
+        field_ctx = self.__syncwave_ctx__.fields_ctx.get(name)
+        new_value = field_ta.validate_python(new_value)
 
-        old_is_reactive = isinstance(old_value, Reactive)
-        safe_to_update = old_is_reactive and isinstance(new_value, type(old_value))
-
-        if safe_to_update:
+        # case 1: non-reactive content type
+        if field_ctx is None:
+            o_setattr(self, name, new_value)
+        # case 2: fixed reactive content type
+        elif isinstance(field_ctx, Context):
+            old_value = getattr(self, name)  # can't be None
             old_value.__syncwave_update__(new_value)
-            original_setattr(self, name, old_value)
+            o_setattr(self, name, old_value)
+        # case 3: union content type
+        elif isinstance(field_ctx, ContextMap):
+            old_value = getattr(self, name, None)
+            _setattr_union(self, name, old_value, new_value, field_ctx, o_setattr)
         else:
-            if old_is_reactive:
-                old_value.__syncwave_live__ = False
-            if isinstance(new_value, Reactive):
-                new_value.__syncwave_init__(
-                    self.__syncwave_sref__,
-                    ctx.fields_ctx[name],
-                )
-            original_setattr(self, name, new_value)
+            raise TypeError("Internal Error: Invalid syncwave context.")
+
         self.__syncwave_sref__.on_change()
 
     @atomic
     def new_delattr(self: SyncModel[T_DC], name: str) -> None:
         old_value = getattr(self, name, None)
-
         if isinstance(old_value, Reactive):
             old_value.__syncwave_live__ = False
-        original_delattr(self, name)
+        o_delattr(self, name)
+
         self.__syncwave_sref__.on_change()
 
     new_cls_dict = {
@@ -383,13 +362,12 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
     new_cls = type(cls_name, (cls, SyncModel), new_cls_dict)
     new_cls = pdc.dataclass(new_cls)
 
-    ctx = SyncModelCtx(
+    new_cls.__syncwave_ctx__ = SyncModelCtx(
         tp=new_cls,
         type_adapter=TypeAdapter(new_cls),
         fields_ctx=fields_ctx,
         fields_type_adapter=fields_type_adapter,
     )
-    new_cls.__syncwave_ctx__ = ctx
 
     return new_cls
 
@@ -400,3 +378,28 @@ class SyncModelCtx(Generic[T], Context):
     type_adapter: TypeAdapter[SyncModel[T]]
     fields_ctx: dict[str, Context | ContextMap]
     fields_type_adapter: dict[str, TypeAdapter[Any]]
+
+
+def _setattr_union(
+    self: SyncModel[T],
+    field_name: str,
+    old_value: Any,
+    new_value: Any,
+    u_ctx: ContextMap,
+    original_setattr: Callable[[Any, Any, Any], None],
+) -> None:
+    old_is_reactive = isinstance(old_value, Reactive)
+    new_is_reactive = isinstance(new_value, Reactive)
+    same_type = type(old_value) is (new_type := type(new_value))
+
+    if old_is_reactive and new_is_reactive and same_type:
+        old_value.__syncwave_update__(new_value)
+        original_setattr(self, field_name, old_value)
+    else:
+        if old_is_reactive:
+            old_value.__syncwave_live__ = False
+        if new_is_reactive:
+            if new_type not in u_ctx:
+                raise TypeError("Internal Error: Invalid syncwave context.")
+            new_value.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
+        original_setattr(self, field_name, new_value)
