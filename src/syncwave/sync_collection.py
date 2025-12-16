@@ -34,6 +34,14 @@ class SyncCollection(Reactive):
         raise TypeError("SyncCollection cannot be subclassed.")
 
 
+@dataclass(frozen=True)
+class SyncDictCtx(Generic[KT, VT], Context):
+    tp: type[SyncDict]
+    type_adapter: TypeAdapter[SyncDict[KT, VT]]
+    inner_ctx: Context | ContextMap | None
+    inner_type_adapter: TypeAdapter[VT]
+
+
 class SyncDict(MutableMapping[KT, VT], Reactive):
     __syncwave_ctx__: SyncDictCtx[KT, VT]
     __data: dict[KT, VT]
@@ -171,9 +179,9 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
 
 
 @dataclass(frozen=True)
-class SyncDictCtx(Generic[KT, VT], Context):
-    tp: type[SyncDict]
-    type_adapter: TypeAdapter[SyncDict[KT, VT]]
+class SyncListCtx(Generic[VT], Context):
+    tp: type[SyncList]
+    type_adapter: TypeAdapter[SyncList[VT]]
     inner_ctx: Context | ContextMap | None
     inner_type_adapter: TypeAdapter[VT]
 
@@ -340,10 +348,10 @@ class SyncList(MutableSequence[VT], Reactive):
 
 
 @dataclass(frozen=True)
-class SyncListCtx(Generic[VT], Context):
-    tp: type[SyncList]
-    type_adapter: TypeAdapter[SyncList[VT]]
-    inner_ctx: Context | ContextMap | None
+class SyncSetCtx(Generic[VT], Context):
+    tp: type[SyncSet]
+    type_adapter: TypeAdapter[SyncSet[VT]]
+    inner_ctx: None  # never holds reactive items
     inner_type_adapter: TypeAdapter[VT]
 
 
@@ -413,14 +421,6 @@ class SyncSet(MutableSet[VT], Reactive):
         )
         instance_schema = cs.is_instance_schema(cls)
         return cs.union_schema([instance_schema, non_instance_schema])
-
-
-@dataclass(frozen=True)
-class SyncSetCtx(Generic[VT], Context):
-    tp: type[SyncSet]
-    type_adapter: TypeAdapter[SyncSet[VT]]
-    inner_ctx: None  # never holds reactive items
-    inner_type_adapter: TypeAdapter[VT]
 
 
 SyncCollection.register(SyncDict)

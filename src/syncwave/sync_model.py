@@ -41,10 +41,21 @@ T_RM = TypeVar("T_RM", bound=RootModel)
 T_DC = TypeVar("T_DC")  # dataclass
 
 
+@dataclass(frozen=True)
+class SyncModelCtx(Generic[T], Context):
+    tp: type[SyncModel]
+    type_adapter: TypeAdapter[SyncModel[T]]
+    fields_ctx: dict[str, Context | ContextMap]
+    fields_type_adapter: dict[str, TypeAdapter[Any]]
+
+
 class SyncModel(Generic[T], Reactive):
     __syncwave_ctx__: SyncModelCtx[T]
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncModelCtx[T]) -> None:
+        if self.__class__.__syncwave_ctx__ is not ctx:
+            raise TypeError("Internal Error: Invalid syncwave context.")
+
         self.__syncwave_sref__ = sref
         self.__syncwave_ctx__ = ctx
         self.__syncwave_live__ = True
@@ -375,14 +386,6 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
     )
 
     return new_cls
-
-
-@dataclass(frozen=True)
-class SyncModelCtx(Generic[T], Context):
-    tp: type[SyncModel]
-    type_adapter: TypeAdapter[SyncModel[T]]
-    fields_ctx: dict[str, Context | ContextMap]
-    fields_type_adapter: dict[str, TypeAdapter[Any]]
 
 
 def _setattr_union(
