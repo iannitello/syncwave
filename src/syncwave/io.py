@@ -6,14 +6,14 @@ import sys
 from pathlib import Path
 from tempfile import mkstemp
 from threading import Lock, Timer
-from typing import Any, Callable, Final
+from typing import Any, Final
 
+from pydantic import TypeAdapter
 from pydantic_core import from_json, to_json
 
 from .watcher import watcher
 
-JSONData = Any
-DataProvider = Callable[[], JSONData]
+PyObj = Any  # any Python object that can be serialized to JSON by Pydantic
 
 
 class _IO:
@@ -24,7 +24,7 @@ class _IO:
     def __init__(self) -> None:
         self._lock = Lock()
         self._debounce_timers: dict[Path, Timer] = {}
-        self._pending_data_providers: dict[Path, DataProvider] = {}
+        self._pending_values: dict[Path, PyObj] = {}
 
     @staticmethod
     def sanitize_path(path: Path | str) -> Path:
@@ -65,56 +65,56 @@ class _IO:
         except OSError as e:
             raise OSError(f"Unable to create file '{path}'.") from e
 
-    def init_json(self, path: Path, default: DataProvider | None) -> None:
+    def init_json(self, path: Path, default_value: PyObj = None) -> None:
         self.create_file(path)
         if path.stat().st_size == 0:
-            if default is not None:
-                self._atomic_write(path, default())
+            if default_value is not None:
+                self._atomic_write(path, default_value)
             return
         try:
-            self._read_json(path)
+            from_json(path.read_text(encoding=self.ENCODING))
         except ValueError as e:
             raise OSError(f"File '{path}' exists but is not a valid JSON file.") from e
 
-    def json_dumps(self, data: JSONData) -> str:
-        return to_json(data, **self.DUMPS_CONFIG).decode(self.ENCODING)
+    def json_dumps(self, value: PyObj) -> str:
+        return to_json(value, **self.DUMPS_CONFIG).decode(self.ENCODING)
 
-    def read_json(self, path: Path) -> JSONData:
+    def read_json(self, path: Path, type_adapter: TypeAdapter | None = None) -> PyObj:
+        p_data: str | None = None  # pending data
         with self._lock:
-            if path in self._pending_data_providers:
-                return self._pending_data_providers[path]()
-        return self._read_json(path)
+            if path in self._pending_values:
+                p_data = self.json_dumps(self._pending_values[path])
+        data = path.read_text(encoding=self.ENCODING) if p_data is None else p_data
+        if type_adapter is None:
+            return from_json(data)
+        return type_adapter.validate_json(data)
 
-    def _read_json(self, path: Path) -> JSONData:
-        return from_json(path.read_text(encoding=self.ENCODING))
-
-    def write_json(self, path: Path, data_provider: DataProvider) -> None:
+    def write_json(self, path: Path, value: PyObj) -> None:
         with self._lock:
             if path in self._debounce_timers:
                 self._debounce_timers[path].cancel()
 
-            self._pending_data_providers[path] = data_provider
+            self._pending_values[path] = value
 
             timer = Timer(
                 self.DEBOUNCE_WINDOW,
                 self._scheduled_write,
-                args=(path, data_provider),
+                args=(path, value),
             )
             self._debounce_timers[path] = timer
             timer.start()
 
-    def _scheduled_write(self, path: Path, data_provider: DataProvider) -> None:
+    def _scheduled_write(self, path: Path, value: PyObj) -> None:
         with self._lock:
             self._debounce_timers.pop(path, None)
-            self._pending_data_providers.pop(path, None)
-        self._atomic_write(path, data_provider())
+            self._pending_values.pop(path, None)
+        self._atomic_write(path, value)
 
-    def _atomic_write(self, path: Path, data: JSONData) -> None:
+    def _atomic_write(self, path: Path, value: PyObj) -> None:
         fd, tmp_path = mkstemp(prefix=watcher.TMP_FILE_PREFIX, dir=path.parent)
         try:
-            json_str = to_json(data, **self.DUMPS_CONFIG).decode(self.ENCODING)
             with os.fdopen(fd, "w", encoding=self.ENCODING) as tmp_file:
-                tmp_file.write(json_str)
+                tmp_file.write(self.json_dumps(value))
                 tmp_file.write("\n")
                 tmp_file.flush()
                 os.fsync(tmp_file.fileno())
