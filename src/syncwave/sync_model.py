@@ -60,6 +60,23 @@ class SyncModel(Generic[T], Reactive):
         self.__syncwave_ctx__ = ctx
         self.__syncwave_live__ = True
 
+        for name, field_ctx in ctx.fields_ctx.items():
+            value = getattr(self, name, None)
+            # case 1: non-reactive content type
+            # skipped since fields_ctx only contains reactive fields
+            # case 2: fixed reactive content type
+            if isinstance(field_ctx, Context):
+                value.__syncwave_init__(sref, field_ctx)
+            # case 3: union content type
+            elif isinstance(field_ctx, ContextMap):
+                if isinstance(value, Reactive):
+                    value_type = type(value)
+                    if value_type not in field_ctx:
+                        raise TypeError("Internal Error: Invalid syncwave context.")
+                    value.__syncwave_init__(sref, field_ctx[value_type])
+            else:
+                raise TypeError("Internal Error: Invalid syncwave context.")
+
     def __syncwave_kill__(self) -> None:
         for name in self.__syncwave_ctx__.fields_ctx:
             value = getattr(self, name, None)

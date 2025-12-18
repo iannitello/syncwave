@@ -60,6 +60,31 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         self.__syncwave_ctx__ = ctx
         self.__syncwave_live__ = True
 
+        inner_ctx = ctx.inner_ctx
+        # case 1: non-reactive content type
+        if inner_ctx is None:
+            pass
+        # case 2: fixed reactive content type
+        elif isinstance(inner_ctx, Context):
+            for item in self.__data.values():
+                item.__syncwave_init__(sref, inner_ctx)
+        # case 3: union content type
+        elif isinstance(inner_ctx, ContextMap):
+            for item in self.__data.values():
+                if isinstance(item, Reactive):
+                    item_type = type(item)
+                    if item_type not in inner_ctx:
+                        raise TypeError("Internal Error: Invalid syncwave context.")
+                    item.__syncwave_init__(sref, inner_ctx[item_type])
+        else:
+            raise TypeError("Internal Error: Invalid syncwave context.")
+
+    def __syncwave_kill__(self) -> None:
+        for item in self.__data.values():
+            if isinstance(item, Reactive):
+                item.__syncwave_kill__()
+        self.__syncwave_live__ = False
+
     def __syncwave_update__(self, new: Mapping[KT, VT]) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         new = self.__syncwave_ctx__.type_adapter.validate_python(new)
@@ -92,12 +117,6 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
                     old_item.__syncwave_kill__()
         else:
             raise TypeError("Internal Error: Invalid syncwave context.")
-
-    def __syncwave_kill__(self) -> None:
-        for item in self.__data.values():
-            if isinstance(item, Reactive):
-                item.__syncwave_kill__()
-        self.__syncwave_live__ = False
 
     @atomic
     def __getitem__(self, key: KT) -> VT:
@@ -210,6 +229,31 @@ class SyncList(MutableSequence[VT], Reactive):
         self.__syncwave_ctx__ = ctx
         self.__syncwave_live__ = True
 
+        inner_ctx = ctx.inner_ctx
+        # case 1: non-reactive content type
+        if inner_ctx is None:
+            pass
+        # case 2: fixed reactive content type
+        elif isinstance(inner_ctx, Context):
+            for item in self.__data:
+                item.__syncwave_init__(sref, inner_ctx)
+        # case 3: union content type
+        elif isinstance(inner_ctx, ContextMap):
+            for item in self.__data:
+                if isinstance(item, Reactive):
+                    item_type = type(item)
+                    if item_type not in inner_ctx:
+                        raise TypeError("Internal Error: Invalid syncwave context.")
+                    item.__syncwave_init__(sref, inner_ctx[item_type])
+        else:
+            raise TypeError("Internal Error: Invalid syncwave context.")
+
+    def __syncwave_kill__(self) -> None:
+        for item in self.__data:
+            if isinstance(item, Reactive):
+                item.__syncwave_kill__()
+        self.__syncwave_live__ = False
+
     def __syncwave_update__(self, new: Sequence[VT]) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         new = self.__syncwave_ctx__.type_adapter.validate_python(new)
@@ -263,12 +307,6 @@ class SyncList(MutableSequence[VT], Reactive):
                         old_item.__syncwave_kill__()
         else:
             raise TypeError("Internal Error: Invalid syncwave context.")
-
-    def __syncwave_kill__(self) -> None:
-        for item in self.__data:
-            if isinstance(item, Reactive):
-                item.__syncwave_kill__()
-        self.__syncwave_live__ = False
 
     @atomic
     def __getitem__(self, index: int) -> VT:
@@ -385,14 +423,15 @@ class SyncSet(MutableSet[VT], Reactive):
         self.__syncwave_sref__ = sref
         self.__syncwave_ctx__ = ctx
         self.__syncwave_live__ = True
+        # no need to loop through items since set can't hold reactive items
+
+    def __syncwave_kill__(self) -> None:
+        # no need to loop through items since set can't hold reactive items
+        self.__syncwave_live__ = False
 
     def __syncwave_update__(self, new: Set[VT]) -> None:
         new = self.__syncwave_ctx__.type_adapter.validate_python(new)
         self.__data = new.__data
-
-    def __syncwave_kill__(self) -> None:
-        # can't hold reactive items
-        self.__syncwave_live__ = False
 
     @atomic
     def __contains__(self, value: object) -> bool:
