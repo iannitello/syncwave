@@ -149,13 +149,12 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
             else:
                 raise TypeError("Internal Error: Invalid syncwave context.")
 
-    @atomic
+    @atomic(mutating=True)
     def new_setattr(self: SyncModel[T_BM], name: str, new_value: Any) -> None:
         field_ta = self.__syncwave_ctx__.fields_type_adapter.get(name)
         # case for a non-model field
         if field_ta is None:
             o_setattr(self, name, new_value)
-            self.__syncwave_sref__.on_change()
             return
 
         field_ctx = self.__syncwave_ctx__.fields_ctx.get(name)
@@ -176,16 +175,12 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
         else:
             raise TypeError("Internal Error: Invalid syncwave context.")
 
-        self.__syncwave_sref__.on_change()
-
-    @atomic
+    @atomic(mutating=True)
     def new_delattr(self: SyncModel[T_BM], name: str) -> None:
         old_value = getattr(self, name, None)
         if isinstance(old_value, Reactive):
             old_value.__syncwave_kill__()
         o_delattr(self, name)
-
-        self.__syncwave_sref__.on_change()
 
     new_cls_dict = {
         "__syncwave_update__": syncwave_update,
@@ -250,11 +245,10 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
         else:
             raise TypeError("Internal Error: Invalid syncwave context.")
 
-    @atomic
+    @atomic(mutating=True)
     def new_setattr(self: SyncModel[T_RM], name: str, new_value: Any) -> None:
         if name != "root":
             o_setattr(self, name, new_value)
-            self.__syncwave_sref__.on_change()
             return
 
         field_ctx = self.__syncwave_ctx__.fields_ctx.get("root")
@@ -276,16 +270,12 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
         else:
             raise TypeError("Internal Error: Invalid syncwave context.")
 
-        self.__syncwave_sref__.on_change()
-
-    @atomic
+    @atomic(mutating=True)
     def new_delattr(self: SyncModel[T_RM], name: str) -> None:
         old_value = getattr(self, name, None)
         if isinstance(old_value, Reactive):
             old_value.__syncwave_kill__()
         o_delattr(self, name)
-
-        self.__syncwave_sref__.on_change()
 
     new_cls_dict = {
         "__syncwave_update__": syncwave_update,
@@ -354,13 +344,12 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
             else:
                 raise TypeError("Internal Error: Invalid syncwave context.")
 
-    @atomic
+    @atomic(mutating=True)
     def new_setattr(self: SyncModel[T_DC], name: str, new_value: Any) -> None:
         field_ta = self.__syncwave_ctx__.fields_type_adapter.get(name)
         # case for a non-model field
         if field_ta is None:
             o_setattr(self, name, new_value)
-            self.__syncwave_sref__.on_change()
             return
 
         field_ctx = self.__syncwave_ctx__.fields_ctx.get(name)
@@ -381,16 +370,12 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
         else:
             raise TypeError("Internal Error: Invalid syncwave context.")
 
-        self.__syncwave_sref__.on_change()
-
-    @atomic
+    @atomic(mutating=True)
     def new_delattr(self: SyncModel[T_DC], name: str) -> None:
         old_value = getattr(self, name, None)
         if isinstance(old_value, Reactive):
             old_value.__syncwave_kill__()
         o_delattr(self, name)
-
-        self.__syncwave_sref__.on_change()
 
     new_cls_dict = {
         "__syncwave_update__": syncwave_update,
