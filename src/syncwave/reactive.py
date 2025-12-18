@@ -26,11 +26,11 @@ class Reactive(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    def __syncwave_update__(self, new: Self) -> None:
+    def __syncwave_kill__(self) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def __syncwave_kill__(self) -> None:
+    def __syncwave_update__(self, new: Self) -> None:
         raise NotImplementedError
 
 
