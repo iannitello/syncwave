@@ -26,24 +26,21 @@ class _IO:
         self._debounce_timers: dict[Path, Timer] = {}
         self._pending_values: dict[Path, PyObj] = {}
 
-    @staticmethod
-    def sanitize_path(path: Path | str) -> Path:
+    def sanitize_path(self, path: Path | str) -> Path:
         path_str = os.fspath(path)
         path_str = os.path.expandvars(path_str)
         path_str = os.path.expanduser(path_str)
         return Path(path_str).resolve()
 
-    @staticmethod
-    def get_root_dir() -> Path:
+    def get_root_dir(self) -> Path:
         main_module = sys.modules.get("__main__")
         if file_attr := getattr(main_module, "__file__", None):
             path = Path(file_attr).parent
         else:
             path = Path.cwd()
-        return _IO.sanitize_path(path)
+        return self.sanitize_path(path)
 
-    @staticmethod
-    def create_dir(path: Path) -> None:
+    def create_dir(self, path: Path) -> None:
         if path.exists() and not path.is_dir():
             raise FileExistsError(f"Path '{path}' exists and is not a directory.")
         try:
@@ -53,9 +50,8 @@ class _IO:
         except OSError as e:
             raise OSError(f"Unable to create dir '{path}'.") from e
 
-    @staticmethod
-    def create_file(path: Path) -> None:
-        _IO.create_dir(path.parent)
+    def create_file(self, path: Path) -> None:
+        self.create_dir(path.parent)
         if path.exists() and not path.is_file():
             raise FileExistsError(f"Path '{path}' exists and is not a file.")
         try:
@@ -64,6 +60,11 @@ class _IO:
             raise PermissionError(f"Permission denied to create file '{path}'.") from e
         except OSError as e:
             raise OSError(f"Unable to create file '{path}'.") from e
+
+    def remove_file(self, path: Path) -> None:
+        if path.exists() and not path.is_file():
+            raise FileNotFoundError(f"Path '{path}' is not a file.")
+        path.unlink(missing_ok=True)
 
     def init_json(self, path: Path, default_value: PyObj = None) -> None:
         self.create_file(path)
