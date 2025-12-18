@@ -60,6 +60,13 @@ class SyncModel(Generic[T], Reactive):
         self.__syncwave_ctx__ = ctx
         self.__syncwave_live__ = True
 
+    def __syncwave_kill__(self) -> None:
+        for name in self.__syncwave_ctx__.fields_ctx:
+            value = getattr(self, name, None)
+            if isinstance(value, Reactive):
+                value.__syncwave_kill__()
+        self.__syncwave_live__ = False
+
 
 def create_sync_model(cls: type[T], cls_name: str | None = None) -> type[SyncModel[T]]:
     if not isclass(cls):
@@ -158,7 +165,7 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
     def new_delattr(self: SyncModel[T_BM], name: str) -> None:
         old_value = getattr(self, name, None)
         if isinstance(old_value, Reactive):
-            old_value.__syncwave_live__ = False
+            old_value.__syncwave_kill__()
         o_delattr(self, name)
 
         self.__syncwave_sref__.on_change()
@@ -258,7 +265,7 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
     def new_delattr(self: SyncModel[T_RM], name: str) -> None:
         old_value = getattr(self, name, None)
         if isinstance(old_value, Reactive):
-            old_value.__syncwave_live__ = False
+            old_value.__syncwave_kill__()
         o_delattr(self, name)
 
         self.__syncwave_sref__.on_change()
@@ -363,7 +370,7 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
     def new_delattr(self: SyncModel[T_DC], name: str) -> None:
         old_value = getattr(self, name, None)
         if isinstance(old_value, Reactive):
-            old_value.__syncwave_live__ = False
+            old_value.__syncwave_kill__()
         o_delattr(self, name)
 
         self.__syncwave_sref__.on_change()
@@ -405,7 +412,7 @@ def _setattr_union(
         original_setattr(self, field_name, old_value)
     else:
         if old_is_reactive:
-            old_value.__syncwave_live__ = False
+            old_value.__syncwave_kill__()
         if new_is_reactive:
             if new_type not in u_ctx:
                 raise TypeError("Internal Error: Invalid syncwave context.")

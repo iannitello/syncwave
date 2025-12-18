@@ -29,6 +29,10 @@ class Reactive(metaclass=ABCMeta):
     def __syncwave_update__(self, new: Self) -> None:
         raise NotImplementedError
 
+    @abstractmethod
+    def __syncwave_kill__(self) -> None:
+        raise NotImplementedError
+
 
 @dataclass(frozen=True)
 class StoreRef:

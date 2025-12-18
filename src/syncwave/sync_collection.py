@@ -77,7 +77,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
             # items to remove
             for key in old_keys - new_keys:
                 old_item = self.__data.pop(key)
-                old_item.__syncwave_live__ = False
+                old_item.__syncwave_kill__()
         # case 3: union content type
         elif isinstance(inner_ctx, ContextMap):
             old_keys, new_keys = set(self.__data.keys()), set(new.__data.keys())
@@ -89,9 +89,15 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
             for key in old_keys - new_keys:
                 old_item = self.__data.pop(key)
                 if isinstance(old_item, Reactive):
-                    old_item.__syncwave_live__ = False
+                    old_item.__syncwave_kill__()
         else:
             raise TypeError("Internal Error: Invalid syncwave context.")
+
+    def __syncwave_kill__(self) -> None:
+        for item in self.__data.values():
+            if isinstance(item, Reactive):
+                item.__syncwave_kill__()
+        self.__syncwave_live__ = False
 
     @atomic
     def __getitem__(self, key: KT) -> VT:
@@ -122,7 +128,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
     def __delitem__(self, key: KT) -> None:
         old_item = self.__data.pop(key)
         if isinstance(old_item, Reactive):
-            old_item.__syncwave_live__ = False
+            old_item.__syncwave_kill__()
 
         self.__syncwave_sref__.on_change()
 
@@ -156,7 +162,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
             o.__syncwave_update__(n)
         else:
             if old_is_reactive:
-                o.__syncwave_live__ = False
+                o.__syncwave_kill__()
             if new_is_reactive:
                 if new_type not in u_ctx:
                     raise TypeError("Internal Error: Invalid syncwave context.")
@@ -228,7 +234,7 @@ class SyncList(MutableSequence[VT], Reactive):
             elif old_len > new_len:
                 for _ in range(old_len - new_len):
                     old_item = self.__data.pop()
-                    old_item.__syncwave_live__ = False
+                    old_item.__syncwave_kill__()
         # case 3: union content type
         elif isinstance(inner_ctx, ContextMap):
             old_len, new_len = len(self.__data), len(new.__data)
@@ -254,9 +260,15 @@ class SyncList(MutableSequence[VT], Reactive):
                 for _ in range(old_len - new_len):
                     old_item = self.__data.pop()
                     if isinstance(old_item, Reactive):
-                        old_item.__syncwave_live__ = False
+                        old_item.__syncwave_kill__()
         else:
             raise TypeError("Internal Error: Invalid syncwave context.")
+
+    def __syncwave_kill__(self) -> None:
+        for item in self.__data:
+            if isinstance(item, Reactive):
+                item.__syncwave_kill__()
+        self.__syncwave_live__ = False
 
     @atomic
     def __getitem__(self, index: int) -> VT:
@@ -325,7 +337,7 @@ class SyncList(MutableSequence[VT], Reactive):
             o.__syncwave_update__(n)
         else:
             if old_is_reactive:
-                o.__syncwave_live__ = False
+                o.__syncwave_kill__()
             if new_is_reactive:
                 if new_type not in u_ctx:
                     raise TypeError("Internal Error: Invalid syncwave context.")
@@ -377,6 +389,10 @@ class SyncSet(MutableSet[VT], Reactive):
     def __syncwave_update__(self, new: Set[VT]) -> None:
         new = self.__syncwave_ctx__.type_adapter.validate_python(new)
         self.__data = new.__data
+
+    def __syncwave_kill__(self) -> None:
+        # can't hold reactive items
+        self.__syncwave_live__ = False
 
     @atomic
     def __contains__(self, value: object) -> bool:

@@ -113,7 +113,7 @@ class Syncwave(MutableMapping[str, Any]):
                     old_value.__syncwave_update__(new_value)
                 else:
                     if old_is_reactive:
-                        old_value.__syncwave_live__ = False
+                        old_value.__syncwave_kill__()
                     if new_is_reactive:
                         if new_type not in ctx:
                             raise TypeError("Internal Error: Invalid syncwave context.")
@@ -138,7 +138,7 @@ class Syncwave(MutableMapping[str, Any]):
 
         with metadata.sref.lock:
             if isinstance(value, Reactive):
-                value.__syncwave_live__ = False
+                value.__syncwave_kill__()
 
     @global_lock
     def __iter__(self) -> Iterator[str]:
