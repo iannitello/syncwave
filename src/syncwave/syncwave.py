@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-import contextlib
-from collections.abc import Callable, Iterator, MutableMapping
-from copy import deepcopy
+from collections.abc import Iterator, MutableMapping
 from dataclasses import dataclass
+from functools import wraps
 from inspect import isclass
 from pathlib import Path
 from threading import RLock
-from typing import Annotated, Any, Union, get_args, get_origin, overload
+from typing import Annotated, Any, Callable, Final, TypeVar, Union, get_args, get_origin
+from typing_extensions import ParamSpec
 
-from pydantic import PydanticSchemaGenerationError, TypeAdapter
+from pydantic import TypeAdapter
 
 from .io import io
-from .reactive import Context, ContextMap, Reactive
+from .reactive import Context, ContextMap, Reactive, StoreRef
 from .sync_collection import (
     KT,
     VT,
@@ -23,27 +23,36 @@ from .sync_collection import (
     SyncSet,
     SyncSetCtx,
 )
-from .sync_model import SyncModel, T
+from .sync_model import SyncModel
 from .watcher import watcher
 
-default_provider = {"array": list, "object": dict, "string": str, "null": lambda: None}
-_UNINITIALIZED = object()
 
-
-@dataclass
-class _Metadata:
+@dataclass(frozen=True)
+class Metadata:
     key: str
     path: Path
+    type_adapter: TypeAdapter[Any]
+    sref: StoreRef
+    ctx: Context | ContextMap | None
 
 
-class _UMetadata(_Metadata):
-    # unregistered store metadata
-    pass
+class EmptyFileType: ...
 
 
-class _RMetadata(_Metadata):
-    # registered store metadata
-    type_adapter: TypeAdapter
+EmptyFile: Final = EmptyFileType()
+
+P = ParamSpec("P")
+R = TypeVar("R")
+WrappedMethod = Callable[P, R]
+
+
+def global_lock(func: WrappedMethod) -> WrappedMethod:
+    @wraps(func)
+    def wrapper(self: Syncwave, *args: P.args, **kwargs: P.kwargs) -> R:
+        with self.__syncwave_lock__:
+            return func(self, *args, **kwargs)
+
+    return wrapper
 
 
 # Has to be thread-safe, this is a temporary solution just to start the implementation.
@@ -55,112 +64,97 @@ class Syncwave(MutableMapping[str, Any]):
             else io.sanitize_path(stores_dir)
         )
         io.create_dir(stores_dir)
-        self.stores_dir = stores_dir
+        self.__syncwave_lock__ = RLock()
+        self.__stores_dir = stores_dir
+        self.__stores: dict[str, tuple[Any | EmptyFileType, Metadata]] = {}
 
-        self.__lock = RLock()
-        self.__data: dict[str, tuple[Any, _Metadata]] = {}
-
+    @global_lock
     def __getitem__(self, key: str) -> Any:
-        with self.__lock:
-            return self.__data[key][0]
+        if key not in self.__stores:
+            raise KeyError(f"Store '{key}' does not exist.")
+        if (value := self.__stores[key][0]) is EmptyFile:
+            raise ValueError(f"Store '{key}' is empty.")
+        return value
 
+    @global_lock
     def __setitem__(self, key: str, value: Any) -> None:
-        key = str(key)
-        with self.__lock:
-            if key not in self.__data:
-                path = self.stores_dir / f"{key}.json"
-                meta = _UMetadata(key, path)
-                data = deepcopy(value)
-                self.__data[key] = (data, meta)
-                io.create_file(path)
-                io.write_json(path, lambda: data)
-                watcher.watch(path, self.__sync_unregistered, meta=meta)
-                return
-            data, meta = self.__data[key]
-            if isinstance(meta, _UMetadata):
-                data = deepcopy(value)
-                self.__data[key] = (data, meta)
-                io.write_json(meta.path, lambda: data)
-                return
-            raise NotImplementedError("Registered store are not supported yet.")
+        if not isinstance(key, str):
+            key_type = type(key).__name__
+            raise TypeError(f"Store key must be a string, found: `{key_type}`.")
 
+        if key not in self.__stores:
+            raise KeyError(
+                f"Store '{key}' does not exist. "
+                "Use `syncwave.register` to create a store first."
+            )
+
+        old_value, metadata = self.__stores[key]
+        new_value = metadata.type_adapter.validate_python(value)
+        ctx, sref = metadata.ctx, metadata.sref
+
+        with sref.lock:
+            # case 1: non-reactive content type
+            if ctx is None:
+                self.__stores[key] = (new_value, metadata)
+            # case 2: fixed reactive content type
+            elif isinstance(ctx, Context):
+                if old_value is not EmptyFile:
+                    old_value.__syncwave_update__(new_value)
+                else:
+                    new_value.__syncwave_init__(sref, ctx)
+                    self.__stores[key] = (new_value, metadata)
+            # case 3: union content type
+            elif isinstance(ctx, ContextMap):
+                old_is_reactive = isinstance(old_value, Reactive)
+                new_is_reactive = isinstance(new_value, Reactive)
+                same_type = type(old_value) is (new_type := type(new_value))
+
+                if old_is_reactive and new_is_reactive and same_type:
+                    old_value.__syncwave_update__(new_value)
+                else:
+                    if old_is_reactive:
+                        old_value.__syncwave_live__ = False
+                    if new_is_reactive:
+                        if new_type not in ctx:
+                            raise TypeError("Internal Error: Invalid syncwave context.")
+                        new_value.__syncwave_init__(sref, ctx[new_type])
+                    self.__stores[key] = (new_value, metadata)
+            else:
+                raise TypeError("Internal Error: Invalid syncwave context.")
+
+            sref.on_change()
+
+    @global_lock
     def __delitem__(self, key: str) -> None:
-        with self.__lock:
-            del self.__data[key]
+        if key not in self.__stores:
+            raise KeyError(f"Store '{key}' does not exist.")
 
+        value, metadata = self.__stores.pop(key)
+
+        # TODO is the order correct? Should review after implementing on_change
+        # because what happens if a file changes while we are deleting the store?
+        watcher.unwatch(metadata.path)
+        io.remove_file(metadata.path)
+
+        with metadata.sref.lock:
+            if isinstance(value, Reactive):
+                value.__syncwave_live__ = False
+
+    @global_lock
     def __iter__(self) -> Iterator[str]:
-        with self.__lock:
-            # first convert to a list so the iterator is over a frozen object
-            return iter(list(self.__data.keys()))
+        # first convert to a list so the iterator is over a frozen object
+        return iter(list(self.__stores.keys()))
 
+    @global_lock
     def __len__(self) -> int:
-        with self.__lock:
-            return len(self.__data)
+        return len(self.__stores)
 
-    def __syncwave_abc_marker__(self) -> None:
-        pass
-
-    def __sync_unregistered(self, meta: _UMetadata) -> None:
-        with contextlib.suppress(FileNotFoundError, ValueError):
-            data = deepcopy(io.read_json(meta.path))
-        with self.__lock:
-            self.__data[meta.key] = (data, None)
-        io.write_json(meta.path, lambda: self.__data[meta.key][0])
-
-    def __sync_registered(self, meta: _RMetadata) -> None:
-        with contextlib.suppress(FileNotFoundError, ValueError):
-            data = meta.type_adapter.validate_python(io.read_json(meta.path))
-        with self.__lock:
-            self.__data[meta.key] = (data, meta)
-        io.write_json(meta.path, lambda: data)
+    @property
+    def stores_dir(self) -> Path:
+        return self.__stores_dir
 
     # repr to be implemented
     # str to be implemented
-
-    @overload
-    def register(
-        self, *, name: str | None = None
-    ) -> Callable[[type[T]], type[SyncModel[T]]]:
-        """
-        Decorator usage: @syncwave.register
-        """
-        ...
-
-    @overload
-    def register(self, type: Any, /, *, name: str) -> None:
-        """
-        Method usage: syncwave.register(type, ...)
-        """
-        ...
-
-    def register(
-        self, type: Any = None, /, *, name: str | None = None
-    ) -> Callable[[type[T]], type[SyncModel[T]]] | None:
-        if type is None:
-            # decorator usage
-            def decorator(cls: type[T]) -> type[SyncModel[T]]:
-                # implementation
-                return cls
-
-            return decorator
-
-        # method usage
-        try:
-            ta = TypeAdapter(type)
-        except PydanticSchemaGenerationError as e:
-            raise ValueError(f"Type '{type}' is not supported.") from e
-        if name is None:
-            raise ValueError("A 'name' is required.")
-        name = str(name)
-        path = self.stores_dir / f"{name}.json"
-        meta = _RMetadata(name, path, ta)
-        with self.__lock:
-            if name in self:
-                raise ValueError(f"The name '{name}' has already been registered.")
-            default = default_provider.get(ta.json_schema()["type"])
-            self.__data[name] = (default() if default else _UNINITIALIZED, meta)
-            io.init_json(path, default)
-            watcher.watch(path, self.__sync_registered, meta=meta)
 
 
 def drill_tp(tp: Any, reactive_allowed: bool) -> Context | ContextMap | None:
