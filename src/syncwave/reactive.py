@@ -54,15 +54,26 @@ R = TypeVar("R")
 WrappedMethod = Callable[P, R]
 
 
-def atomic(func: WrappedMethod) -> WrappedMethod:
-    @wraps(func)
-    def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> R:
-        with self.__syncwave_sref__.lock:
-            if not self.__syncwave_live__:
-                raise DeadReferenceError(reference=self)
-            return func(self, *args, **kwargs)
+def atomic(*, mutating: bool) -> Callable[[WrappedMethod], WrappedMethod]:
+    def decorator(fn: WrappedMethod) -> WrappedMethod:
+        @wraps(fn)
+        def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> R:
+            with self.__syncwave_sref__.lock:
+                if not self.__syncwave_live__:
+                    raise DeadReferenceError(reference=self)
 
-    return wrapper
+                if not mutating:
+                    return fn(self, *args, **kwargs)
+
+                result = fn(self, *args, **kwargs)
+                if result is not None:
+                    raise ValueError("Internal Error: Mutating fn returned a value.")
+
+            self.__syncwave_sref__.on_change()
+
+        return wrapper
+
+    return decorator
 
 
 class DeadReferenceError(RuntimeError):
