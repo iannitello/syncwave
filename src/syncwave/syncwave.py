@@ -88,6 +88,58 @@ class Syncwave(MutableMapping[str, Any]):
                 "Use `syncwave.register` to create a store first."
             )
 
+        self.__set_store(key, value)
+
+    @global_lock
+    def __delitem__(self, key: str) -> None:
+        if key not in self.__stores:
+            raise KeyError(f"Store '{key}' does not exist.")
+
+        value, metadata = self.__stores[key]
+        watcher.unwatch(metadata.path)
+        with metadata.sref.lock:
+            if isinstance(value, Reactive):
+                value.__syncwave_kill__()
+        del self.__stores[key]
+        io.remove_file(metadata.path)
+
+    @global_lock
+    def __iter__(self) -> Iterator[str]:
+        # first convert to a list so the iterator is over a frozen object
+        return iter(list(self.__stores.keys()))
+
+    @global_lock
+    def __len__(self) -> int:
+        return len(self.__stores)
+
+    @property
+    def stores_dir(self) -> Path:
+        return self.__stores_dir
+
+    # repr to be implemented
+    # str to be implemented
+
+    @global_lock
+    def __on_store_change(self, key: str) -> None:
+        value, metadata = self.__stores[key]
+        io.write_json(metadata.path, value)
+
+    def __on_file_change(self, metadata: Metadata) -> None:
+        try:
+            new_value = io.read_json(metadata.path, metadata.type_adapter)
+        except (FileNotFoundError, ValueError):
+            with self.__syncwave_lock__:
+                old_value = self.__stores[metadata.key][0]
+            io.write_json(metadata.path, old_value)
+            return
+
+        with self.__syncwave_lock__:
+            if metadata.key not in self.__stores:
+                return  # Store was deleted, ignore this event
+            self.__set_store(metadata.key, new_value)
+
+    def __set_store(self, key: str, value: Any) -> None:
+        # always called from within the global lock context
         old_value, metadata = self.__stores[key]
         new_value = metadata.type_adapter.validate_python(value)
         ctx, sref = metadata.ctx, metadata.sref
@@ -122,39 +174,7 @@ class Syncwave(MutableMapping[str, Any]):
             else:
                 raise TypeError("Internal Error: Invalid syncwave context.")
 
-            sref.on_change()
-
-    @global_lock
-    def __delitem__(self, key: str) -> None:
-        if key not in self.__stores:
-            raise KeyError(f"Store '{key}' does not exist.")
-
-        value, metadata = self.__stores.pop(key)
-
-        # TODO is the order correct? Should review after implementing on_change
-        # because what happens if a file changes while we are deleting the store?
-        watcher.unwatch(metadata.path)
-        io.remove_file(metadata.path)
-
-        with metadata.sref.lock:
-            if isinstance(value, Reactive):
-                value.__syncwave_kill__()
-
-    @global_lock
-    def __iter__(self) -> Iterator[str]:
-        # first convert to a list so the iterator is over a frozen object
-        return iter(list(self.__stores.keys()))
-
-    @global_lock
-    def __len__(self) -> int:
-        return len(self.__stores)
-
-    @property
-    def stores_dir(self) -> Path:
-        return self.__stores_dir
-
-    # repr to be implemented
-    # str to be implemented
+        sref.on_change()
 
 
 def drill_tp(tp: Any, reactive_allowed: bool) -> Context | ContextMap | None:
