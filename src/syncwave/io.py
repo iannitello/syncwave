@@ -16,6 +16,12 @@ from .watcher import watcher
 PyObj = Any  # any Python object that can be serialized to JSON by Pydantic
 
 
+class EmptyFileType: ...
+
+
+EmptyFile: Final = EmptyFileType()
+
+
 class _IO:
     ENCODING: Final[str] = "utf-8"
     DUMPS_CONFIG: Final[dict[str, Any]] = {"indent": 2}
@@ -66,16 +72,17 @@ class _IO:
             raise FileNotFoundError(f"Path '{path}' is not a file.")
         path.unlink(missing_ok=True)
 
-    def init_json(self, path: Path, default_value: PyObj = None) -> None:
+    def init_json(self, path: Path, default: PyObj | EmptyFileType = EmptyFile) -> None:
         self.create_file(path)
-        if path.stat().st_size == 0:
-            if default_value is not None:
-                self._atomic_write(path, default_value)
+        content = path.read_text(encoding=self.ENCODING).strip()
+        if content == "":
+            if default is not EmptyFile:
+                self._atomic_write(path, self.json_dumps(default))
             return
         try:
-            from_json(path.read_text(encoding=self.ENCODING))
+            from_json(content)
         except ValueError as e:
-            raise OSError(f"File '{path}' exists but is not a valid JSON file.") from e
+            raise ValueError(f"File '{path}' contains invalid JSON.") from e
 
     def json_dumps(self, value: PyObj) -> str:
         return to_json(value, **self.DUMPS_CONFIG).decode(self.ENCODING)
@@ -109,13 +116,13 @@ class _IO:
         with self._lock:
             self._debounce_timers.pop(path, None)
             self._pending_values.pop(path, None)
-        self._atomic_write(path, value)
+        self._atomic_write(path, self.json_dumps(value))
 
-    def _atomic_write(self, path: Path, value: PyObj) -> None:
+    def _atomic_write(self, path: Path, text: str) -> None:
         fd, tmp_path = mkstemp(prefix=watcher.TMP_FILE_PREFIX, dir=path.parent)
         try:
             with os.fdopen(fd, "w", encoding=self.ENCODING) as tmp_file:
-                tmp_file.write(self.json_dumps(value))
+                tmp_file.write(text)
                 tmp_file.write("\n")
                 tmp_file.flush()
                 os.fsync(tmp_file.fileno())
