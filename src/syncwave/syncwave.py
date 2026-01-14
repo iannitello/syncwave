@@ -11,7 +11,7 @@ from typing_extensions import ParamSpec
 
 from pydantic import TypeAdapter
 
-from .io import io
+from .io import EmptyFile, EmptyFileType, io
 from .reactive import Context, ContextMap, Reactive, StoreRef
 from .sync_collection import (
     KT,
@@ -35,11 +35,6 @@ class Metadata:
     sref: StoreRef
     ctx: Context | ContextMap | None
 
-
-class EmptyFileType: ...
-
-
-EmptyFile: Final = EmptyFileType()
 
 P = ParamSpec("P")
 R = TypeVar("R")
