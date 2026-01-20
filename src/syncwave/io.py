@@ -8,12 +8,12 @@ from tempfile import mkstemp
 from threading import Lock, Timer
 from typing import Any, Final
 
-from pydantic import TypeAdapter
-from pydantic_core import from_json, to_json
+from pydantic import TypeAdapter, ValidationError
 
 from .watcher import watcher
 
 PyObj = Any  # any Python object that can be serialized to JSON by Pydantic
+PendingWrite = tuple[PyObj, TypeAdapter, Timer]
 
 
 class EmptyFileType: ...
@@ -24,13 +24,14 @@ EmptyFile: Final = EmptyFileType()
 
 class _IO:
     ENCODING: Final[str] = "utf-8"
-    DUMPS_CONFIG: Final[dict[str, Any]] = {"indent": 2}
+    DUMPS_CONFIG: Final[dict[str, Any]] = {"indent": 2, "warnings": "error"}
     DEBOUNCE_WINDOW: Final[float] = 0.05
+
+    _any_ta = TypeAdapter(Any)
 
     def __init__(self) -> None:
         self._lock = Lock()
-        self._debounce_timers: dict[Path, Timer] = {}
-        self._pending_values: dict[Path, PyObj] = {}
+        self._pending_writes: dict[Path, PendingWrite] = {}
 
     def sanitize_path(self, path: Path | str) -> Path:
         path_str = os.fspath(path)
@@ -77,46 +78,41 @@ class _IO:
         content = path.read_text(encoding=self.ENCODING).strip()
         if content == "":
             if default is not EmptyFile:
-                self._atomic_write(path, self.json_dumps(default))
+                self._atomic_write(path, self._dump(default, self._any_ta))
             return
         try:
-            from_json(content)
-        except ValueError as e:
+            self._any_ta.validate_json(content)
+        except ValidationError as e:
             raise ValueError(f"File '{path}' contains invalid JSON.") from e
 
-    def json_dumps(self, value: PyObj) -> str:
-        return to_json(value, **self.DUMPS_CONFIG).decode(self.ENCODING)
+    def _dump(self, value: PyObj, ta: TypeAdapter) -> str:
+        return ta.dump_json(value, **self.DUMPS_CONFIG).decode(self.ENCODING)
 
-    def read_json(self, path: Path, type_adapter: TypeAdapter | None = None) -> PyObj:
-        p_data: str | None = None  # pending data
+    def read_json(self, path: Path, ta: TypeAdapter = _any_ta) -> PyObj:
         with self._lock:
-            if path in self._pending_values:
-                p_data = self.json_dumps(self._pending_values[path])
-        data = path.read_text(encoding=self.ENCODING) if p_data is None else p_data
-        if type_adapter is None:
-            return from_json(data)
-        return type_adapter.validate_json(data)
+            if path in self._pending_writes:
+                value, previous_ta, _ = self._pending_writes[path]
+                if previous_ta is ta:
+                    return value
+                text = self._dump(value, previous_ta)
+                return ta.validate_json(text)
+        text = path.read_text(encoding=self.ENCODING)
+        return ta.validate_json(text)
 
-    def write_json(self, path: Path, value: PyObj) -> None:
+    def write_json(self, path: Path, value: PyObj, ta: TypeAdapter = _any_ta) -> None:
         with self._lock:
-            if path in self._debounce_timers:
-                self._debounce_timers[path].cancel()
-
-            self._pending_values[path] = value
-
-            timer = Timer(
-                self.DEBOUNCE_WINDOW,
-                self._scheduled_write,
-                args=(path, value),
-            )
-            self._debounce_timers[path] = timer
+            if path in self._pending_writes:
+                self._pending_writes[path][2].cancel()
+            timer = Timer(self.DEBOUNCE_WINDOW, self._scheduled_write, args=(path,))
+            self._pending_writes[path] = (value, ta, timer)
             timer.start()
 
-    def _scheduled_write(self, path: Path, value: PyObj) -> None:
+    def _scheduled_write(self, path: Path) -> None:
         with self._lock:
-            self._debounce_timers.pop(path, None)
-            self._pending_values.pop(path, None)
-        self._atomic_write(path, self.json_dumps(value))
+            if path not in self._pending_writes:
+                return  # is this possible? should it be an error?
+            value, ta, _ = self._pending_writes.pop(path)
+        self._atomic_write(path, self._dump(value, ta))
 
     def _atomic_write(self, path: Path, text: str) -> None:
         fd, tmp_path = mkstemp(prefix=watcher.TMP_FILE_PREFIX, dir=path.parent)
