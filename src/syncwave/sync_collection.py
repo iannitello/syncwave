@@ -196,7 +196,12 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
             cls.__syncwave_new__, mapping_t_schema
         )
         instance_schema = cs.is_instance_schema(cls)
-        return cs.union_schema([instance_schema, non_instance_schema])
+        return cs.union_schema(
+            [instance_schema, non_instance_schema],
+            serialization=cs.plain_serializer_function_ser_schema(
+                lambda instance: instance.__data
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -384,7 +389,12 @@ class SyncList(MutableSequence[VT], Reactive):
             cls.__syncwave_new__, sequence_t_schema
         )
         instance_schema = cs.is_instance_schema(cls)
-        return cs.union_schema([instance_schema, non_instance_schema])
+        return cs.union_schema(
+            [instance_schema, non_instance_schema],
+            serialization=cs.plain_serializer_function_ser_schema(
+                lambda instance: instance.__data
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -463,7 +473,12 @@ class SyncSet(MutableSet[VT], Reactive):
             cls.__syncwave_new__, set_t_schema
         )
         instance_schema = cs.is_instance_schema(cls)
-        return cs.union_schema([instance_schema, non_instance_schema])
+        return cs.union_schema(
+            [instance_schema, non_instance_schema],
+            serialization=cs.plain_serializer_function_ser_schema(
+                lambda instance: instance.__data
+            ),
+        )
 
 
 SyncCollection.register(SyncDict)
