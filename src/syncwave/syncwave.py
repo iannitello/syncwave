@@ -2,14 +2,23 @@ from __future__ import annotations
 
 from collections.abc import Iterator, MutableMapping
 from dataclasses import dataclass
-from functools import wraps
+from functools import partial, wraps
 from inspect import isclass
 from pathlib import Path
 from threading import RLock
-from typing import Annotated, Any, Callable, Final, TypeVar, Union, get_args, get_origin
+from typing import (
+    Annotated,
+    Any,
+    Callable,
+    TypeVar,
+    Union,
+    get_args,
+    get_origin,
+    overload,
+)
 from typing_extensions import ParamSpec
 
-from pydantic import TypeAdapter
+from pydantic import PydanticSchemaGenerationError, TypeAdapter, ValidationError
 
 from .io import EmptyFile, EmptyFileType, io
 from .reactive import Context, ContextMap, Reactive, StoreRef
@@ -23,7 +32,7 @@ from .sync_collection import (
     SyncSet,
     SyncSetCtx,
 )
-from .sync_model import SyncModel
+from .sync_model import SyncModel, T, create_sync_model
 from .watcher import watcher
 
 
@@ -114,10 +123,62 @@ class Syncwave(MutableMapping[str, Any]):
     # repr to be implemented
     # str to be implemented
 
+    def reactive(self, cls: type[T], cls_name: str | None = None) -> type[SyncModel[T]]:
+        return create_sync_model(cls, rename=cls_name or True)
+
+    @overload
+    def register(
+        self,
+        *,
+        name: str | None = None,
+        path: Path | None = None,
+    ) -> Callable[[type[T]], type[SyncModel[T]]]: ...
+
+    @global_lock
+    def register(self, _cls=None, /, *, name=None, path=None):
+        def decorator(cls: type[T]) -> type[SyncModel[T]]:
+            sync_cls = create_sync_model(cls, rename=False)
+            self.store(SyncDict[str, sync_cls], name or cls.__name__, path)
+            return sync_cls
+
+        # Case 1: called with parentheses, e.g. `@syncwave.register(**kwargs)`
+        if _cls is None:
+            return decorator
+
+        # Case 2: called without parentheses, e.g. `@syncwave.register`
+        return decorator(_cls)
+
+    @global_lock
+    def store(self, tp: type, /, *, name: str, path: str | Path | None = None) -> None:
+        if name in self.__stores:
+            raise ValueError(f"Store '{name}' already exists.")
+
+        if path is None:
+            path = self.__stores_dir / f"{name.lower()}.json"
+        path = io.sanitize_path(path)
+
+        if path in (store[1].path for store in self.__stores.values()):
+            raise ValueError(f"Path '{path}' already exists.")
+
+        try:
+            type_adapter = TypeAdapter(tp)
+        except PydanticSchemaGenerationError as e:
+            raise ValueError(f"Type '{tp}' is not supported.") from e
+
+        default = _get_default(type_adapter)
+
+        sref = StoreRef(lock=RLock(), on_change=partial(self.__on_store_change, name))
+        ctx = drill_tp(tp, reactive_allowed=True)
+        metadata = Metadata(name, path, type_adapter, sref, ctx)
+        self.__stores[name] = (default, metadata)
+
+        io.init_json(path, default)
+        watcher.watch(path, self.__on_file_change, metadata)
+
     @global_lock
     def __on_store_change(self, key: str) -> None:
         value, metadata = self.__stores[key]
-        io.write_json(metadata.path, value)
+        io.write_json(metadata.path, value, metadata.type_adapter)
 
     def __on_file_change(self, metadata: Metadata) -> None:
         try:
@@ -125,7 +186,7 @@ class Syncwave(MutableMapping[str, Any]):
         except (FileNotFoundError, ValueError):
             with self.__syncwave_lock__:
                 old_value = self.__stores[metadata.key][0]
-            io.write_json(metadata.path, old_value)
+            io.write_json(metadata.path, old_value, metadata.type_adapter)
             return
 
         with self.__syncwave_lock__:
@@ -290,7 +351,7 @@ def _get_union_ctx(args: tuple[Any, ...], reactive_allowed: bool) -> ContextMap 
 JSON_SCHEMA_DEFAULTS = {"array": [], "object": {}, "string": "", "null": None}
 
 
-def _get_default(type_adapter: TypeAdapter[Any]) -> Any:
+def _get_default(type_adapter: TypeAdapter[Any]) -> Any | EmptyFileType:
     schema = type_adapter.json_schema()
     default = EmptyFile
 
@@ -308,7 +369,6 @@ def _get_default(type_adapter: TypeAdapter[Any]) -> Any:
             default = next((v for v in sub_defaults if v is not None), None)
 
     try:
-        type_adapter.validate_python(default)
-        return default
+        return type_adapter.validate_python(default)
     except ValidationError:
         return EmptyFile
