@@ -17,9 +17,8 @@ class SyncModelSupportedMeta(ABCMeta):
     def __subclasscheck__(self, subclass: type[Any]) -> bool:
         if not isclass(subclass):
             return False
-        is_model = any(base in (BaseModel, RootModel) for base in subclass.__mro__)
-        is_dc = dc.is_dataclass(subclass)
-        return is_model or is_dc
+        # RootModel is a subclass of BaseModel, and a pydantic dataclass is a dataclass
+        return issubclass(subclass, BaseModel) or dc.is_dataclass(subclass)
 
     def __instancecheck__(self, instance: Any) -> bool:
         return self.__subclasscheck__(type(instance))
@@ -85,23 +84,21 @@ class SyncModel(Generic[T], Reactive):
         self.__syncwave_live__ = False
 
 
-def create_sync_model(cls: type[T], cls_name: str | None = None) -> type[SyncModel[T]]:
-    if not isclass(cls):
-        raise TypeError(f"'{cls}' is not a valid type.")
+def create_sync_model(cls: type[T], rename: bool | str = True) -> type[SyncModel[T]]:
+    cls_ = cls  # just to prevent the type checker from flagging code as unreachable
+    if not isclass(cls_):
+        raise TypeError(f"'{cls}' is not a class.")
 
-    is_base_model = any(base is BaseModel for base in cls.__mro__)
-    is_root_model = any(base is RootModel for base in cls.__mro__)
-    is_dataclass = dc.is_dataclass(cls)
-    if not (is_base_model or is_root_model or is_dataclass):
-        raise TypeError(f"Class '{cls.__name__}' is not a SyncModelSupported type.")
+    cls_name = f"Sync{cls.__name__}" if rename is True else rename or cls.__name__
 
-    cls_name = cls_name or f"Sync{cls.__name__}"
-    if is_base_model:
+    if issubclass(cls_, BaseModel):
+        if issubclass(cls_, RootModel):
+            return _create_root_model(cls, cls_name)
         return _create_base_model(cls, cls_name)
-    if is_root_model:
-        return _create_root_model(cls, cls_name)
-    if is_dataclass:
+    if dc.is_dataclass(cls_):
         return _create_dataclass(cls, cls_name)
+
+    raise TypeError(f"Class '{cls.__name__}' is not a SyncModelSupported type.")
 
 
 def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
