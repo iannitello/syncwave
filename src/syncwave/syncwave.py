@@ -18,7 +18,7 @@ from typing import (
 )
 from typing_extensions import ParamSpec
 
-from pydantic import PydanticSchemaGenerationError, TypeAdapter, ValidationError
+from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
 from .io import EmptyFile, EmptyFileType, io
 from .reactive import Context, ContextMap, Reactive, StoreRef
@@ -38,9 +38,9 @@ from .watcher import watcher
 
 @dataclass(frozen=True)
 class Metadata:
-    key: str
+    name: str
     path: Path
-    type_adapter: TypeAdapter[Any]
+    type_adapter: TypeAdapter
     sref: StoreRef
     ctx: Context | ContextMap | None
 
@@ -138,7 +138,7 @@ class Syncwave(MutableMapping[str, Any]):
     def register(self, _cls=None, /, *, name=None, path=None):
         def decorator(cls: type[T]) -> type[SyncModel[T]]:
             sync_cls = create_sync_model(cls, rename=False)
-            self.store(SyncDict[str, sync_cls], name or cls.__name__, path)
+            self.store(SyncDict[str, sync_cls], name=name or cls.__name__, path=path)
             return sync_cls
 
         # Case 1: called with parentheses, e.g. `@syncwave.register(**kwargs)`
@@ -165,19 +165,19 @@ class Syncwave(MutableMapping[str, Any]):
         except PydanticSchemaGenerationError as e:
             raise ValueError(f"Type '{tp}' is not supported.") from e
 
-        default = _get_default(type_adapter)
-
         sref = StoreRef(lock=RLock(), on_change=partial(self.__on_store_change, name))
         ctx = drill_tp(tp, reactive_allowed=True)
         metadata = Metadata(name, path, type_adapter, sref, ctx)
-        self.__stores[name] = (default, metadata)
 
-        io.init_json(path, default)
+        value = io.init_json(path, type_adapter)
+        if isinstance(value, Reactive):
+            value.__syncwave_init__(sref, ctx)
+        self.__stores[name] = (value, metadata)
         watcher.watch(path, self.__on_file_change, metadata)
 
     @global_lock
-    def __on_store_change(self, key: str) -> None:
-        value, metadata = self.__stores[key]
+    def __on_store_change(self, name: str) -> None:
+        value, metadata = self.__stores[name]
         io.write_json(metadata.path, value, metadata.type_adapter)
 
     def __on_file_change(self, metadata: Metadata) -> None:
@@ -185,14 +185,14 @@ class Syncwave(MutableMapping[str, Any]):
             new_value = io.read_json(metadata.path, metadata.type_adapter)
         except (FileNotFoundError, ValueError):
             with self.__syncwave_lock__:
-                old_value = self.__stores[metadata.key][0]
+                old_value = self.__stores[metadata.name][0]
             io.write_json(metadata.path, old_value, metadata.type_adapter)
             return
 
         with self.__syncwave_lock__:
-            if metadata.key not in self.__stores:
+            if metadata.name not in self.__stores:
                 return  # Store was deleted, ignore this event
-            self.__set_store(metadata.key, new_value)
+            self.__set_store(metadata.name, new_value)
 
     def __set_store(self, key: str, value: Any) -> None:
         # always called from within the global lock context
