@@ -346,13 +346,3 @@ def _get_union_ctx(args: tuple[Any, ...], reactive_allowed: bool) -> ContextMap 
         return None
 
     return ContextMap(ctx_map)
-
-
-def _get_default(type_adapter: TypeAdapter[Any]) -> Any | EmptyFileType:
-    defaults = [{}, [], "", None]
-    for default in defaults:
-        try:
-            return type_adapter.validate_python(default)
-        except ValidationError:
-            continue
-    return EmptyFile

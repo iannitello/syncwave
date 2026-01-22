@@ -12,8 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from .watcher import watcher
 
-PyObj = Any  # any Python object that can be serialized to JSON by Pydantic
-PendingWrite = tuple[PyObj, TypeAdapter, Timer]
+PendingWrite = tuple[Any, TypeAdapter, Timer]
 
 
 class EmptyFileType: ...
@@ -73,33 +72,28 @@ class _IO:
             raise FileNotFoundError(f"Path '{path}' is not a file.")
         path.unlink(missing_ok=True)
 
-    def init_json(self, path: Path, default: PyObj | EmptyFileType = EmptyFile) -> None:
+    def init_json(self, path: Path, ta: TypeAdapter = _any_ta) -> Any | EmptyFileType:
         self.create_file(path)
         content = path.read_text(encoding=self.ENCODING).strip()
         if content == "":
+            default = self._get_default(ta)
             if default is not EmptyFile:
-                self._atomic_write(path, self._dump(default, self._any_ta))
-            return
-        try:
-            self._any_ta.validate_json(content)
-        except ValidationError as e:
-            raise ValueError(f"File '{path}' contains invalid JSON.") from e
+                self._atomic_write(path, self._serialize(default, ta))
+            return default
+        return self._deserialize(content, ta, path)
 
-    def _dump(self, value: PyObj, ta: TypeAdapter) -> str:
-        return ta.dump_json(value, **self.DUMPS_CONFIG).decode(self.ENCODING)
-
-    def read_json(self, path: Path, ta: TypeAdapter = _any_ta) -> PyObj:
+    def read_json(self, path: Path, ta: TypeAdapter = _any_ta) -> Any:
         with self._lock:
             if path in self._pending_writes:
                 value, previous_ta, _ = self._pending_writes[path]
                 if previous_ta is ta:
                     return value
-                text = self._dump(value, previous_ta)
-                return ta.validate_json(text)
-        text = path.read_text(encoding=self.ENCODING)
-        return ta.validate_json(text)
+                text = self._serialize(value, previous_ta)
+                return self._deserialize(text, ta, path)
+        text = path.read_text(encoding=self.ENCODING).strip()
+        return self._deserialize(text, ta, path)
 
-    def write_json(self, path: Path, value: PyObj, ta: TypeAdapter = _any_ta) -> None:
+    def write_json(self, path: Path, value: Any, ta: TypeAdapter = _any_ta) -> None:
         with self._lock:
             if path in self._pending_writes:
                 self._pending_writes[path][2].cancel()
@@ -112,7 +106,7 @@ class _IO:
             if path not in self._pending_writes:
                 return  # is this possible? should it be an error?
             value, ta, _ = self._pending_writes.pop(path)
-        self._atomic_write(path, self._dump(value, ta))
+        self._atomic_write(path, self._serialize(value, ta))
 
     def _atomic_write(self, path: Path, text: str) -> None:
         fd, tmp_path = mkstemp(prefix=watcher.TMP_FILE_PREFIX, dir=path.parent)
@@ -137,6 +131,28 @@ class _IO:
                 f"Failed to write JSON to '{path}'. "
                 f"Temporary file '{tmp_path}' removed. Original error: {e}"
             ) from e
+
+    def _serialize(self, value: Any, ta: TypeAdapter) -> str:
+        return ta.dump_json(value, **self.DUMPS_CONFIG).decode(self.ENCODING)
+
+    def _deserialize(self, text: str, ta: TypeAdapter, path: Path) -> Any:
+        try:
+            return ta.validate_json(text)
+        except ValidationError as e:
+            try:
+                self._any_ta.validate_json(text)
+            except ValidationError:
+                raise ValueError(f"File '{path}' contains malformed JSON.") from None
+            raise ValueError(f"File '{path}' contains unexpected data type.") from e
+
+    def _get_default(self, ta: TypeAdapter) -> Any | EmptyFileType:
+        defaults = [{}, [], "", None]
+        for default in defaults:
+            try:
+                return ta.validate_python(default)
+            except ValidationError:
+                continue
+        return EmptyFile
 
 
 io = _IO()
