@@ -348,27 +348,11 @@ def _get_union_ctx(args: tuple[Any, ...], reactive_allowed: bool) -> ContextMap 
     return ContextMap(ctx_map)
 
 
-JSON_SCHEMA_DEFAULTS = {"array": [], "object": {}, "string": "", "null": None}
-
-
 def _get_default(type_adapter: TypeAdapter[Any]) -> Any | EmptyFileType:
-    schema = type_adapter.json_schema()
-    default = EmptyFile
-
-    if "type" in schema:
-        default = JSON_SCHEMA_DEFAULTS.get(schema["type"], EmptyFile)
-
-    elif "anyOf" in schema:
-        sub_defaults = []
-        for sub_schema in schema["anyOf"]:
-            sub_default = JSON_SCHEMA_DEFAULTS.get(sub_schema.get("type"), EmptyFile)
-            if sub_default is not EmptyFile:
-                sub_defaults.append(sub_default)
-        if sub_defaults:
-            # picks the first default value, but de-prioritizes None
-            default = next((v for v in sub_defaults if v is not None), None)
-
-    try:
-        return type_adapter.validate_python(default)
-    except ValidationError:
-        return EmptyFile
+    defaults = [{}, [], "", None]
+    for default in defaults:
+        try:
+            return type_adapter.validate_python(default)
+        except ValidationError:
+            continue
+    return EmptyFile
