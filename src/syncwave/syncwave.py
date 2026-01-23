@@ -47,10 +47,9 @@ class Metadata:
 
 P = ParamSpec("P")
 R = TypeVar("R")
-WrappedMethod = Callable[P, R]
 
 
-def global_lock(func: WrappedMethod) -> WrappedMethod:
+def global_lock(func: Callable[P, R]) -> Callable[P, R]:
     @wraps(func)
     def wrapper(self: Syncwave, *args: P.args, **kwargs: P.kwargs) -> R:
         with self.__syncwave_lock__:

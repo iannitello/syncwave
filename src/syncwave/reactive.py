@@ -51,29 +51,31 @@ class ContextMap(dict[type[Reactive], Context]): ...
 
 P = ParamSpec("P")
 R = TypeVar("R")
-WrappedMethod = Callable[P, R]
 
 
-def atomic(*, mutating: bool) -> Callable[[WrappedMethod], WrappedMethod]:
-    def decorator(fn: WrappedMethod) -> WrappedMethod:
-        @wraps(fn)
-        def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> R:
-            with self.__syncwave_sref__.lock:
-                if not self.__syncwave_live__:
-                    raise DeadReferenceError(reference=self)
+def atomic(fn: Callable[P, R]) -> Callable[P, R]:
+    @wraps(fn)
+    def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> R:
+        with self.__syncwave_sref__.lock:
+            if not self.__syncwave_live__:
+                raise DeadReferenceError(reference=self)
+            return fn(self, *args, **kwargs)
 
-                if not mutating:
-                    return fn(self, *args, **kwargs)
+    return wrapper
 
-                result = fn(self, *args, **kwargs)
-                if result is not None:
-                    raise ValueError("Internal Error: Mutating fn returned a value.")
 
-            self.__syncwave_sref__.on_change()
+def mut_atomic(fn: Callable[P, R]) -> Callable[P, None]:
+    @wraps(fn)
+    def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> None:
+        with self.__syncwave_sref__.lock:
+            if not self.__syncwave_live__:
+                raise DeadReferenceError(reference=self)
+            result = fn(self, *args, **kwargs)
+            if result is not None:
+                raise ValueError("Internal Error: Mutating method returned a value.")
+        self.__syncwave_sref__.on_change()
 
-        return wrapper
-
-    return decorator
+    return wrapper
 
 
 class DeadReferenceError(RuntimeError):

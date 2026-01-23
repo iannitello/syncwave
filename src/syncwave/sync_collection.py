@@ -22,7 +22,7 @@ from pydantic import GetCoreSchemaHandler as Handler
 from pydantic import TypeAdapter
 from pydantic_core import core_schema as cs
 
-from .reactive import Context, ContextMap, Reactive, StoreRef, atomic
+from .reactive import Context, ContextMap, Reactive, StoreRef, atomic, mut_atomic
 
 KT = TypeVar("KT", bound=Union[str, int, float, bool, None])
 VT = TypeVar("VT")
@@ -118,11 +118,11 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         else:
             raise TypeError("Internal Error: Invalid syncwave context.")
 
-    @atomic(mutating=False)
+    @atomic
     def __getitem__(self, key: KT) -> VT:
         return self.__data[key]
 
-    @atomic(mutating=True)
+    @mut_atomic
     def __setitem__(self, key: KT, value: VT) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         new_item = self.__syncwave_ctx__.inner_type_adapter.validate_python(value)
@@ -141,18 +141,18 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         else:
             raise TypeError("Internal Error: Invalid syncwave context.")
 
-    @atomic(mutating=True)
+    @mut_atomic
     def __delitem__(self, key: KT) -> None:
         old_item = self.__data.pop(key)
         if isinstance(old_item, Reactive):
             old_item.__syncwave_kill__()
 
-    @atomic(mutating=False)
+    @atomic
     def __iter__(self) -> Iterator[KT]:
         # first convert to a list so the iterator is over a frozen object
         return iter(list(self.__data))
 
-    @atomic(mutating=False)
+    @atomic
     def __len__(self) -> int:
         return len(self.__data)
 
@@ -316,11 +316,11 @@ class SyncList(MutableSequence[VT], Reactive):
         else:
             raise TypeError("Internal Error: Invalid syncwave context.")
 
-    @atomic(mutating=False)
+    @atomic
     def __getitem__(self, index: int) -> VT:
         return self.__data[index]
 
-    @atomic(mutating=True)
+    @mut_atomic
     def __setitem__(self, index: int, value: VT) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         new_item = self.__syncwave_ctx__.inner_type_adapter.validate_python(value)
@@ -338,7 +338,7 @@ class SyncList(MutableSequence[VT], Reactive):
         else:
             raise TypeError("Internal Error: Invalid syncwave context.")
 
-    @atomic(mutating=True)
+    @mut_atomic
     def __delitem__(self, index: int) -> None:
         if self.__syncwave_ctx__.inner_ctx is None:
             del self.__data[index]
@@ -347,11 +347,11 @@ class SyncList(MutableSequence[VT], Reactive):
             del data_copy[index]
             self.__syncwave_update__(data_copy)
 
-    @atomic(mutating=False)
+    @atomic
     def __len__(self) -> int:
         return len(self.__data)
 
-    @atomic(mutating=True)
+    @mut_atomic
     def insert(self, index: int, value: VT) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         new_item = self.__syncwave_ctx__.inner_type_adapter.validate_python(value)
@@ -447,25 +447,25 @@ class SyncSet(MutableSet[VT], Reactive):
         new = self.__syncwave_ctx__.type_adapter.validate_python(new)
         self.__data = new.__data
 
-    @atomic(mutating=False)
+    @atomic
     def __contains__(self, value: object) -> bool:
         return value in self.__data
 
-    @atomic(mutating=False)
+    @atomic
     def __iter__(self) -> Iterator[VT]:
         # first convert to a list so the iterator is over a frozen object
         return iter(list(self.__data))
 
-    @atomic(mutating=False)
+    @atomic
     def __len__(self) -> int:
         return len(self.__data)
 
-    @atomic(mutating=True)
+    @mut_atomic
     def add(self, value: VT) -> None:
         new_item = self.__syncwave_ctx__.inner_type_adapter.validate_python(value)
         self.__data.add(new_item)
 
-    @atomic(mutating=True)
+    @mut_atomic
     def discard(self, value: VT) -> None:
         if value in self.__data:
             self.__data.discard(value)
