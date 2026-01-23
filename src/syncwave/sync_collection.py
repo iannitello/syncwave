@@ -156,8 +156,14 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
     def __len__(self) -> int:
         return len(self.__data)
 
-    # __repr__ to be implemented
-    # __str__ to be implemented
+    def __str__(self) -> str:
+        items = ", ".join(f"{k!r}: {v}" for k, v in self.__data.items())
+        return "{" + items + "}"
+
+    def __repr__(self) -> str:
+        status = "live" if self.__syncwave_live__ else "dead"
+        return f"<SyncDict {self.__data!r} ({status})>"
+
     # __eq__ to be implemented?
     # __hash__ to be implemented?
 
@@ -357,8 +363,14 @@ class SyncList(MutableSequence[VT], Reactive):
             data_copy.insert(index, new_item)
             self.__syncwave_update__(data_copy)
 
-    # __repr__ to be implemented
-    # __str__ to be implemented
+    def __str__(self) -> str:
+        items = ", ".join(str(item) for item in self.__data)
+        return "[" + items + "]"
+
+    def __repr__(self) -> str:
+        status = "live" if self.__syncwave_live__ else "dead"
+        return f"<SyncList {self.__data!r} ({status})>"
+
     # __eq__ to be implemented?
     # __hash__ to be implemented?
 
@@ -458,8 +470,16 @@ class SyncSet(MutableSet[VT], Reactive):
         if value in self.__data:
             self.__data.discard(value)
 
-    # __repr__ to be implemented
-    # __str__ to be implemented
+    def __str__(self) -> str:
+        items = ", ".join(str(item) for item in self.__data)
+        if not items:
+            return "set()"
+        return "{" + items + "}"
+
+    def __repr__(self) -> str:
+        status = "live" if self.__syncwave_live__ else "dead"
+        return f"<SyncSet {self.__data!r} ({status})>"
+
     # __eq__ to be implemented?
     # __hash__ to be implemented?
 

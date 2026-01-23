@@ -120,8 +120,12 @@ class Syncwave(MutableMapping[str, Any]):
     def stores_dir(self) -> Path:
         return self.__stores_dir
 
-    # repr to be implemented
-    # str to be implemented
+    def __str__(self) -> str:
+        items = ", ".join(f"{k!r}: {v[0]}" for k, v in self.__stores.items())
+        return "{" + items + "}"
+
+    def __repr__(self) -> str:
+        return f"<Syncwave stores={list(self.__stores.keys())!r}>"
 
     def reactive(self, cls: type[T], cls_name: str | None = None) -> type[SyncModel[T]]:
         return create_sync_model(cls, rename=cls_name or True)
