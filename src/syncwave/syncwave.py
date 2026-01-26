@@ -32,7 +32,13 @@ from .sync_collection import (
     SyncSet,
     SyncSetCtx,
 )
-from .sync_model import SyncModel, T, create_sync_model
+from .sync_model import (
+    SyncModel,
+    SyncModelCtx,
+    SyncModelSupported,
+    T,
+    create_sync_model,
+)
 from .watcher import watcher
 
 
@@ -127,6 +133,11 @@ class Syncwave(MutableMapping[str, Any]):
         return f"<Syncwave stores={list(self.__stores.keys())!r}>"
 
     def reactive(self, cls: type[T], cls_name: str | None = None) -> type[SyncModel[T]]:
+        if not isclass(cls):
+            raise TypeError(f"'{cls}' is not a class.")
+        if not issubclass(cls, SyncModelSupported):
+            raise TypeError(f"Class '{cls.__name__}' is not a SyncModelSupported type.")
+        drill_model(cls, as_reactive=True)
         return create_sync_model(cls, rename=cls_name or True)
 
     @overload
@@ -240,23 +251,17 @@ def drill_tp(tp: Any, reactive_allowed: bool) -> Context | ContextMap | None:
     origin = get_origin(tp) or tp
     args = get_args(tp)
 
-    if isclass(origin) and issubclass(origin, Reactive):
-        if not reactive_allowed:
+    if isclass(origin):
+        if not reactive_allowed and issubclass(origin, Reactive):
             raise TypeError("Cannot break the reactivity chain.")
-        if issubclass(origin, SyncModel):
-            ctx = getattr(origin, "__syncwave_ctx__", None)
-            if ctx is None:
-                raise TypeError(
-                    f"'{origin.__name__}' is a SyncModel but has no context. "
-                    f"Ensure dependent models are made reactive first."
-                )
-            return ctx
         if issubclass(origin, SyncDict):
             return _get_sync_dict_ctx(tp)
         if issubclass(origin, SyncList):
             return _get_sync_list_ctx(tp)
         if issubclass(origin, SyncSet):
             return _get_sync_set_ctx(tp)
+        if issubclass(origin, SyncModel) or issubclass(origin, SyncModelSupported):
+            return drill_model(origin)
         raise TypeError(f"Unknown reactive type: {origin.__name__}")  # shouldn't happen
 
     if origin is Annotated:
@@ -265,10 +270,54 @@ def drill_tp(tp: Any, reactive_allowed: bool) -> Context | ContextMap | None:
         return drill_tp(args[0], reactive_allowed)
 
     if origin is Union or str(origin) == "typing.Union":
-        return _get_union_ctx(args, reactive_allowed)
+        if not args:
+            raise ValueError("Union must have arguments.")
+        contexts = [drill_tp(arg, reactive_allowed) for arg in args]
+        ctx_map = {ctx.tp: ctx for ctx in contexts if ctx is not None}
+        return ContextMap(ctx_map) if ctx_map else None
 
     for arg in args:
         drill_tp(arg, reactive_allowed=False)
+
+    return None
+
+
+def drill_model(cls: type, as_reactive: bool = False) -> SyncModelCtx | None:
+    is_sync_model = issubclass(cls, SyncModel)
+    treat_as_reactive = is_sync_model or as_reactive
+
+    # a frozen model can't be reactive
+    if treat_as_reactive and (
+        getattr(cls, "model_config", {}).get("frozen", False)
+        or getattr(cls, "__pydantic_config__", {}).get("frozen", False)
+        or getattr(getattr(cls, "__dataclass_params__", None), "frozen", False)
+    ):
+        raise TypeError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
+
+    # get fields
+    fields = getattr(cls, "__pydantic_fields__", None) or cls.__dataclass_fields__
+    if not fields:
+        raise TypeError(f"Class '{cls.__name__}' has no fields.")
+
+    fields_ctx: dict[str, Context | ContextMap] = {}
+    fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
+
+    for name, field in fields.items():
+        tp = getattr(field, "annotation", None) or field.type
+        field_ctx = drill_tp(tp, reactive_allowed=treat_as_reactive)
+        if field_ctx is not None:
+            if getattr(field, "frozen", False):
+                raise TypeError(f"Field '{name}': frozen fields cannot be reactive.")
+            fields_ctx[name] = field_ctx
+        fields_type_adapter[name] = TypeAdapter(tp)
+
+    if is_sync_model:
+        return SyncModelCtx(
+            tp=cls,
+            type_adapter=TypeAdapter(cls),
+            fields_ctx=fields_ctx,
+            fields_type_adapter=fields_type_adapter,
+        )
 
     return None
 
@@ -336,16 +385,3 @@ def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
         inner_ctx=None,
         inner_type_adapter=inner_type_adapter,
     )
-
-
-def _get_union_ctx(args: tuple[Any, ...], reactive_allowed: bool) -> ContextMap | None:
-    if not args:
-        raise ValueError("Union must have arguments.")
-
-    contexts = [drill_tp(tp, reactive_allowed) for tp in args]
-    ctx_map = {ctx.tp: ctx for ctx in contexts if ctx is not None}
-
-    if not ctx_map:
-        return None
-
-    return ContextMap(ctx_map)
