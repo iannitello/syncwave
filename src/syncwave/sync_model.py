@@ -52,9 +52,6 @@ class SyncModel(Generic[T], Reactive):
     __syncwave_ctx__: SyncModelCtx[T]
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncModelCtx[T]) -> None:
-        if self.__class__.__syncwave_ctx__ is not ctx:
-            raise TypeError("Internal Error: Invalid syncwave context.")
-
         self.__syncwave_sref__ = sref
         self.__syncwave_ctx__ = ctx
         self.__syncwave_live__ = True
@@ -86,8 +83,6 @@ class SyncModel(Generic[T], Reactive):
 
 def create_sync_model(cls: type[T], rename: bool | str = True) -> type[SyncModel[T]]:
     cls_ = cls  # just to prevent the type checker from flagging code as unreachable
-    if not isclass(cls_):
-        raise TypeError(f"'{cls}' is not a class.")
 
     cls_name = f"Sync{cls.__name__}" if rename is True else rename or cls.__name__
 
@@ -95,29 +90,10 @@ def create_sync_model(cls: type[T], rename: bool | str = True) -> type[SyncModel
         if issubclass(cls_, RootModel):
             return _create_root_model(cls, cls_name)
         return _create_base_model(cls, cls_name)
-    if dc.is_dataclass(cls_):
-        return _create_dataclass(cls, cls_name)
-
-    raise TypeError(f"Class '{cls.__name__}' is not a SyncModelSupported type.")
+    return _create_dataclass(cls, cls_name)
 
 
 def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
-    from .syncwave import drill_tp
-
-    if cls.model_config.get("frozen"):
-        raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
-
-    fields_ctx: dict[str, Context | ContextMap] = {}
-    fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
-
-    for name, field in cls.model_fields.items():
-        field_ctx = drill_tp(field.annotation, reactive_allowed=True)
-        if field_ctx is not None:
-            if field.frozen:
-                raise TypeError(f"Field '{name}': frozen fields cannot be reactive.")
-            fields_ctx[name] = field_ctx
-        fields_type_adapter[name] = TypeAdapter(field.annotation)
-
     o_setattr = cls.__setattr__
     o_delattr = cls.__delattr__
 
@@ -185,36 +161,10 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
         "__delattr__": new_delattr,
         "__module__": cls.__module__,
     }
-
-    new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
-
-    new_cls.__syncwave_ctx__ = SyncModelCtx(
-        tp=new_cls,
-        type_adapter=TypeAdapter(new_cls),
-        fields_ctx=fields_ctx,
-        fields_type_adapter=fields_type_adapter,
-    )
-
-    return new_cls
+    return create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
 
 
 def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
-    from .syncwave import drill_tp
-
-    if cls.model_config.get("frozen"):
-        raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
-
-    fields_ctx: dict[str, Context | ContextMap] = {}
-    fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
-
-    root_field = cls.model_fields["root"]
-    field_ctx = drill_tp(root_field.annotation, reactive_allowed=True)
-    if field_ctx is not None:
-        if root_field.frozen:
-            raise TypeError("Field 'root': frozen fields cannot be reactive.")
-        fields_ctx["root"] = field_ctx
-    fields_type_adapter["root"] = TypeAdapter(root_field.annotation)
-
     o_setattr = cls.__setattr__
     o_delattr = cls.__delattr__
 
@@ -280,38 +230,12 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
         "__delattr__": new_delattr,
         "__module__": cls.__module__,
     }
-
-    new_cls = create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
-
-    new_cls.__syncwave_ctx__ = SyncModelCtx(
-        tp=new_cls,
-        type_adapter=TypeAdapter(new_cls),
-        fields_ctx=fields_ctx,
-        fields_type_adapter=fields_type_adapter,
-    )
-
-    return new_cls
+    return create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
 
 
 def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
-    from .syncwave import drill_tp
-
-    if cls.__dataclass_params__.frozen:
-        raise ValueError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
-
     if not pdc.is_pydantic_dataclass(cls):
         cls = pdc.dataclass(cls)
-
-    fields_ctx: dict[str, Context | ContextMap] = {}
-    fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
-
-    for name, field in cls.__pydantic_fields__.items():
-        field_ctx = drill_tp(field.annotation, reactive_allowed=True)
-        if field_ctx is not None:
-            if field.frozen:
-                raise TypeError(f"Field '{name}': frozen fields cannot be reactive.")
-            fields_ctx[name] = field_ctx
-        fields_type_adapter[name] = TypeAdapter(field.annotation)
 
     o_setattr = cls.__setattr__
     o_delattr = cls.__delattr__
@@ -382,16 +306,7 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
     }
 
     new_cls = type(cls_name, (cls, SyncModel), new_cls_dict)
-    new_cls = pdc.dataclass(new_cls)
-
-    new_cls.__syncwave_ctx__ = SyncModelCtx(
-        tp=new_cls,
-        type_adapter=TypeAdapter(new_cls),
-        fields_ctx=fields_ctx,
-        fields_type_adapter=fields_type_adapter,
-    )
-
-    return new_cls
+    return pdc.dataclass(new_cls)
 
 
 def _setattr_union(
