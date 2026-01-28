@@ -82,19 +82,17 @@ class Syncwave(MutableMapping[str, Any]):
         if key not in self.__stores:
             raise KeyError(f"Store '{key}' does not exist.")
         if (value := self.__stores[key][0]) is EmptyFile:
-            raise ValueError(f"Store '{key}' is empty.")
+            raise ValueError(f"Store '{key}' has not been initialized.")
         return value
 
     @global_lock
     def __setitem__(self, key: str, value: Any) -> None:
         if not isinstance(key, str):
-            key_type = type(key).__name__
-            raise TypeError(f"Store key must be a string, found: `{key_type}`.")
-
+            raise TypeError(f"Store key must be a string, got `{type(key).__name__}`.")
         if key not in self.__stores:
             raise KeyError(
                 f"Store '{key}' does not exist. "
-                "Use `syncwave.register` to create a store first."
+                "Use `syncwave.store()` to create one first."
             )
 
         self.__set_store(key, value)
@@ -134,10 +132,10 @@ class Syncwave(MutableMapping[str, Any]):
 
     def reactive(self, cls: type[T], cls_name: str | None = None) -> type[SyncModel[T]]:
         if not isclass(cls):
-            raise TypeError(f"'{cls}' is not a class.")
+            raise TypeError(f"Expected a class, got `{type(cls).__name__}`.")
         if not issubclass(cls, SyncModelSupported):
-            raise TypeError(f"Class '{cls.__name__}' is not a SyncModelSupported type.")
-        drill_model(cls, as_reactive=True)
+            raise TypeError(f"Expected a SyncModelSupported, got `{cls.__name__}`.")
+        drill_model(cls, as_sync_model=True)
         return create_sync_model(cls, rename=cls_name or True)
 
     @overload
@@ -172,15 +170,15 @@ class Syncwave(MutableMapping[str, Any]):
         path = io.sanitize_path(path)
 
         if path in (store[1].path for store in self.__stores.values()):
-            raise ValueError(f"Path '{path}' already exists.")
+            raise ValueError(f"Path '{path}' is already in use by another store.")
 
         try:
             type_adapter = TypeAdapter(tp)
         except PydanticSchemaGenerationError as e:
-            raise ValueError(f"Type '{tp}' is not supported.") from e
+            raise TypeError(f"Type `{tp}` is not supported by Pydantic.") from e
 
         sref = StoreRef(lock=RLock(), on_change=partial(self.__on_store_change, name))
-        ctx = drill_tp(tp, reactive_allowed=True)
+        ctx = drill_tp(tp)
         metadata = Metadata(name, path, type_adapter, sref, ctx)
 
         value = io.init_json(path, type_adapter)
@@ -238,78 +236,89 @@ class Syncwave(MutableMapping[str, Any]):
                         old_value.__syncwave_kill__()
                     if new_is_reactive:
                         if new_type not in ctx:
-                            raise TypeError("Internal Error: Invalid syncwave context.")
+                            raise TypeError("Internal error: context missing for type.")
                         new_value.__syncwave_init__(sref, ctx[new_type])
                     self.__stores[key] = (new_value, metadata)
             else:
-                raise TypeError("Internal Error: Invalid syncwave context.")
+                raise TypeError("Internal error: unexpected context type.")
 
         sref.on_change()
 
 
-def drill_tp(tp: Any, reactive_allowed: bool) -> Context | ContextMap | None:
+def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None:
     origin = get_origin(tp) or tp
     args = get_args(tp)
-
-    if isclass(origin):
-        if not reactive_allowed and issubclass(origin, Reactive):
-            raise TypeError("Cannot break the reactivity chain.")
-        if issubclass(origin, SyncDict):
-            return _get_sync_dict_ctx(tp)
-        if issubclass(origin, SyncList):
-            return _get_sync_list_ctx(tp)
-        if issubclass(origin, SyncSet):
-            return _get_sync_set_ctx(tp)
-        if issubclass(origin, SyncModel) or issubclass(origin, SyncModelSupported):
-            return drill_model(origin)
-        raise TypeError(f"Unknown reactive type: {origin.__name__}")  # shouldn't happen
+    name = getattr(origin, "__name__", repr(origin))
 
     if origin is Annotated:
         if len(args) < 1:
-            raise ValueError("Annotated must have arguments.")
-        return drill_tp(args[0], reactive_allowed)
+            raise TypeError("`Annotated` must have at least one type argument.")
+        return drill_tp(args[0], _err_if_reactive)
 
     if origin is Union or str(origin) == "typing.Union":
         if not args:
-            raise ValueError("Union must have arguments.")
-        contexts = [drill_tp(arg, reactive_allowed) for arg in args]
-        ctx_map = {ctx.tp: ctx for ctx in contexts if ctx is not None}
+            raise TypeError("`Union` must have at least one type argument.")
+        ctxs = [drill_tp(arg, _err_if_reactive) for arg in args]
+        ctx_map = {ctx.tp: ctx for ctx in ctxs if ctx is not None}
         return ContextMap(ctx_map) if ctx_map else None
 
+    if isclass(origin):
+        if issubclass(origin, Reactive):
+            if _err_if_reactive:
+                raise TypeError(f"`{name}` cannot be used here: {_err_if_reactive}")
+            if issubclass(origin, SyncDict):
+                return _get_sync_dict_ctx(tp)
+            if issubclass(origin, SyncList):
+                return _get_sync_list_ctx(tp)
+            if issubclass(origin, SyncSet):
+                return _get_sync_set_ctx(tp)
+            if issubclass(origin, SyncModel):
+                return drill_model(origin)
+            raise TypeError(f"`{name}` is not a recognized reactive type.")
+        if issubclass(origin, SyncModelSupported):
+            return drill_model(origin)
+
+    err = f"`{name}` is not a reactive container."
     for arg in args:
-        drill_tp(arg, reactive_allowed=False)
+        drill_tp(arg, _err_if_reactive=err)
 
     return None
 
 
-def drill_model(cls: type, as_reactive: bool = False) -> SyncModelCtx | None:
+def drill_model(cls: type, as_sync_model: bool = False) -> SyncModelCtx | None:
     is_sync_model = issubclass(cls, SyncModel)
-    treat_as_reactive = is_sync_model or as_reactive
+    treat_as_sync_model = is_sync_model or as_sync_model
 
-    # a frozen model can't be reactive
-    if treat_as_reactive and (
+    model_is_frozen: bool = (
         getattr(cls, "model_config", {}).get("frozen", False)
         or getattr(cls, "__pydantic_config__", {}).get("frozen", False)
         or getattr(getattr(cls, "__dataclass_params__", None), "frozen", False)
-    ):
-        raise TypeError(f"'{cls.__name__}' is frozen and cannot be made reactive.")
+    )
+    if model_is_frozen and treat_as_sync_model:
+        raise TypeError(f"`{cls.__name__}` is frozen and cannot be made reactive.")
 
-    # get fields
     fields = getattr(cls, "__pydantic_fields__", None) or cls.__dataclass_fields__
     if not fields:
-        raise TypeError(f"Class '{cls.__name__}' has no fields.")
+        raise TypeError(f"`{cls.__name__}` has no fields.")
 
     fields_ctx: dict[str, Context | ContextMap] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
 
     for name, field in fields.items():
-        tp = getattr(field, "annotation", None) or field.type
-        field_ctx = drill_tp(tp, reactive_allowed=treat_as_reactive)
+        field_tp = getattr(field, "annotation", None) or field.type
+        field_is_frozen: bool = getattr(field, "frozen", False)
+
+        if not treat_as_sync_model:
+            err = f"`{cls.__name__}` is not a `SyncModel` (for field `{name}`)."
+        elif field_is_frozen:
+            err = f"Field `{name}` in `{cls.__name__}` is frozen."
+        else:
+            err = ""
+
+        field_ctx = drill_tp(field_tp, _err_if_reactive=err)
         if field_ctx is not None:
-            if getattr(field, "frozen", False):
-                raise TypeError(f"Field '{name}': frozen fields cannot be reactive.")
             fields_ctx[name] = field_ctx
-        fields_type_adapter[name] = TypeAdapter(tp)
+        fields_type_adapter[name] = TypeAdapter(field_tp)
 
     if is_sync_model:
         return SyncModelCtx(
@@ -324,17 +333,15 @@ def drill_model(cls: type, as_reactive: bool = False) -> SyncModelCtx | None:
 
 def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
     args = get_args(tp)
-    len_args = len(args)
 
-    if len_args == 2:
-        vt = args[1]
-        inner_ctx = drill_tp(vt, reactive_allowed=True)
-        inner_type_adapter = TypeAdapter(vt)
-    elif len_args == 0:
+    if len(args) == 2:
+        inner_ctx = drill_tp(args[1])
+        inner_type_adapter = TypeAdapter(args[1])
+    elif len(args) == 0:
         inner_ctx = None
         inner_type_adapter = TypeAdapter(Any)
     else:
-        raise TypeError("SyncDict must have 0 or 2 arguments.")
+        raise TypeError("`SyncDict` requires 0 or 2 type arguments.")
 
     return SyncDictCtx(
         tp=SyncDict,
@@ -346,17 +353,15 @@ def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
 
 def _get_sync_list_ctx(tp: type[SyncList[VT]]) -> SyncListCtx[VT]:
     args = get_args(tp)
-    len_args = len(args)
 
-    if len_args == 1:
-        vt = args[0]
-        inner_ctx = drill_tp(vt, reactive_allowed=True)
-        inner_type_adapter = TypeAdapter(vt)
-    elif len_args == 0:
+    if len(args) == 1:
+        inner_ctx = drill_tp(args[0])
+        inner_type_adapter = TypeAdapter(args[0])
+    elif len(args) == 0:
         inner_ctx = None
         inner_type_adapter = TypeAdapter(Any)
     else:
-        raise TypeError("SyncList must have 0 or 1 argument.")
+        raise TypeError("`SyncList` requires 0 or 1 type argument.")
 
     return SyncListCtx(
         tp=SyncList,
@@ -368,16 +373,14 @@ def _get_sync_list_ctx(tp: type[SyncList[VT]]) -> SyncListCtx[VT]:
 
 def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
     args = get_args(tp)
-    len_args = len(args)
 
-    if len_args == 1:
-        vt = args[0]
-        drill_tp(vt, reactive_allowed=False)  # will raise if reactive
-        inner_type_adapter = TypeAdapter(vt)
-    elif len_args == 0:
+    if len(args) == 1:
+        drill_tp(args[0], _err_if_reactive="`SyncSet` cannot hold reactive items.")
+        inner_type_adapter = TypeAdapter(args[0])
+    elif len(args) == 0:
         inner_type_adapter = TypeAdapter(Any)
     else:
-        raise TypeError("SyncSet must have 0 or 1 argument.")
+        raise TypeError("`SyncSet` requires 0 or 1 type argument.")
 
     return SyncSetCtx(
         tp=SyncSet,
