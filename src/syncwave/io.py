@@ -126,7 +126,6 @@ class _IO:
             # Attempt to remove temporary file on error
             with contextlib.suppress(OSError):
                 os.remove(tmp_path)
-            # Raise a clear error message including context
             raise OSError(
                 f"Failed to write JSON to '{path}'. "
                 f"Temporary file '{tmp_path}' removed. Original error: {e}"

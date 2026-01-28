@@ -4,7 +4,7 @@ from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
 from functools import wraps
 from threading import RLock
-from typing import Callable, TypeVar, final
+from typing import Callable, NoReturn, TypeVar, final
 from typing_extensions import ParamSpec, Self
 
 from pydantic import TypeAdapter
@@ -72,7 +72,7 @@ def mut_atomic(fn: Callable[P, R]) -> Callable[P, None]:
                 raise DeadReferenceError(reference=self)
             result = fn(self, *args, **kwargs)
             if result is not None:
-                raise ValueError("Internal Error: Mutating method returned a value.")
+                assert_never()
         self.__syncwave_sref__.on_change()
 
     return wrapper
@@ -82,3 +82,7 @@ class DeadReferenceError(RuntimeError):
     def __init__(self, *, reference: Reactive) -> None:
         message = f"Operation attempted on a dead reference: {reference!r}"
         super().__init__(message)
+
+
+def assert_never() -> NoReturn:
+    raise RuntimeError("Internal Error")
