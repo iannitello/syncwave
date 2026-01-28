@@ -10,7 +10,7 @@ from typing import Any, Callable, Generic, NoReturn, TypeVar, final
 from pydantic import BaseModel, RootModel, TypeAdapter, create_model
 from pydantic import dataclasses as pdc
 
-from .reactive import Context, ContextMap, Reactive, StoreRef, mut_atomic
+from .reactive import Context, ContextMap, Reactive, StoreRef, assert_never, mut_atomic
 
 
 class SyncModelSupportedMeta(ABCMeta):
@@ -66,12 +66,9 @@ class SyncModel(Generic[T], Reactive):
             # case 3: union content type
             elif isinstance(field_ctx, ContextMap):
                 if isinstance(value, Reactive):
-                    value_type = type(value)
-                    if value_type not in field_ctx:
-                        raise TypeError("Internal Error: Invalid syncwave context.")
-                    value.__syncwave_init__(sref, field_ctx[value_type])
+                    value.__syncwave_init__(sref, field_ctx[type(value)])
             else:
-                raise TypeError("Internal Error: Invalid syncwave context.")
+                assert_never()
 
     def __syncwave_kill__(self) -> None:
         for name in self.__syncwave_ctx__.fields_ctx:
@@ -120,7 +117,7 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
                 old_value = getattr(self, name, None)
                 _setattr_union(self, name, old_value, new_value, field_ctx, o_setattr)
             else:
-                raise TypeError("Internal Error: Invalid syncwave context.")
+                assert_never()
 
     @mut_atomic
     def new_setattr(self: SyncModel[T_BM], name: str, new_value: Any) -> None:
@@ -146,7 +143,7 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
             old_value = getattr(self, name, None)
             _setattr_union(self, name, old_value, new_value, field_ctx, o_setattr)
         else:
-            raise TypeError("Internal Error: Invalid syncwave context.")
+            assert_never()
 
     @mut_atomic
     def new_delattr(self: SyncModel[T_BM], name: str) -> None:
@@ -190,7 +187,7 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
             old_value = getattr(self, "root", None)
             _setattr_union(self, "root", old_value, new_value, field_ctx, o_setattr)
         else:
-            raise TypeError("Internal Error: Invalid syncwave context.")
+            assert_never()
 
     @mut_atomic
     def new_setattr(self: SyncModel[T_RM], name: str, new_value: Any) -> None:
@@ -215,7 +212,7 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
             old_value = getattr(self, "root", None)
             _setattr_union(self, "root", old_value, new_value, field_ctx, o_setattr)
         else:
-            raise TypeError("Internal Error: Invalid syncwave context.")
+            assert_never()
 
     @mut_atomic
     def new_delattr(self: SyncModel[T_RM], name: str) -> None:
@@ -263,7 +260,7 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
                 old_value = getattr(self, name, None)
                 _setattr_union(self, name, old_value, new_value, field_ctx, o_setattr)
             else:
-                raise TypeError("Internal Error: Invalid syncwave context.")
+                assert_never()
 
     @mut_atomic
     def new_setattr(self: SyncModel[T_DC], name: str, new_value: Any) -> None:
@@ -289,7 +286,7 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
             old_value = getattr(self, name, None)
             _setattr_union(self, name, old_value, new_value, field_ctx, o_setattr)
         else:
-            raise TypeError("Internal Error: Invalid syncwave context.")
+            assert_never()
 
     @mut_atomic
     def new_delattr(self: SyncModel[T_DC], name: str) -> None:
@@ -328,7 +325,5 @@ def _setattr_union(
         if old_is_reactive:
             old_value.__syncwave_kill__()
         if new_is_reactive:
-            if new_type not in u_ctx:
-                raise TypeError("Internal Error: Invalid syncwave context.")
             new_value.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
         original_setattr(self, field_name, new_value)

@@ -21,7 +21,7 @@ from typing_extensions import ParamSpec
 from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
 from .io import EmptyFile, EmptyFileType, io
-from .reactive import Context, ContextMap, Reactive, StoreRef
+from .reactive import Context, ContextMap, Reactive, StoreRef, assert_never
 from .sync_collection import (
     KT,
     VT,
@@ -235,12 +235,10 @@ class Syncwave(MutableMapping[str, Any]):
                     if old_is_reactive:
                         old_value.__syncwave_kill__()
                     if new_is_reactive:
-                        if new_type not in ctx:
-                            raise TypeError("Internal error: context missing for type.")
                         new_value.__syncwave_init__(sref, ctx[new_type])
                     self.__stores[key] = (new_value, metadata)
             else:
-                raise TypeError("Internal error: unexpected context type.")
+                assert_never()
 
         sref.on_change()
 
