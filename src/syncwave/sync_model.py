@@ -52,9 +52,9 @@ class SyncModel(Generic[T], Reactive):
     __syncwave_ctx__: SyncModelCtx[T]
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncModelCtx[T]) -> None:
-        self.__syncwave_sref__ = sref
-        self.__syncwave_ctx__ = ctx
-        self.__syncwave_live__ = True
+        object.__setattr__(self, "__syncwave_sref__", sref)
+        object.__setattr__(self, "__syncwave_ctx__", ctx)
+        object.__setattr__(self, "__syncwave_live__", True)
 
         for name, field_ctx in ctx.fields_ctx.items():
             value = getattr(self, name, None)
@@ -75,7 +75,7 @@ class SyncModel(Generic[T], Reactive):
             value = getattr(self, name, None)
             if isinstance(value, Reactive):
                 value.__syncwave_kill__()
-        self.__syncwave_live__ = False
+        object.__setattr__(self, "__syncwave_live__", False)
 
 
 def create_sync_model(cls: type[T], rename: bool | str = True) -> type[SyncModel[T]]:
@@ -152,13 +152,13 @@ def _create_base_model(cls: type[T_BM], cls_name: str) -> type[SyncModel[T_BM]]:
             old_value.__syncwave_kill__()
         o_delattr(self, name)
 
-    new_cls_dict = {
-        "__syncwave_update__": syncwave_update,
-        "__setattr__": new_setattr,
-        "__delattr__": new_delattr,
-        "__module__": cls.__module__,
-    }
-    return create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
+    new_cls = create_model(cls_name, __base__=(cls, SyncModel))
+    new_cls.__syncwave_update__ = syncwave_update
+    new_cls.__setattr__ = new_setattr
+    new_cls.__delattr__ = new_delattr
+    new_cls.__module__ = cls.__module__
+    new_cls.__abstractmethods__ = frozenset()
+    return new_cls
 
 
 def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
@@ -221,13 +221,13 @@ def _create_root_model(cls: type[T_RM], cls_name: str) -> type[SyncModel[T_RM]]:
             old_value.__syncwave_kill__()
         o_delattr(self, name)
 
-    new_cls_dict = {
-        "__syncwave_update__": syncwave_update,
-        "__setattr__": new_setattr,
-        "__delattr__": new_delattr,
-        "__module__": cls.__module__,
-    }
-    return create_model(cls_name, __base__=(cls, SyncModel), **new_cls_dict)
+    new_cls = create_model(cls_name, __base__=(cls, SyncModel))
+    new_cls.__syncwave_update__ = syncwave_update
+    new_cls.__setattr__ = new_setattr
+    new_cls.__delattr__ = new_delattr
+    new_cls.__module__ = cls.__module__
+    new_cls.__abstractmethods__ = frozenset()
+    return new_cls
 
 
 def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
@@ -295,14 +295,11 @@ def _create_dataclass(cls: type[T_DC], cls_name: str) -> type[SyncModel[T_DC]]:
             old_value.__syncwave_kill__()
         o_delattr(self, name)
 
-    new_cls_dict = {
-        "__syncwave_update__": syncwave_update,
-        "__setattr__": new_setattr,
-        "__delattr__": new_delattr,
-        "__module__": cls.__module__,
-    }
-
-    new_cls = type(cls_name, (cls, SyncModel), new_cls_dict)
+    new_cls = type(cls_name, (cls, SyncModel), {"__module__": cls.__module__})
+    new_cls.__syncwave_update__ = syncwave_update
+    new_cls.__setattr__ = new_setattr
+    new_cls.__delattr__ = new_delattr
+    new_cls.__abstractmethods__ = frozenset()
     return pdc.dataclass(new_cls)
 
 
