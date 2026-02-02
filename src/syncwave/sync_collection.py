@@ -5,15 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import (
-    Iterator,
-    Mapping,
-    MutableMapping,
-    MutableSequence,
-    MutableSet,
-    Sequence,
-    Set,
-)
+from collections.abc import Iterator, MutableMapping, MutableSequence, MutableSet
 from dataclasses import dataclass
 from typing import Any, Generic, NoReturn, TypeVar, Union, final, get_args
 from typing_extensions import Self
@@ -38,8 +30,8 @@ VT = TypeVar("VT")
 
 @final
 class SyncCollection(Reactive):
-    def __init_subclass__(cls: type[SyncCollection], /, **kwargs: Any) -> NoReturn:
-        raise TypeError("SyncCollection cannot be subclassed.")
+    def __init_subclass__(cls, /, **kwargs: Any) -> NoReturn:
+        raise TypeError("`SyncCollection` cannot be subclassed.")
 
 
 @dataclass(frozen=True)
@@ -55,11 +47,11 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
     __data: dict[KT, VT]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
-        raise TypeError("SyncDict cannot be instantiated directly.")
+        raise TypeError("`SyncDict` cannot be instantiated directly.")
 
     @classmethod
-    def __syncwave_new__(cls: type[SyncDict], data: dict[KT, VT]) -> Self:
-        self: SyncDict = object.__new__(cls)
+    def __syncwave_new__(cls, data: dict[KT, VT]) -> Self:
+        self = object.__new__(cls)
         self.__data = data
         return self
 
@@ -90,7 +82,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
                 item.__syncwave_kill__()
         self.__syncwave_live__ = False
 
-    def __syncwave_update__(self, new: Mapping[KT, VT]) -> None:
+    def __syncwave_update__(self, new: Self | dict[KT, VT]) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         new = self.__syncwave_ctx__.type_adapter.validate_python(new)
 
@@ -197,9 +189,9 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
         args = get_args(src)
         if args:
-            mapping_t_schema = handler.generate_schema(Mapping[args[0], args[1]])
+            mapping_t_schema = handler.generate_schema(dict[args[0], args[1]])
         else:
-            mapping_t_schema = handler.generate_schema(Mapping)
+            mapping_t_schema = handler.generate_schema(dict)
 
         non_instance_schema = cs.no_info_after_validator_function(
             cls.__syncwave_new__, mapping_t_schema
@@ -227,11 +219,11 @@ class SyncList(MutableSequence[VT], Reactive):
     __data: list[VT]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
-        raise TypeError("SyncList cannot be instantiated directly.")
+        raise TypeError("`SyncList` cannot be instantiated directly.")
 
     @classmethod
-    def __syncwave_new__(cls: type[SyncList], data: list[VT]) -> Self:
-        self: SyncList = object.__new__(cls)
+    def __syncwave_new__(cls, data: list[VT]) -> Self:
+        self = object.__new__(cls)
         self.__data = data
         return self
 
@@ -262,7 +254,7 @@ class SyncList(MutableSequence[VT], Reactive):
                 item.__syncwave_kill__()
         self.__syncwave_live__ = False
 
-    def __syncwave_update__(self, new: Sequence[VT]) -> None:
+    def __syncwave_update__(self, new: Self | list[VT]) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         new = self.__syncwave_ctx__.type_adapter.validate_python(new)
 
@@ -389,9 +381,9 @@ class SyncList(MutableSequence[VT], Reactive):
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
         args = get_args(src)
         if args:
-            sequence_t_schema = handler.generate_schema(Sequence[args[0]])
+            sequence_t_schema = handler.generate_schema(list[args[0]])
         else:
-            sequence_t_schema = handler.generate_schema(Sequence)
+            sequence_t_schema = handler.generate_schema(list)
 
         non_instance_schema = cs.no_info_after_validator_function(
             cls.__syncwave_new__, sequence_t_schema
@@ -420,11 +412,11 @@ class SyncSet(MutableSet[VT], Reactive):
     __data: set[VT]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
-        raise TypeError("SyncSet cannot be instantiated directly.")
+        raise TypeError("`SyncSet` cannot be instantiated directly.")
 
     @classmethod
-    def __syncwave_new__(cls: type[SyncSet], data: set[VT]) -> Self:
-        self: SyncSet = object.__new__(cls)
+    def __syncwave_new__(cls, data: set[VT]) -> Self:
+        self = object.__new__(cls)
         self.__data = data
         return self
 
@@ -438,7 +430,7 @@ class SyncSet(MutableSet[VT], Reactive):
         # no need to loop through items since set can't hold reactive items
         self.__syncwave_live__ = False
 
-    def __syncwave_update__(self, new: Set[VT]) -> None:
+    def __syncwave_update__(self, new: Self | set[VT]) -> None:
         new = self.__syncwave_ctx__.type_adapter.validate_python(new)
         self.__data = new.__data
 
@@ -482,9 +474,9 @@ class SyncSet(MutableSet[VT], Reactive):
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
         args = get_args(src)
         if args:
-            set_t_schema = handler.generate_schema(Set[args[0]])
+            set_t_schema = handler.generate_schema(set[args[0]])
         else:
-            set_t_schema = handler.generate_schema(Set)
+            set_t_schema = handler.generate_schema(set)
 
         non_instance_schema = cs.no_info_after_validator_function(
             cls.__syncwave_new__, set_t_schema
@@ -506,7 +498,7 @@ SyncCollection.register(SyncSet)
 
 def register(*args: Any, **kwargs: Any) -> NoReturn:
     """SyncCollection does not support class registration."""
-    raise TypeError("SyncCollection does not support class registration.")
+    raise TypeError("`SyncCollection` does not support class registration.")
 
 
 SyncCollection.register = register
