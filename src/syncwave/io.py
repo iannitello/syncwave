@@ -69,7 +69,7 @@ class _IO:
 
     def remove_file(self, path: Path) -> None:
         if path.exists() and not path.is_file():
-            raise FileNotFoundError(f"Path '{path}' is not a file.")
+            raise OSError(f"Path '{path}' exists but is not a regular file.")
         path.unlink(missing_ok=True)
 
     def init_json(self, path: Path, ta: TypeAdapter = _any_ta) -> Any | EmptyFileType:
@@ -83,6 +83,7 @@ class _IO:
         return self._deserialize(content, ta, path)
 
     def read_json(self, path: Path, ta: TypeAdapter = _any_ta) -> Any:
+        # never returns EmptyFile, it throws an error if the file is empty
         with self._lock:
             if path in self._pending_writes:
                 value, previous_ta, _ = self._pending_writes[path]
@@ -104,7 +105,7 @@ class _IO:
     def _scheduled_write(self, path: Path) -> None:
         with self._lock:
             if path not in self._pending_writes:
-                return  # is this possible? should it be an error?
+                return  # TODO is this possible? should it be an error?
             value, ta, _ = self._pending_writes.pop(path)
         self._atomic_write(path, self._serialize(value, ta))
 

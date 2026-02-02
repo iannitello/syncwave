@@ -32,7 +32,7 @@ class SyncModelSupportedMeta(ABCMeta):
 
 @final
 class SyncModelSupported(metaclass=SyncModelSupportedMeta):
-    def __init_subclass__(cls, /, **kwargs: Any) -> None:
+    def __init_subclass__(cls, /, **kwargs: Any) -> NoReturn:
         raise TypeError("SyncModelSupported cannot be subclassed.")
 
 
@@ -175,7 +175,7 @@ def create_sync_model(cls: type[T], rename: bool | str = True) -> type[T]:
 
 
 def _setattr_union(
-    self: SyncModel[T],
+    self: SyncModel,
     field_name: str,
     old_value: Any,
     new_value: Any,
