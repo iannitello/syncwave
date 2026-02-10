@@ -12,7 +12,15 @@ from pydantic import BaseModel, TypeAdapter
 from pydantic import GetCoreSchemaHandler as Handler
 from pydantic_core import core_schema as cs
 
-from .reactive import Context, ContextMap, Reactive, StoreRef, assert_never, mut_atomic
+from .reactive import (
+    Context,
+    ContextMap,
+    DeadReferenceError,
+    Reactive,
+    StoreRef,
+    assert_never,
+    mut_atomic,
+)
 
 
 class SyncModelSupportedMeta(ABCMeta):
@@ -83,6 +91,9 @@ class SyncModel(Reactive):
             value = getattr(self, name, None)
             if isinstance(value, Reactive):
                 value.__syncwave_kill__()
+        # see the comment in __getattr__ for why we pop the fields from __dict__
+        for name in self.__syncwave_ctx__.fields_type_adapter:
+            self.__dict__.pop(name, None)
         object.__setattr__(self, "__syncwave_live__", False)
 
     def __syncwave_update__(self, new: Self | Mapping[str, Any]) -> None:
@@ -109,6 +120,25 @@ class SyncModel(Reactive):
                 _setattr_union(self, name, old_value, new_value, field_ctx, o_setattr)
             else:
                 assert_never()
+
+    def __getattr__(self, name: str) -> Any:
+        # __getattribute__ would always trigger (methods, internal properties, etc.).
+        # Instead, we pop the fields from __dict__ when the instance is killed
+        # so subsequent attribute access triggers __getattr__,
+        # and we can raise DeadReferenceError.
+
+        live = self.__dict__.get("__syncwave_live__")
+        if live is not None:  # instance is initialized
+            ctx = self.__syncwave_ctx__
+            if name in ctx.fields_type_adapter:
+                if live:
+                    # __getattr__ should never be called for a tracked field
+                    # if the instance is still alive
+                    assert_never()
+                raise DeadReferenceError(reference=self)
+
+        o_getattr = self.__syncwave_original_cls__.__getattr__
+        return o_getattr(self, name)
 
     @mut_atomic
     def __setattr__(self, name: str, new_value: Any) -> None:
