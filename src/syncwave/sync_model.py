@@ -141,10 +141,13 @@ class SyncModel(Reactive):
 
     @mut_atomic
     def __delattr__(self, name: str) -> None:
+        ctx = self.__syncwave_ctx__
+        if name in ctx.fields_type_adapter:
+            raise AttributeError(
+                f"Cannot delete tracked field `{name}` to keep the model in sync. "
+                "Set it to `None` instead (if the field type allows it)."
+            )
         o_delattr = self.__syncwave_original_cls__.__delattr__
-        old_value = getattr(self, name, None)
-        if isinstance(old_value, Reactive):
-            old_value.__syncwave_kill__()
         o_delattr(self, name)
 
     @classmethod
