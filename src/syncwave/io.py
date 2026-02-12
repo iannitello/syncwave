@@ -4,7 +4,7 @@ import contextlib
 import os
 import sys
 from pathlib import Path
-from tempfile import mkstemp
+from tempfile import TemporaryDirectory, mkstemp
 from threading import Lock, Timer
 from typing import Any, Final
 
@@ -31,6 +31,19 @@ class _IO:
     def __init__(self) -> None:
         self._lock = Lock()
         self._pending_writes: dict[Path, PendingWrite] = {}
+
+    def file_name_guard(self, name: str) -> None:
+        # assumes name is already validated to be a non-empty string
+        if os.sep in name or (os.altsep is not None and os.altsep in name):
+            sep = repr(os.sep) + (f" or {os.altsep!r}" if os.altsep is not None else "")
+            raise ValueError(f"File name cannot contain path separators ({sep}).")
+        if Path(name).is_absolute():
+            raise ValueError("File name cannot be an absolute path.")
+        try:
+            with TemporaryDirectory() as td:
+                (Path(td) / name).mkdir()
+        except OSError as e:
+            raise ValueError(f"File name {name!r} is not valid: {e.strerror}") from None
 
     def sanitize_path(self, path: Path | str) -> Path:
         path_str = os.fspath(path)
