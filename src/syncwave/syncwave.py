@@ -4,19 +4,21 @@ from collections.abc import Iterator, MutableMapping
 from dataclasses import dataclass
 from functools import partial, wraps
 from inspect import isclass
+from keyword import iskeyword
 from pathlib import Path
 from threading import RLock
 from typing import (
     Annotated,
     Any,
     Callable,
+    Literal,
     TypeVar,
     Union,
     get_args,
     get_origin,
-    overload,
 )
 from typing_extensions import ParamSpec
+from weakref import WeakSet
 
 from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
@@ -25,6 +27,7 @@ from .reactive import Context, ContextMap, Reactive, StoreRef, assert_never
 from .sync_collection import (
     KT,
     VT,
+    SyncCollection,
     SyncDict,
     SyncDictCtx,
     SyncList,
@@ -36,7 +39,6 @@ from .sync_model import (
     SyncModel,
     SyncModelCtx,
     SyncModelSupported,
-    T,
     create_sync_model,
 )
 from .watcher import watcher
@@ -76,6 +78,11 @@ class Syncwave(MutableMapping[str, Any]):
         self.__syncwave_lock__ = RLock()
         self.__stores_dir = stores_dir
         self.__stores: dict[str, tuple[Any | EmptyFileType, BaseCtx]] = {}
+        self.__models: WeakSet[type[SyncModelSupported]] = WeakSet()
+
+    @property
+    def stores_dir(self) -> Path:
+        return self.__stores_dir
 
     @global_lock
     def __getitem__(self, key: str) -> Any:
@@ -87,14 +94,12 @@ class Syncwave(MutableMapping[str, Any]):
 
     @global_lock
     def __setitem__(self, key: str, value: Any) -> None:
-        if not isinstance(key, str):
-            raise TypeError(f"Store key must be a string, got `{type(key).__name__}`.")
         if key not in self.__stores:
             raise KeyError(
                 f"Store '{key}' does not exist. "
-                "Use `syncwave.store()` to create one first."
+                "Use `syncwave.create_store(...)`, or `@syncwave.store(...)` first."
             )
-
+        _str_guard("key", key)
         self.__set_store(key, value)
 
     @global_lock
@@ -119,10 +124,6 @@ class Syncwave(MutableMapping[str, Any]):
     def __len__(self) -> int:
         return len(self.__stores)
 
-    @property
-    def stores_dir(self) -> Path:
-        return self.__stores_dir
-
     def __str__(self) -> str:
         items = ", ".join(f"{k!r}: {v[0]}" for k, v in self.__stores.items())
         return "{" + items + "}"
@@ -130,53 +131,69 @@ class Syncwave(MutableMapping[str, Any]):
     def __repr__(self) -> str:
         return f"<Syncwave stores={list(self.__stores.keys())!r}>"
 
-    def reactive(self, cls: type[T], cls_name: str | None = None) -> type[T]:
-        if not isclass(cls):
-            raise TypeError(f"Expected a class, got `{type(cls).__name__}`.")
-        if not issubclass(cls, SyncModelSupported):
-            raise TypeError(f"Expected a SyncModelSupported, got `{cls.__name__}`.")
-        drill_model(cls, as_sync_model=True)
-        return create_sync_model(cls, rename=cls_name or True)
+    @global_lock
+    def reactive(self, _cls: type[SyncModelSupported]) -> type[SyncModel]:
+        if _cls in self.__models:
+            raise ValueError(f"Class '{_cls.__name__}' has already been made reactive.")
 
-    @overload
-    def register(
+        _reactive_guard(_cls)
+        sync_model = create_sync_model(_cls, rename=False)
+        self.__models.add(_cls)
+        return sync_model
+
+    @global_lock
+    def make_reactive(
+        self, cls: type[SyncModelSupported], /, cls_name: str | None = None
+    ) -> type[SyncModel]:
+        if cls in self.__models:
+            raise ValueError(f"Class '{cls.__name__}' has already been made reactive.")
+
+        if cls_name is not None:
+            _str_guard("cls_name", cls_name)
+            if not cls_name.isidentifier() or iskeyword(cls_name):
+                raise ValueError(f"'{cls_name}' is not a valid class name.")
+
+        _reactive_guard(cls)
+        sync_model = create_sync_model(cls, rename=cls_name or True)
+        self.__models.add(cls)
+        return sync_model
+
+    @global_lock
+    def store(
         self,
         *,
-        name: str | None = None,
-        path: Path | None = None,
-    ) -> Callable[[type[T]], type[T]]: ...
-
-    @global_lock
-    def register(self, _cls=None, /, *, name=None, path=None):
-        def decorator(cls: type[T]) -> type[T]:
-            sync_cls = create_sync_model(cls, rename=False)
-            self.store(SyncDict[str, sync_cls], name=name or cls.__name__, path=path)
-            return sync_cls
-
-        # Case 1: called with parentheses, e.g. `@syncwave.register(**kwargs)`
-        if _cls is None:
-            return decorator
-
-        # Case 2: called without parentheses, e.g. `@syncwave.register`
-        return decorator(_cls)
-
-    @global_lock
-    def store(self, tp: type, /, *, name: str, path: str | Path | None = None) -> None:
+        name: str,
+        collection: type[SyncCollection] | Literal["auto"] | None = "auto",
+    ) -> Callable[[type[SyncModelSupported]], type[SyncModel]]:
+        _str_guard("name", name)
         if name in self.__stores:
             raise ValueError(f"Store '{name}' already exists.")
+        io.file_name_guard(name)
 
-        if path is None:
-            path = self.__stores_dir / f"{name.lower()}.json"
-        path = io.sanitize_path(path)
+        def decorator(cls: type[SyncModelSupported]) -> type[SyncModel]:
+            sync_model = self.reactive(cls)
+            # TODO needs collection wrapping
+            self.__create_store(SyncDict[str, sync_model], name=name or cls.__name__)
+            return sync_model
 
-        if path in (store[1].path for store in self.__stores.values()):
-            raise ValueError(f"Path '{path}' is already in use by another store.")
+        return decorator
 
+    @global_lock
+    def create_store(self, tp: type, /, *, name: str) -> None:
+        _str_guard("name", name)
+        if name in self.__stores:
+            raise ValueError(f"Store '{name}' already exists.")
+        io.file_name_guard(name)
+
+        self.__create_store(tp, name)
+
+    def __create_store(self, tp: type, name: str) -> None:
         try:
             type_adapter = TypeAdapter(tp)
         except PydanticSchemaGenerationError as e:
             raise TypeError(f"Type `{tp}` is not supported by Pydantic.") from e
 
+        path = self.__stores_dir / f"{name.lower()}.json"
         sref = StoreRef(lock=RLock(), on_change=partial(self.__on_store_change, name))
         ctx = drill_tp(tp)
         base_ctx = BaseCtx(name, path, type_adapter, sref, ctx)
@@ -192,6 +209,7 @@ class Syncwave(MutableMapping[str, Any]):
         value, base_ctx = self.__stores[name]
         io.write_json(base_ctx.path, value, base_ctx.type_adapter)
 
+    # TODO global lock?
     def __on_file_change(self, base_ctx: BaseCtx) -> None:
         try:
             new_value = io.read_json(base_ctx.path, base_ctx.type_adapter)
@@ -386,3 +404,19 @@ def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
         inner_ctx=None,
         inner_type_adapter=inner_type_adapter,
     )
+
+
+def _str_guard(param: str, value: Any) -> None:
+    if not isinstance(value, str):
+        tp = type(value).__name__
+        raise TypeError(f"Expected a `str` for param '{param}', got `{tp}`.")
+    if not value.strip():
+        raise ValueError(f"'{param}' cannot be empty or whitespace only.")
+
+
+def _reactive_guard(cls: type[SyncModelSupported]) -> None:
+    if not isclass(cls):
+        raise TypeError(f"Expected a class, got `{type(cls).__name__}`.")
+    if not issubclass(cls, SyncModelSupported):
+        raise TypeError(f"Expected a SyncModelSupported, got `{cls.__name__}`.")
+    drill_model(cls, as_sync_model=True)

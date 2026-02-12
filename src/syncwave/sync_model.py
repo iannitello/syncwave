@@ -137,6 +137,7 @@ class SyncModel(Reactive):
                     assert_never()
                 raise DeadReferenceError(reference=self)
 
+        # TODO: may not have a __getattr__
         o_getattr = self.__syncwave_original_cls__.__getattr__
         return o_getattr(self, name)
 
