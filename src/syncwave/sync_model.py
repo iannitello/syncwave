@@ -5,7 +5,7 @@ from abc import ABCMeta
 from collections.abc import Mapping
 from dataclasses import dataclass
 from inspect import isclass
-from typing import Any, Callable, Generic, NoReturn, TypeVar, final
+from typing import Any, Callable, NoReturn, final
 from typing_extensions import Self
 
 from pydantic import BaseModel, TypeAdapter
@@ -27,6 +27,8 @@ class SyncModelSupportedMeta(ABCMeta):
     def __subclasscheck__(self, subclass: type[Any]) -> bool:
         if not isclass(subclass):
             return False
+        if issubclass(subclass, SyncModel):
+            return False
         # RootModel is a subclass of BaseModel, and a pydantic dataclass is a dataclass
         return issubclass(subclass, BaseModel) or dc.is_dataclass(subclass)
 
@@ -44,30 +46,28 @@ class SyncModelSupported(metaclass=SyncModelSupportedMeta):
         raise TypeError("SyncModelSupported cannot be subclassed.")
 
 
-T = TypeVar("T")
-
-
 @dataclass(frozen=True)
-class SyncModelCtx(Generic[T], Context):
-    tp: type[T]
-    type_adapter: TypeAdapter[T]
+class SyncModelCtx(Context):
+    tp: type[SyncModel]
+    type_adapter: TypeAdapter[SyncModel]
     fields_ctx: dict[str, Context | ContextMap]
     fields_type_adapter: dict[str, TypeAdapter[Any]]
 
 
 class SyncModel(Reactive):
-    __syncwave_ctx__: SyncModelCtx[T]
-    __syncwave_original_cls__: type[T]
+    __syncwave_ctx__: SyncModelCtx
+    __syncwave_original_cls__: type[SyncModelSupported]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
         raise TypeError(f"{cls.__name__} cannot be instantiated directly.")
 
     @classmethod
-    def __syncwave_new__(cls, self: T) -> Self:
-        self.__class__ = cls
-        return self
+    def __syncwave_new__(cls, instance: SyncModelSupported) -> Self:
+        instance.__class__ = cls
+        instance: SyncModel = instance
+        return instance
 
-    def __syncwave_init__(self, sref: StoreRef, ctx: SyncModelCtx[T]) -> None:
+    def __syncwave_init__(self, sref: StoreRef, ctx: SyncModelCtx) -> None:
         object.__setattr__(self, "__syncwave_sref__", sref)
         object.__setattr__(self, "__syncwave_ctx__", ctx)
         object.__setattr__(self, "__syncwave_live__", True)
@@ -198,7 +198,9 @@ class SyncModel(Reactive):
         )
 
 
-def create_sync_model(cls: type[T], rename: bool | str = True) -> type[T]:
+def create_sync_model(
+    cls: type[SyncModelSupported], rename: bool | str = True
+) -> type[SyncModel]:
     cls_name = f"Sync{cls.__name__}" if rename is True else rename or cls.__name__
     return type(
         cls_name,
