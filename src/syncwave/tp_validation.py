@@ -25,7 +25,6 @@ from .reactive import Context, ContextMap, Reactive, assert_never
 from .sync_collection import (
     KT,
     VT,
-    SyncCollection,
     SyncDict,
     SyncDictCtx,
     SyncList,
@@ -58,9 +57,9 @@ def sync_model_guard(
 
 
 def resolve_store_type(
-    collection: type[SyncCollection] | Literal["auto"] | None,
     cls: type[SyncModelSupported],
     sync_model: type[SyncModel],
+    collection: type[SyncDict] | type[SyncList] | Literal["auto"] | None,
 ) -> type:
     resolved_collection = collection  # non "auto" case
     if collection == "auto":
@@ -88,9 +87,11 @@ def resolve_store_type(
         return SyncDict[str, sync_model]
     if origin is SyncList:
         return SyncList[sync_model]
+
+    err = "`collection` must be a `SyncDict`, `SyncList`, `None`, or `'auto'`.`"
     if origin is SyncSet:
-        return SyncSet[sync_model]
-    raise TypeError("`collection` must be a `SyncCollection` type, None, or 'auto'.")
+        err += " `SyncSet` cannot be used because it cannot contain reactive items."
+    raise ValueError(err)
 
 
 def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None:
