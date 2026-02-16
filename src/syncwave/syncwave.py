@@ -14,9 +14,9 @@ from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
 from .io import EmptyFile, EmptyFileType, io
 from .reactive import Context, ContextMap, Reactive, StoreRef, assert_never
-from .sync_collection import SyncCollection, SyncDict
+from .sync_collection import SyncCollection
 from .sync_model import SyncModel, SyncModelSupported, create_sync_model
-from .tp_validation import drill_tp, str_guard, sync_model_guard
+from .tp_validation import drill_tp, resolve_store_type, str_guard, sync_model_guard
 from .watcher import watcher
 
 
@@ -109,27 +109,25 @@ class Syncwave(MutableMapping[str, Any]):
 
     @global_lock
     def reactive(self, _cls: type[SyncModelSupported]) -> type[SyncModel]:
-        if _cls in self.__models:
-            raise ValueError(f"Class '{_cls.__name__}' has already been made reactive.")
-
-        sync_model_guard(_cls)
+        sync_model_guard(_cls, self.__models)
         sync_model = create_sync_model(_cls, rename=False)
         self.__models.add(_cls)
         return sync_model
 
     @global_lock
     def make_reactive(
-        self, cls: type[SyncModelSupported], /, cls_name: str | None = None
+        self,
+        cls: type[SyncModelSupported],
+        /,
+        cls_name: str | None = None,
     ) -> type[SyncModel]:
-        if cls in self.__models:
-            raise ValueError(f"Class '{cls.__name__}' has already been made reactive.")
+        sync_model_guard(cls, self.__models)
 
         if cls_name is not None:
             str_guard("cls_name", cls_name)
             if not cls_name.isidentifier() or iskeyword(cls_name):
                 raise ValueError(f"'{cls_name}' is not a valid class name.")
 
-        sync_model_guard(cls)
         sync_model = create_sync_model(cls, rename=cls_name or True)
         self.__models.add(cls)
         return sync_model
@@ -148,9 +146,11 @@ class Syncwave(MutableMapping[str, Any]):
         io.file_name_guard(name)
 
         def decorator(cls: type[SyncModelSupported]) -> type[SyncModel]:
-            sync_model = self.reactive(cls)
-            # TODO needs collection wrapping
-            self.__create_store(SyncDict[str, sync_model], name=name or cls.__name__)
+            sync_model_guard(cls, self.__models)
+            sync_model = create_sync_model(cls, rename=False)
+            store_tp = resolve_store_type(collection, cls, sync_model)
+            self.__create_store(store_tp, name=name or cls.__name__)
+            self.__models.add(cls)
             return sync_model
 
         return decorator
