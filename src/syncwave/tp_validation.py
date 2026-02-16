@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Container
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from enum import Enum
@@ -17,12 +19,13 @@ from re import Pattern
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 from uuid import UUID
 
-from pydantic import ByteSize, TypeAdapter
+from pydantic import ByteSize, RootModel, TypeAdapter
 
 from .reactive import Context, ContextMap, Reactive, assert_never
 from .sync_collection import (
     KT,
     VT,
+    SyncCollection,
     SyncDict,
     SyncDictCtx,
     SyncList,
@@ -41,12 +44,53 @@ def str_guard(param: str, value: Any) -> None:
         raise ValueError(f"'{param}' cannot be empty or whitespace only.")
 
 
-def sync_model_guard(cls: type[SyncModelSupported]) -> None:
+def sync_model_guard(
+    cls: type[SyncModelSupported],
+    models: Container[type[SyncModelSupported]],
+) -> None:
+    if cls in models:
+        raise ValueError(f"Class '{cls.__qualname__}' has already been made reactive.")
     if not isclass(cls):
         raise TypeError(f"Expected a class, got `{type(cls).__qualname__}`.")
     if not issubclass(cls, SyncModelSupported):
         raise TypeError(f"Expected a SyncModelSupported, got `{cls.__qualname__}`.")
     _parse_model(cls, as_sync_model=True)
+
+
+def resolve_store_type(
+    collection: type[SyncCollection] | Literal["auto"] | None,
+    cls: type[SyncModelSupported],
+    sync_model: type[SyncModel],
+) -> type:
+    resolved_collection = collection  # non "auto" case
+    if collection == "auto":
+        if issubclass(cls, RootModel):
+            resolved_collection = None
+        elif "key" in (fields := _get_fields(cls)):
+            resolved_collection = SyncDict[fields["key"].tp]
+        else:
+            resolved_collection = SyncList
+
+    origin = get_origin(resolved_collection) or resolved_collection
+    args = get_args(resolved_collection)
+
+    if (len_args := len(args)) > 0:
+        if origin is not SyncDict:
+            raise TypeError(f"`{origin.__qualname__}` does not support type arguments.")
+        if origin is SyncDict and len_args > 1:
+            raise TypeError("`SyncDict` supports only one type argument for the key.")
+        _validate_key_tp(args[0])
+        return SyncDict[args[0], sync_model]
+
+    if origin is None:
+        return sync_model
+    if origin is SyncDict:
+        return SyncDict[str, sync_model]
+    if origin is SyncList:
+        return SyncList[sync_model]
+    if origin is SyncSet:
+        return SyncSet[sync_model]
+    raise TypeError("`collection` must be a `SyncCollection` type, None, or 'auto'.")
 
 
 def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None:
@@ -61,6 +105,8 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None
         ctxs = [drill_tp(member, _err_if_reactive) for member in union_members]
         ctx_map = {ctx.tp: ctx for ctx in ctxs if ctx is not None}
         return ContextMap(ctx_map) if ctx_map else None
+
+    _handle_literal(origin, args)  # nothing to do, just to check there are args
 
     if isclass(origin):
         if issubclass(origin, Reactive):
@@ -86,6 +132,29 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None
     return None
 
 
+@dataclass(frozen=True)
+class _Field:
+    tp: Any
+    is_frozen: bool
+
+
+def _get_fields(cls: type[SyncModelSupported]) -> dict[str, _Field]:
+    fields = (
+        getattr(cls, "model_fields", None)
+        or getattr(cls, "__pydantic_fields__", None)
+        or getattr(cls, "__dataclass_fields__", None)
+    )
+    if not fields:
+        raise TypeError(f"`{cls.__qualname__}` has no fields.")
+    return {
+        field_name: _Field(
+            tp=getattr(field, "annotation", None) or field.type,
+            is_frozen=getattr(field, "frozen", False),
+        )
+        for field_name, field in fields.items()
+    }
+
+
 def _parse_model(cls: type, as_sync_model: bool = False) -> SyncModelCtx | None:
     is_sync_model = issubclass(cls, SyncModel)
     treat_as_sync_model = is_sync_model or as_sync_model
@@ -98,28 +167,22 @@ def _parse_model(cls: type, as_sync_model: bool = False) -> SyncModelCtx | None:
     if model_is_frozen and treat_as_sync_model:
         raise TypeError(f"`{cls.__qualname__}` is frozen and cannot be made reactive.")
 
-    fields = getattr(cls, "__pydantic_fields__", None) or cls.__dataclass_fields__
-    if not fields:
-        raise TypeError(f"`{cls.__qualname__}` has no fields.")
-
     fields_ctx: dict[str, Context | ContextMap] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
 
-    for name, field in fields.items():
-        field_tp = getattr(field, "annotation", None) or field.type
-        field_is_frozen: bool = getattr(field, "frozen", False)
-
+    for field_name, field in _get_fields(cls).items():
+        err = f"Field `{field_name}` in `{cls.__qualname__}` cannot be reactive because"
         if not treat_as_sync_model:
-            err = f"`{cls.__qualname__}` is not a `SyncModel` (for field `{name}`)."
-        elif field_is_frozen:
-            err = f"Field `{name}` in `{cls.__qualname__}` is frozen."
+            err += " it is not contained in a `SyncModel` (breaks the reactive chain)."
+        elif field.is_frozen:
+            err += " it is frozen."
         else:
             err = ""
 
-        field_ctx = drill_tp(field_tp, _err_if_reactive=err)
+        field_ctx = drill_tp(field.tp, _err_if_reactive=err)
         if field_ctx is not None:
-            fields_ctx[name] = field_ctx
-        fields_type_adapter[name] = TypeAdapter(field_tp)
+            fields_ctx[field_name] = field_ctx
+        fields_type_adapter[field_name] = TypeAdapter(field.tp)
 
     if is_sync_model:
         return SyncModelCtx(
@@ -194,7 +257,7 @@ def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
 
 # Types that round-trip as dict keys through JSON (dump_json/validate_json).
 # See: docs.pydantic.dev/latest/concepts/conversion_table/
-_VALID_KEY_TYPES: list[type] = [
+_VALID_DICT_KEY_TYPES: list[type] = [
     str,
     int,
     float,
@@ -218,14 +281,16 @@ _VALID_KEY_TYPES: list[type] = [
 ]
 
 
-_VALID_KEY_TYPES_STR = (
+_VALID_DICT_KEY_TYPES_STR = (
     ", ".join(
-        f"`{tp.__qualname__}`" for tp in _VALID_KEY_TYPES if tp.__module__ == "builtins"
+        f"`{tp.__qualname__}`"
+        for tp in _VALID_DICT_KEY_TYPES
+        if tp.__module__ == "builtins"
     )
     + ", `enum.Enum`, `typing.Literal`, "
     + ", ".join(
         f"`{tp.__module__}.{tp.__qualname__}`"
-        for tp in _VALID_KEY_TYPES
+        for tp in _VALID_DICT_KEY_TYPES
         if tp.__module__ != "builtins"
     )
 )
@@ -246,7 +311,7 @@ def _validate_key_tp(tp: Any) -> None:
     if (literal_members := _handle_literal(origin, args)) is not None:
         [_validate_key_tp(type(member)) for member in literal_members]
         return
-    if origin in _VALID_KEY_TYPES:
+    if origin in _VALID_DICT_KEY_TYPES:
         return
     if isclass(origin) and issubclass(origin, Enum):
         _validate_enum_value_types(origin)
@@ -255,14 +320,14 @@ def _validate_key_tp(tp: Any) -> None:
         f"`{tp_name}` is not a valid dict key type. This is either because:\n"
         "  1. it cannot be serialized to `str` (JSON keys are always strings), or\n"
         "  2. it cannot be deserialized from JSON back to the same type.\n\n"
-        f"The supported types are: {_VALID_KEY_TYPES_STR}."
+        f"The supported types are: {_VALID_DICT_KEY_TYPES_STR}."
     )
 
 
 def _validate_enum_value_types(enum_cls: type[Enum]) -> None:
     for member in enum_cls:
         val_tp = type(member.value)
-        if val_tp in _VALID_KEY_TYPES:
+        if val_tp in _VALID_DICT_KEY_TYPES:
             continue
         if isclass(val_tp) and issubclass(val_tp, Enum):
             _validate_enum_value_types(val_tp)
@@ -270,7 +335,7 @@ def _validate_enum_value_types(enum_cls: type[Enum]) -> None:
         raise TypeError(
             f"Enum `{enum_cls.__qualname__}` has member `{member.name}` with value "
             f"type `{val_tp.__qualname__}`, which is not a valid key type. "
-            f"The supported key types are: {_VALID_KEY_TYPES_STR}."
+            f"The supported key types are: {_VALID_DICT_KEY_TYPES_STR}."
         )
 
 
