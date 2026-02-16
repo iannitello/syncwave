@@ -14,7 +14,7 @@ from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
 from .io import EmptyFile, EmptyFileType, io
 from .reactive import Context, ContextMap, Reactive, StoreRef, assert_never
-from .sync_collection import SyncCollection
+from .sync_collection import SyncDict, SyncList
 from .sync_model import SyncModel, SyncModelSupported, create_sync_model
 from .tp_validation import drill_tp, resolve_store_type, str_guard, sync_model_guard
 from .watcher import watcher
@@ -137,7 +137,7 @@ class Syncwave(MutableMapping[str, Any]):
         self,
         *,
         name: str,
-        collection: type[SyncCollection] | Literal["auto"] | None = "auto",
+        collection: type[SyncDict] | type[SyncList] | Literal["auto"] | None = "auto",
     ) -> Callable[[type[SyncModelSupported]], type[SyncModel]]:
         if name in self.__stores:
             raise ValueError(f"Store '{name}' already exists.")
@@ -148,7 +148,7 @@ class Syncwave(MutableMapping[str, Any]):
         def decorator(cls: type[SyncModelSupported]) -> type[SyncModel]:
             sync_model_guard(cls, self.__models)
             sync_model = create_sync_model(cls, rename=False)
-            store_tp = resolve_store_type(collection, cls, sync_model)
+            store_tp = resolve_store_type(cls, sync_model, collection)
             self.__create_store(store_tp, name=name or cls.__name__)
             self.__models.add(cls)
             return sync_model
