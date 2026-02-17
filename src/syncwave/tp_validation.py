@@ -45,9 +45,9 @@ def str_guard(param: str, value: Any) -> None:
 
 def sync_model_guard(
     cls: type[SyncModelSupported],
-    models: Container[type[SyncModelSupported]],
+    known_models: Container[type[SyncModelSupported]],
 ) -> None:
-    if cls in models:
+    if cls in known_models:
         raise ValueError(f"Class '{cls.__qualname__}' has already been made reactive.")
     if not isclass(cls):
         raise TypeError(f"Expected a class, got `{type(cls).__qualname__}`.")
@@ -56,7 +56,7 @@ def sync_model_guard(
     _parse_model(cls, as_sync_model=True)
 
 
-def resolve_store_type(
+def collection_wrap(
     cls: type[SyncModelSupported],
     sync_model: type[SyncModel],
     collection: type[SyncDict] | type[SyncList] | Literal["auto"] | None,
@@ -88,7 +88,7 @@ def resolve_store_type(
     if origin is SyncList:
         return SyncList[sync_model]
 
-    err = "`collection` must be a `SyncDict`, `SyncList`, `None`, or `'auto'`.`"
+    err = "`collection` must be one of: `SyncDict`, `SyncList`, `None`, or `'auto'`."
     if origin is SyncSet:
         err += " `SyncSet` cannot be used because it cannot contain reactive items."
     raise ValueError(err)
@@ -124,8 +124,13 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None
             assert_never()
         if issubclass(origin, SyncModelSupported):
             return _parse_model(origin)
-        if issubclass(origin, dict) and len(args) > 0:
+
+        if issubclass(origin, dict) and args:
             _validate_key_tp(args[0])
+        if issubclass(origin, (set, frozenset)) and args:
+            arg_name = getattr(args[0], "__qualname__", repr(args[0]))
+            err = f"`{tp_name}` must hold hashable elements, got `{arg_name}`."
+            _validate_hashable(args[0], err)
 
     for arg in args:
         drill_tp(arg, _err_if_reactive=f"`{tp_name}` is not a reactive container.")
@@ -241,6 +246,9 @@ def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
     args = get_args(tp)
 
     if len(args) == 1:
+        tp_name = getattr(args[0], "__qualname__", repr(args[0]))
+        err = f"`SyncSet` must hold hashable elements, got `{tp_name}`."
+        _validate_hashable(args[0], err)
         drill_tp(args[0], _err_if_reactive="`SyncSet` cannot hold reactive items.")
         inner_type_adapter = TypeAdapter(args[0])
     elif len(args) == 0:
@@ -254,6 +262,34 @@ def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
         inner_ctx=None,
         inner_type_adapter=inner_type_adapter,
     )
+
+
+def _validate_hashable(tp: Any, _err: str) -> None:
+    origin = get_origin(tp) or tp
+    args = get_args(tp)
+
+    if (annotated_inner := _handle_annotated(origin, args)) is not None:
+        _validate_hashable(annotated_inner, _err)
+        return
+    if (union_members := _handle_union(origin, args)) is not None:
+        [_validate_hashable(member, _err) for member in union_members]
+        return
+    if (literal_members := _handle_literal(origin, args)) is not None:
+        [_validate_hashable(type(member), _err) for member in literal_members]
+        return
+
+    if isclass(origin):
+        if getattr(origin, "__hash__", None) is None:
+            raise TypeError(_err)
+        # tuple and frozenset are hashable only if all elements are hashable
+        if issubclass(origin, (tuple, frozenset)) and args:
+            [_validate_hashable(arg, _err) for arg in args]
+        # enums are hashable only if their members' values are hashable
+        if issubclass(origin, Enum):
+            [_validate_hashable(type(member.value), _err) for member in origin]
+        return
+
+    [_validate_hashable(arg, _err) for arg in args]
 
 
 # Types that round-trip as dict keys through JSON (dump_json/validate_json).
@@ -298,7 +334,7 @@ _VALID_DICT_KEY_TYPES_STR = (
 
 
 def _validate_key_tp(tp: Any) -> None:
-    # JSON keys are strings, so the type must serialize to str and parse back from str.
+    # JSON keys are strings, so the type must serialize to str and parseable back.
     origin = get_origin(tp) or tp
     args = get_args(tp)
     tp_name = getattr(origin, "__qualname__", repr(origin))
@@ -312,32 +348,20 @@ def _validate_key_tp(tp: Any) -> None:
     if (literal_members := _handle_literal(origin, args)) is not None:
         [_validate_key_tp(type(member)) for member in literal_members]
         return
+
+    if isclass(origin) and issubclass(origin, Enum):
+        [_validate_key_tp(type(member.value)) for member in origin]
+        return
     if origin in _VALID_DICT_KEY_TYPES:
         return
-    if isclass(origin) and issubclass(origin, Enum):
-        _validate_enum_value_types(origin)
-        return
+
     raise TypeError(
         f"`{tp_name}` is not a valid dict key type. This is either because:\n"
         "  1. it cannot be serialized to `str` (JSON keys are always strings), or\n"
-        "  2. it cannot be deserialized from JSON back to the same type.\n\n"
-        f"The supported types are: {_VALID_DICT_KEY_TYPES_STR}."
+        "  2. it cannot be deserialized from JSON back to the same type.\n"
+        "  3. it is not hashable.\n\n"
+        f"The key types currently supported are: {_VALID_DICT_KEY_TYPES_STR}."
     )
-
-
-def _validate_enum_value_types(enum_cls: type[Enum]) -> None:
-    for member in enum_cls:
-        val_tp = type(member.value)
-        if val_tp in _VALID_DICT_KEY_TYPES:
-            continue
-        if isclass(val_tp) and issubclass(val_tp, Enum):
-            _validate_enum_value_types(val_tp)
-            continue
-        raise TypeError(
-            f"Enum `{enum_cls.__qualname__}` has member `{member.name}` with value "
-            f"type `{val_tp.__qualname__}`, which is not a valid key type. "
-            f"The supported key types are: {_VALID_DICT_KEY_TYPES_STR}."
-        )
 
 
 def _handle_annotated(origin: Any, args: tuple[Any, ...]) -> Any | None:
