@@ -24,14 +24,23 @@ from .reactive import (
     mut_atomic,
 )
 
-KT = TypeVar("KT", bound=Union[str, int, float, bool, None])
-VT = TypeVar("VT")
+KT = TypeVar("KT")
+VT = TypeVar("VT", bound=Union[Reactive, Any])
 
 
 @final
 class SyncCollection(Reactive):
     def __init_subclass__(cls, /, **kwargs: Any) -> NoReturn:
-        raise TypeError("`SyncCollection` cannot be subclassed.")
+        raise TypeError("SyncCollection cannot be subclassed.")
+
+    def __syncwave_init__(self, sref: StoreRef, ctx: Context) -> None:
+        raise NotImplementedError
+
+    def __syncwave_kill__(self) -> None:
+        raise NotImplementedError
+
+    def __syncwave_update__(self, new: Any) -> None:
+        raise NotImplementedError
 
 
 @dataclass(frozen=True)
@@ -46,14 +55,31 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
     __syncwave_ctx__: SyncDictCtx[KT, VT]
     __data: dict[KT, VT]
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
-        raise TypeError("`SyncDict` cannot be instantiated directly.")
-
     @classmethod
-    def __syncwave_new__(cls, data: dict[KT, VT]) -> Self:
+    def __new(cls, data: dict[KT, VT]) -> Self:
         self = object.__new__(cls)
         self.__data = data
         return self
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
+        args = get_args(src)
+        if args:
+            kt, vt = args[0], args[1]
+            dict_schema = handler.generate_schema(dict[kt, vt])
+        else:
+            dict_schema = handler.generate_schema(dict)
+
+        inst_schema = cs.is_instance_schema(cls)
+        non_inst_schema = cs.no_info_after_validator_function(cls.__new, dict_schema)
+
+        return cs.union_schema(
+            [inst_schema, non_inst_schema],
+            serialization=cs.wrap_serializer_function_ser_schema(
+                lambda v, nxt: nxt(v.__data),
+                schema=dict_schema,
+            ),
+        )
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncDictCtx[KT, VT]) -> None:
         self.__syncwave_sref__ = sref
@@ -84,17 +110,17 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
 
     def __syncwave_update__(self, new: Self | dict[KT, VT]) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
-        new = self.__syncwave_ctx__.type_adapter.validate_python(new)
+        new_ = self.__syncwave_ctx__.type_adapter.validate_python(new)
 
         # case 1: non-reactive content type
         if inner_ctx is None:
-            self.__data = new.__data
+            self.__data = new_.__data
         # case 2: fixed reactive content type
         elif isinstance(inner_ctx, Context):
-            old_keys, new_keys = set(self.__data.keys()), set(new.__data.keys())
+            old_keys, new_keys = set(self.__data.keys()), set(new_.__data.keys())
             # items to add and update
             for key in new_keys:
-                old_item, new_item = self.__data.get(key), new.__data[key]
+                old_item, new_item = self.__data.get(key), new_.__data[key]
                 self.__setitem_reactive(key, old_item, new_item, inner_ctx)
             # items to remove
             for key in old_keys - new_keys:
@@ -102,10 +128,10 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
                 old_item.__syncwave_kill__()
         # case 3: union content type
         elif isinstance(inner_ctx, ContextMap):
-            old_keys, new_keys = set(self.__data.keys()), set(new.__data.keys())
+            old_keys, new_keys = set(self.__data.keys()), set(new_.__data.keys())
             # items to add and update
             for key in new_keys:
-                old_item, new_item = self.__data.get(key), new.__data[key]
+                old_item, new_item = self.__data.get(key), new_.__data[key]
                 self.__setitem_union(key, old_item, new_item, inner_ctx)
             # items to remove
             for key in old_keys - new_keys:
@@ -177,33 +203,13 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         same_type = type(o) is (new_type := type(n))
 
         if old_is_reactive and new_is_reactive and same_type:
-            o.__syncwave_update__(n)
+            o.__syncwave_update__(n)  # ty: ignore[unresolved-attribute] (aliased conditional expressions are not supported by ty)
         else:
             if old_is_reactive:
-                o.__syncwave_kill__()
+                o.__syncwave_kill__()  # ty: ignore[unresolved-attribute] (aliased conditional expressions are not supported by ty)
             if new_is_reactive:
                 n.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
             self.__data[k] = n
-
-    @classmethod
-    def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
-        args = get_args(src)
-        if args:
-            mapping_t_schema = handler.generate_schema(dict[args[0], args[1]])
-        else:
-            mapping_t_schema = handler.generate_schema(dict)
-
-        non_instance_schema = cs.no_info_after_validator_function(
-            cls.__syncwave_new__, mapping_t_schema
-        )
-        instance_schema = cs.is_instance_schema(cls)
-        return cs.union_schema(
-            [instance_schema, non_instance_schema],
-            serialization=cs.wrap_serializer_function_ser_schema(
-                lambda v, nxt: nxt(v.__data),
-                schema=mapping_t_schema,
-            ),
-        )
 
 
 @dataclass(frozen=True)
@@ -218,14 +224,31 @@ class SyncList(MutableSequence[VT], Reactive):
     __syncwave_ctx__: SyncListCtx[VT]
     __data: list[VT]
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
-        raise TypeError("`SyncList` cannot be instantiated directly.")
-
     @classmethod
-    def __syncwave_new__(cls, data: list[VT]) -> Self:
+    def __new(cls, data: list[VT]) -> Self:
         self = object.__new__(cls)
         self.__data = data
         return self
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
+        args = get_args(src)
+        if args:
+            vt = args[0]
+            list_schema = handler.generate_schema(list[vt])
+        else:
+            list_schema = handler.generate_schema(list)
+
+        inst_schema = cs.is_instance_schema(cls)
+        non_inst_schema = cs.no_info_after_validator_function(cls.__new, list_schema)
+
+        return cs.union_schema(
+            [inst_schema, non_inst_schema],
+            serialization=cs.wrap_serializer_function_ser_schema(
+                lambda v, nxt: nxt(v.__data),
+                schema=list_schema,
+            ),
+        )
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncListCtx[VT]) -> None:
         self.__syncwave_sref__ = sref
@@ -256,22 +279,22 @@ class SyncList(MutableSequence[VT], Reactive):
 
     def __syncwave_update__(self, new: Self | list[VT]) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
-        new = self.__syncwave_ctx__.type_adapter.validate_python(new)
+        new_ = self.__syncwave_ctx__.type_adapter.validate_python(new)
 
         # case 1: non-reactive content type
         if inner_ctx is None:
-            self.__data = new.__data
+            self.__data = new_.__data
         # case 2: fixed reactive content type
         elif isinstance(inner_ctx, Context):
-            old_len, new_len = len(self.__data), len(new.__data)
+            old_len, new_len = len(self.__data), len(new_.__data)
             # items to update
             for i in range(min(old_len, new_len)):
-                old_item, new_item = self.__data[i], new.__data[i]
+                old_item, new_item = self.__data[i], new_.__data[i]
                 old_item.__syncwave_update__(new_item)
             # items to add
             if new_len > old_len:
                 for i in range(old_len, new_len):
-                    new_item = new.__data[i]
+                    new_item = new_.__data[i]
                     new_item.__syncwave_init__(self.__syncwave_sref__, inner_ctx)
                     self.__data.append(new_item)
             # items to remove
@@ -281,19 +304,18 @@ class SyncList(MutableSequence[VT], Reactive):
                     old_item.__syncwave_kill__()
         # case 3: union content type
         elif isinstance(inner_ctx, ContextMap):
-            old_len, new_len = len(self.__data), len(new.__data)
+            old_len, new_len = len(self.__data), len(new_.__data)
             # items to update
             for i in range(min(old_len, new_len)):
-                old_item, new_item = self.__data[i], new.__data[i]
+                old_item, new_item = self.__data[i], new_.__data[i]
                 self.__setitem_union(i, old_item, new_item, inner_ctx)
             # items to add
             if new_len > old_len:
                 for i in range(old_len, new_len):
-                    new_item = new.__data[i]
+                    new_item = new_.__data[i]
                     if isinstance(new_item, Reactive):
                         new_item.__syncwave_init__(
-                            self.__syncwave_sref__,
-                            inner_ctx[type(new_item)],
+                            self.__syncwave_sref__, inner_ctx[type(new_item)]
                         )
                     self.__data.append(new_item)
             # items to remove
@@ -377,26 +399,6 @@ class SyncList(MutableSequence[VT], Reactive):
                 n.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
             self.__data[i] = n
 
-    @classmethod
-    def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
-        args = get_args(src)
-        if args:
-            sequence_t_schema = handler.generate_schema(list[args[0]])
-        else:
-            sequence_t_schema = handler.generate_schema(list)
-
-        non_instance_schema = cs.no_info_after_validator_function(
-            cls.__syncwave_new__, sequence_t_schema
-        )
-        instance_schema = cs.is_instance_schema(cls)
-        return cs.union_schema(
-            [instance_schema, non_instance_schema],
-            serialization=cs.wrap_serializer_function_ser_schema(
-                lambda v, nxt: nxt(v.__data),
-                schema=sequence_t_schema,
-            ),
-        )
-
 
 @dataclass(frozen=True)
 class SyncSetCtx(Generic[VT], Context):
@@ -411,14 +413,31 @@ class SyncSet(MutableSet[VT], Reactive):
     __syncwave_ctx__: SyncSetCtx[VT]
     __data: set[VT]
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
-        raise TypeError("`SyncSet` cannot be instantiated directly.")
-
     @classmethod
-    def __syncwave_new__(cls, data: set[VT]) -> Self:
+    def __new(cls, data: set[VT]) -> Self:
         self = object.__new__(cls)
         self.__data = data
         return self
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
+        args = get_args(src)
+        if args:
+            vt = args[0]
+            set_schema = handler.generate_schema(set[vt])
+        else:
+            set_schema = handler.generate_schema(set)
+
+        inst_schema = cs.is_instance_schema(cls)
+        non_inst_schema = cs.no_info_after_validator_function(cls.__new, set_schema)
+
+        return cs.union_schema(
+            [inst_schema, non_inst_schema],
+            serialization=cs.wrap_serializer_function_ser_schema(
+                lambda v, nxt: nxt(v.__data),
+                schema=set_schema,
+            ),
+        )
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncSetCtx[VT]) -> None:
         self.__syncwave_sref__ = sref
@@ -431,8 +450,8 @@ class SyncSet(MutableSet[VT], Reactive):
         self.__syncwave_live__ = False
 
     def __syncwave_update__(self, new: Self | set[VT]) -> None:
-        new = self.__syncwave_ctx__.type_adapter.validate_python(new)
-        self.__data = new.__data
+        new_ = self.__syncwave_ctx__.type_adapter.validate_python(new)
+        self.__data = new_.__data
 
     @atomic
     def __contains__(self, value: object) -> bool:
@@ -470,26 +489,6 @@ class SyncSet(MutableSet[VT], Reactive):
     # __eq__ to be implemented?
     # __hash__ to be implemented?
 
-    @classmethod
-    def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
-        args = get_args(src)
-        if args:
-            set_t_schema = handler.generate_schema(set[args[0]])
-        else:
-            set_t_schema = handler.generate_schema(set)
-
-        non_instance_schema = cs.no_info_after_validator_function(
-            cls.__syncwave_new__, set_t_schema
-        )
-        instance_schema = cs.is_instance_schema(cls)
-        return cs.union_schema(
-            [instance_schema, non_instance_schema],
-            serialization=cs.wrap_serializer_function_ser_schema(
-                lambda v, nxt: nxt(v.__data),
-                schema=set_t_schema,
-            ),
-        )
-
 
 SyncCollection.register(SyncDict)
 SyncCollection.register(SyncList)
@@ -498,7 +497,7 @@ SyncCollection.register(SyncSet)
 
 def register(*args: Any, **kwargs: Any) -> NoReturn:
     """SyncCollection does not support class registration."""
-    raise TypeError("`SyncCollection` does not support class registration.")
+    raise TypeError("SyncCollection does not support class registration.")
 
 
-SyncCollection.register = register
+SyncCollection.register = register  # ty: ignore[invalid-assignment]
