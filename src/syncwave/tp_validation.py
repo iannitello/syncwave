@@ -16,7 +16,7 @@ from ipaddress import (
 )
 from pathlib import Path
 from re import Pattern
-from typing import Annotated, Any, Literal, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_origin
 from uuid import UUID
 
 from pydantic import ByteSize, RootModel, TypeAdapter
@@ -32,7 +32,10 @@ from .sync_collection import (
     SyncSet,
     SyncSetCtx,
 )
-from .sync_model import SyncModel, SyncModelCtx, SyncModelSupported
+from .sync_model import SyncModel, SyncModelCtx, is_sync_model_supported
+
+if TYPE_CHECKING:
+    from .sync_model import _SMS
 
 
 def str_guard(param: str, value: Any) -> None:
@@ -43,21 +46,18 @@ def str_guard(param: str, value: Any) -> None:
         raise ValueError(f"'{param}' cannot be empty or whitespace only.")
 
 
-def sync_model_guard(
-    cls: type[SyncModelSupported],
-    known_models: Container[type[SyncModelSupported]],
-) -> None:
+def sync_model_guard(cls: type[_SMS], known_models: Container[type[_SMS]]) -> None:
     if cls in known_models:
         raise ValueError(f"Class '{cls.__qualname__}' has already been made reactive.")
     if not isclass(cls):
         raise TypeError(f"Expected a class, got `{type(cls).__qualname__}`.")
-    if not issubclass(cls, SyncModelSupported):
+    if not is_sync_model_supported(cls):
         raise TypeError(f"Expected a SyncModelSupported, got `{cls.__qualname__}`.")
     _parse_model(cls, as_sync_model=True)
 
 
 def collection_wrap(
-    cls: type[SyncModelSupported],
+    cls: type[_SMS],
     sync_model: type[SyncModel],
     collection: type[SyncDict] | type[SyncList] | Literal["auto"] | None,
 ) -> type:
@@ -122,7 +122,7 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None
             if issubclass(origin, SyncModel):
                 return _parse_model(origin)
             assert_never()
-        if issubclass(origin, SyncModelSupported):
+        if is_sync_model_supported(origin):
             return _parse_model(origin)
 
         if issubclass(origin, dict) and args:
@@ -144,7 +144,7 @@ class _Field:
     is_frozen: bool
 
 
-def _get_fields(cls: type[SyncModelSupported]) -> dict[str, _Field]:
+def _get_fields(cls: type[_SMS]) -> dict[str, _Field]:
     fields = (
         getattr(cls, "model_fields", None)
         or getattr(cls, "__pydantic_fields__", None)

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import dataclasses as dc
-from abc import ABCMeta
 from collections.abc import Mapping
 from dataclasses import dataclass
 from inspect import isclass
-from typing import Any, Callable, NoReturn, final
-from typing_extensions import Self
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, NoReturn, Protocol, Union
+from typing_extensions import Self, TypeGuard
 
 from pydantic import BaseModel, TypeAdapter
 from pydantic import GetCoreSchemaHandler as Handler
@@ -22,28 +21,29 @@ from .reactive import (
     mut_atomic,
 )
 
+if TYPE_CHECKING:
 
-class SyncModelSupportedMeta(ABCMeta):
-    def __subclasscheck__(self, subclass: type[Any]) -> bool:
-        if not isclass(subclass):
-            return False
-        if issubclass(subclass, SyncModel):
-            return False
-        # RootModel is a subclass of BaseModel, and a pydantic dataclass is a dataclass
-        return issubclass(subclass, BaseModel) or dc.is_dataclass(subclass)
+    class Dataclass(Protocol):
+        """A class decorated with @dataclasses.dataclass or @pydantic.dataclasses.dataclass."""
 
-    def __instancecheck__(self, instance: Any) -> bool:
-        return self.__subclasscheck__(type(instance))
+        __dataclass_fields__: ClassVar[dict[str, dc.Field[Any]]]
 
-    def register(self, subclass: type[Any]) -> NoReturn:
-        """SyncModelSupported does not support class registration."""
-        raise TypeError("SyncModelSupported does not support class registration.")
+    # SyncModelSupported
+    # A user-defined class that can be made reactive, either of the following:
+    #   1. a subclass of `pydantic.BaseModel`,
+    #   2. a subclass of `pydantic.RootModel`,
+    #   3. a class decorated with `@pydantic.dataclasses.dataclass`, or
+    #   4. a class decorated with `@dataclasses.dataclass`.
+    _SMS = Union[BaseModel, Dataclass]
 
 
-@final
-class SyncModelSupported(metaclass=SyncModelSupportedMeta):
-    def __init_subclass__(cls, /, **kwargs: Any) -> NoReturn:
-        raise TypeError("SyncModelSupported cannot be subclassed.")
+def is_sync_model_supported(cls: type) -> TypeGuard[type[_SMS]]:
+    if not isclass(cls):
+        return False
+    if issubclass(cls, SyncModel):
+        return False
+    # RootModel is a subclass of BaseModel, and a pydantic dataclass is a dataclass
+    return issubclass(cls, BaseModel) or dc.is_dataclass(cls)
 
 
 @dataclass(frozen=True)
@@ -56,13 +56,13 @@ class SyncModelCtx(Context):
 
 class SyncModel(Reactive):
     __syncwave_ctx__: SyncModelCtx
-    __syncwave_original_cls__: type[SyncModelSupported]
+    __syncwave_original_cls__: type[_SMS]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
         raise TypeError(f"{cls.__name__} cannot be instantiated directly.")
 
     @classmethod
-    def __syncwave_new__(cls, instance: SyncModelSupported) -> Self:
+    def __syncwave_new__(cls, instance: _SMS) -> Self:
         instance.__class__ = cls
         instance: SyncModel = instance
         return instance
@@ -199,9 +199,7 @@ class SyncModel(Reactive):
         )
 
 
-def create_sync_model(
-    cls: type[SyncModelSupported], rename: bool | str = True
-) -> type[SyncModel]:
+def create_sync_model(cls: type[_SMS], rename: bool | str = True) -> type[SyncModel]:
     cls_name = f"Sync{cls.__name__}" if rename is True else rename or cls.__name__
     return type(
         cls_name,
