@@ -186,7 +186,6 @@ class Syncwave(MutableMapping[str, Any]):
         value, base_ctx = self.__stores[name]
         io.write_json(base_ctx.path, value, base_ctx.type_adapter)
 
-    # TODO global lock?
     def __on_file_change(self, base_ctx: BaseCtx) -> None:
         try:
             new_value = io.read_json(base_ctx.path, base_ctx.type_adapter)

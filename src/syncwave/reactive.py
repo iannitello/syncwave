@@ -4,25 +4,27 @@ from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
 from functools import wraps
 from threading import RLock
-from typing import Callable, NoReturn, TypeVar, final
-from typing_extensions import ParamSpec, Self
+from typing import Any, Callable, NoReturn, TypeVar, final
+from typing_extensions import ParamSpec
 
 from pydantic import TypeAdapter
 
 
 class Reactive(metaclass=ABCMeta):
     __syncwave_sref__: StoreRef
-    __syncwave_ctx__: Context
+    __syncwave_ctx__: CtxSubCls
     __syncwave_live__: bool
+
+    def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
+        raise TypeError("Reactive types can never be instantiated directly.")
 
     @final
     @property
     def sync_live(self) -> bool:
-        with self.__syncwave_sref__.lock:
-            return self.__syncwave_live__
+        return self.__syncwave_live__  # atomic, no need to lock
 
     @abstractmethod
-    def __syncwave_init__(self, sref: StoreRef, ctx: Context) -> None:
+    def __syncwave_init__(self, sref: StoreRef, ctx: CtxSubCls) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -30,7 +32,7 @@ class Reactive(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    def __syncwave_update__(self, new: Self) -> None:
+    def __syncwave_update__(self, new: ReactiveSubCls | Any) -> None:
         raise NotImplementedError
 
 
@@ -49,6 +51,10 @@ class Context:
 class ContextMap(dict[type[Reactive], Context]): ...
 
 
+CtxSubCls = TypeVar("CtxSubCls", bound=Context)
+ReactiveSubCls = TypeVar("ReactiveSubCls", bound=Reactive)
+
+
 P = ParamSpec("P")
 R = TypeVar("R")
 
@@ -59,9 +65,9 @@ def atomic(fn: Callable[P, R]) -> Callable[P, R]:
         with self.__syncwave_sref__.lock:
             if not self.__syncwave_live__:
                 raise DeadReferenceError(reference=self)
-            return fn(self, *args, **kwargs)
+            return fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
 
-    return wrapper
+    return wrapper  # ty: ignore[invalid-return-type]
 
 
 def mut_atomic(fn: Callable[P, R]) -> Callable[P, None]:
@@ -70,12 +76,14 @@ def mut_atomic(fn: Callable[P, R]) -> Callable[P, None]:
         with self.__syncwave_sref__.lock:
             if not self.__syncwave_live__:
                 raise DeadReferenceError(reference=self)
-            result = fn(self, *args, **kwargs)
+            result = fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
             if result is not None:
                 assert_never()
+        # TODO make sure it's really necessary to release the store lock before.
+        #      Like, why is `on_change` protected by the global syncwave lock?
         self.__syncwave_sref__.on_change()
 
-    return wrapper
+    return wrapper  # ty: ignore[invalid-return-type]
 
 
 class DeadReferenceError(RuntimeError):
