@@ -6,7 +6,7 @@ from functools import partial, wraps
 from keyword import iskeyword
 from pathlib import Path
 from threading import RLock
-from typing import Any, Callable, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Literal, TypeVar
 from typing_extensions import ParamSpec
 from weakref import WeakSet
 
@@ -15,9 +15,12 @@ from pydantic import PydanticSchemaGenerationError, TypeAdapter
 from .io import EmptyFile, EmptyFileType, io
 from .reactive import Context, ContextMap, Reactive, StoreRef, assert_never
 from .sync_collection import SyncDict, SyncList
-from .sync_model import SyncModel, SyncModelSupported, create_sync_model
+from .sync_model import SyncModel, create_sync_model
 from .tp_validation import collection_wrap, drill_tp, str_guard, sync_model_guard
 from .watcher import watcher
+
+if TYPE_CHECKING:
+    from .sync_model import _SMS
 
 
 @dataclass(frozen=True)
@@ -54,7 +57,7 @@ class Syncwave(MutableMapping[str, Any]):
         self.__syncwave_lock__ = RLock()
         self.__stores_dir = stores_dir
         self.__stores: dict[str, tuple[Any | EmptyFileType, BaseCtx]] = {}
-        self.__models: WeakSet[type[SyncModelSupported]] = WeakSet()
+        self.__models: WeakSet[type[_SMS]] = WeakSet()
 
     @property
     def stores_dir(self) -> Path:
@@ -108,7 +111,7 @@ class Syncwave(MutableMapping[str, Any]):
         return f"<Syncwave stores={list(self.__stores.keys())!r}>"
 
     @global_lock
-    def reactive(self, _cls: type[SyncModelSupported]) -> type[SyncModel]:
+    def reactive(self, _cls: type[_SMS]) -> type[SyncModel]:
         sync_model_guard(_cls, self.__models)
         sync_model = create_sync_model(_cls, rename=False)
         self.__models.add(_cls)
@@ -116,10 +119,7 @@ class Syncwave(MutableMapping[str, Any]):
 
     @global_lock
     def make_reactive(
-        self,
-        cls: type[SyncModelSupported],
-        /,
-        cls_name: str | None = None,
+        self, cls: type[_SMS], /, cls_name: str | None = None
     ) -> type[SyncModel]:
         sync_model_guard(cls, self.__models)
 
@@ -138,14 +138,14 @@ class Syncwave(MutableMapping[str, Any]):
         *,
         name: str,
         collection: type[SyncDict] | type[SyncList] | Literal["auto"] | None = "auto",
-    ) -> Callable[[type[SyncModelSupported]], type[SyncModel]]:
+    ) -> Callable[[type[_SMS]], type[SyncModel]]:
         if name in self.__stores:
             raise ValueError(f"Store '{name}' already exists.")
 
         str_guard("name", name)
         io.file_name_guard(name)
 
-        def decorator(cls: type[SyncModelSupported]) -> type[SyncModel]:
+        def decorator(cls: type[_SMS]) -> type[SyncModel]:
             sync_model_guard(cls, self.__models)
             sync_model = create_sync_model(cls, rename=False)
             store_tp = collection_wrap(cls, sync_model, collection)
