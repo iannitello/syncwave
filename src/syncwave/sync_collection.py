@@ -203,10 +203,13 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         same_type = type(o) is (new_type := type(n))
 
         if old_is_reactive and new_is_reactive and same_type:
-            o.__syncwave_update__(n)  # ty: ignore[unresolved-attribute] (aliased conditional expressions are not supported by ty)
+            # `old_is_reactive` means `o` is not None,
+            # but aliased conditional expressions are not supported by ty
+            o.__syncwave_update__(n)  # ty: ignore[unresolved-attribute]
         else:
             if old_is_reactive:
-                o.__syncwave_kill__()  # ty: ignore[unresolved-attribute] (aliased conditional expressions are not supported by ty)
+                # same reason as above, `o` can't be None
+                o.__syncwave_kill__()  # ty: ignore[unresolved-attribute]
             if new_is_reactive:
                 n.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
             self.__data[k] = n
