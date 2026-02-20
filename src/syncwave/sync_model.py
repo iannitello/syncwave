@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import dataclasses as dc
-from collections.abc import Mapping
 from dataclasses import dataclass
 from inspect import isclass
 from typing import TYPE_CHECKING, Any, Callable, Union
@@ -46,9 +45,8 @@ def is_sync_model_supported(cls: type) -> TypeGuard[type[_SMS]]:
 @dataclass(frozen=True)
 class SyncModelCtx(Context):
     tp: type[SyncModel]
-    type_adapter: TypeAdapter[SyncModel]
-    fields_ctx: dict[str, Context | ContextMap]
     fields_type_adapter: dict[str, TypeAdapter[Any]]
+    fields_ctx: dict[str, Context | ContextMap]
 
 
 class SyncModel(Reactive):
@@ -109,15 +107,13 @@ class SyncModel(Reactive):
             self.__dict__.pop(name, None)
         object.__setattr__(self, "__syncwave_live__", False)
 
-    def __syncwave_update__(self, new: Self | Mapping[str, Any]) -> None:
+    def __syncwave_update__(self, new: Self) -> None:
         ctx = self.__syncwave_ctx__
         o_setattr = self.__syncwave_original_cls__.__setattr__
 
-        new_ = ctx.type_adapter.validate_python(new)
-
         for name in ctx.fields_type_adapter:
             field_ctx = ctx.fields_ctx.get(name)
-            new_value = getattr(new_, name, None)
+            new_value = getattr(new, name, None)
 
             # case 1: non-reactive content type
             if field_ctx is None:

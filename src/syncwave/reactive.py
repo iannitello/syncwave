@@ -7,7 +7,23 @@ from threading import RLock
 from typing import Any, Callable, NoReturn, TypeVar, final
 from typing_extensions import ParamSpec
 
-from pydantic import TypeAdapter
+
+@dataclass(frozen=True)
+class StoreRef:
+    lock: RLock
+    on_change: Callable[[], None]
+
+
+@dataclass(frozen=True)
+class Context:
+    tp: type[Reactive]
+
+
+class ContextMap(dict[type["Reactive"], Context]): ...
+
+
+CtxSubCls = TypeVar("CtxSubCls", bound=Context)
+ReactiveSubCls = TypeVar("ReactiveSubCls", bound="Reactive")
 
 
 class Reactive(metaclass=ABCMeta):
@@ -32,27 +48,8 @@ class Reactive(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    def __syncwave_update__(self, new: ReactiveSubCls | Any) -> None:
+    def __syncwave_update__(self, new: ReactiveSubCls) -> None:
         raise NotImplementedError
-
-
-@dataclass(frozen=True)
-class StoreRef:
-    lock: RLock
-    on_change: Callable[[], None]
-
-
-@dataclass(frozen=True)
-class Context:
-    tp: type[Reactive]
-    type_adapter: TypeAdapter[Reactive]
-
-
-class ContextMap(dict[type[Reactive], Context]): ...
-
-
-CtxSubCls = TypeVar("CtxSubCls", bound=Context)
-ReactiveSubCls = TypeVar("ReactiveSubCls", bound=Reactive)
 
 
 P = ParamSpec("P")
