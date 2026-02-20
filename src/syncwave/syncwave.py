@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class BaseCtx:
+class StoreInfo:
     name: str
     path: Path
     type_adapter: TypeAdapter
@@ -56,7 +56,7 @@ class Syncwave(MutableMapping[str, Any]):
         io.create_dir(stores_dir)
         self.__syncwave_lock__ = RLock()
         self.__stores_dir = stores_dir
-        self.__stores: dict[str, tuple[Any | EmptyFileType, BaseCtx]] = {}
+        self.__stores: dict[str, tuple[Any | EmptyFileType, StoreInfo]] = {}
         self.__models: WeakSet[type[_SMS]] = WeakSet()
 
     @property
@@ -86,13 +86,13 @@ class Syncwave(MutableMapping[str, Any]):
         if key not in self.__stores:
             raise KeyError(f"Store '{key}' does not exist.")
 
-        value, base_ctx = self.__stores[key]
-        watcher.unwatch(base_ctx.path)
-        with base_ctx.sref.lock:
+        value, store_info = self.__stores[key]
+        watcher.unwatch(store_info.path)
+        with store_info.sref.lock:
             if isinstance(value, Reactive):
                 value.__syncwave_kill__()
         del self.__stores[key]
-        io.remove_file(base_ctx.path)
+        io.remove_file(store_info.path)
 
     @global_lock
     def __iter__(self) -> Iterator[str]:
@@ -173,50 +173,50 @@ class Syncwave(MutableMapping[str, Any]):
         path = self.__stores_dir / f"{name}.json"
         sref = StoreRef(lock=RLock(), on_change=partial(self.__on_store_change, name))
         ctx = drill_tp(tp)
-        base_ctx = BaseCtx(name, path, type_adapter, sref, ctx)
+        store_info = StoreInfo(name, path, type_adapter, sref, ctx)
 
         value = io.init_json(path, type_adapter)
         if isinstance(value, Reactive):
             value.__syncwave_init__(sref, ctx)
-        self.__stores[name] = (value, base_ctx)
-        watcher.watch(path, self.__on_file_change, base_ctx)
+        self.__stores[name] = (value, store_info)
+        watcher.watch(path, self.__on_file_change, store_info)
 
     @global_lock
     def __on_store_change(self, name: str) -> None:
-        value, base_ctx = self.__stores[name]
-        io.write_json(base_ctx.path, value, base_ctx.type_adapter)
+        value, store_info = self.__stores[name]
+        io.write_json(store_info.path, value, store_info.type_adapter)
 
-    def __on_file_change(self, base_ctx: BaseCtx) -> None:
+    def __on_file_change(self, store_info: StoreInfo) -> None:
         try:
-            new_value = io.read_json(base_ctx.path, base_ctx.type_adapter)
+            new_value = io.read_json(store_info.path, store_info.type_adapter)
         except (FileNotFoundError, ValueError):
             with self.__syncwave_lock__:
-                old_value = self.__stores[base_ctx.name][0]
-            io.write_json(base_ctx.path, old_value, base_ctx.type_adapter)
+                old_value = self.__stores[store_info.name][0]
+            io.write_json(store_info.path, old_value, store_info.type_adapter)
             return
 
         with self.__syncwave_lock__:
-            if base_ctx.name not in self.__stores:
+            if store_info.name not in self.__stores:
                 return  # Store was deleted, ignore this event
-            self.__set_store(base_ctx.name, new_value)
+            self.__set_store(store_info.name, new_value)
 
     def __set_store(self, key: str, value: Any) -> None:
         # always called from within the global lock context
-        old_value, base_ctx = self.__stores[key]
-        new_value = base_ctx.type_adapter.validate_python(value)
-        ctx, sref = base_ctx.ctx, base_ctx.sref
+        old_value, store_info = self.__stores[key]
+        new_value = store_info.type_adapter.validate_python(value)
+        ctx, sref = store_info.ctx, store_info.sref
 
         with sref.lock:
             # case 1: non-reactive content type
             if ctx is None:
-                self.__stores[key] = (new_value, base_ctx)
+                self.__stores[key] = (new_value, store_info)
             # case 2: fixed reactive content type
             elif isinstance(ctx, Context):
                 if old_value is not EmptyFile:
                     old_value.__syncwave_update__(new_value)
                 else:
                     new_value.__syncwave_init__(sref, ctx)
-                    self.__stores[key] = (new_value, base_ctx)
+                    self.__stores[key] = (new_value, store_info)
             # case 3: union content type
             elif isinstance(ctx, ContextMap):
                 old_is_reactive = isinstance(old_value, Reactive)
@@ -230,7 +230,7 @@ class Syncwave(MutableMapping[str, Any]):
                         old_value.__syncwave_kill__()
                     if new_is_reactive:
                         new_value.__syncwave_init__(sref, ctx[new_type])
-                    self.__stores[key] = (new_value, base_ctx)
+                    self.__stores[key] = (new_value, store_info)
             else:
                 assert_never()
 

@@ -193,7 +193,6 @@ def _parse_model(cls: type, as_sync_model: bool = False) -> SyncModelCtx | None:
     if is_sync_model:
         return SyncModelCtx(
             tp=cls,
-            type_adapter=TypeAdapter(cls),
             fields_ctx=fields_ctx,
             fields_type_adapter=fields_type_adapter,
         )
@@ -216,7 +215,6 @@ def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
 
     return SyncDictCtx(
         tp=SyncDict,
-        type_adapter=TypeAdapter(tp),
         inner_ctx=inner_ctx,
         inner_type_adapter=inner_type_adapter,
     )
@@ -236,7 +234,6 @@ def _get_sync_list_ctx(tp: type[SyncList[VT]]) -> SyncListCtx[VT]:
 
     return SyncListCtx(
         tp=SyncList,
-        type_adapter=TypeAdapter(tp),
         inner_ctx=inner_ctx,
         inner_type_adapter=inner_type_adapter,
     )
@@ -258,7 +255,6 @@ def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
 
     return SyncSetCtx(
         tp=SyncSet,
-        type_adapter=TypeAdapter(tp),
         inner_ctx=None,
         inner_type_adapter=inner_type_adapter,
     )
