@@ -105,6 +105,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         for item in self.__data.values():
             if isinstance(item, Reactive):
                 item.__syncwave_kill__()
+        self.__data = {}
         self.__syncwave_live__ = False
 
     def __syncwave_update__(self, new: Self) -> None:
@@ -275,6 +276,7 @@ class SyncList(MutableSequence[VT], Reactive):
         for item in self.__data:
             if isinstance(item, Reactive):
                 item.__syncwave_kill__()
+        self.__data = []
         self.__syncwave_live__ = False
 
     def __syncwave_update__(self, new: Self) -> None:
@@ -447,6 +449,7 @@ class SyncSet(MutableSet[VT], Reactive):
 
     def __syncwave_kill__(self) -> None:
         # no need to loop through items since set can't hold reactive items
+        self.__data = set()
         self.__syncwave_live__ = False
 
     def __syncwave_update__(self, new: Self) -> None:
@@ -476,9 +479,9 @@ class SyncSet(MutableSet[VT], Reactive):
             self.__data.discard(value)
 
     def __str__(self) -> str:
+        if not self.__data:
+            return "SyncSet()"
         items = ", ".join(str(item) for item in self.__data)
-        if not items:
-            return "set()"
         return "{" + items + "}"
 
     def __repr__(self) -> str:

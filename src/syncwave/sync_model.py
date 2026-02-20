@@ -190,6 +190,16 @@ class SyncModel(Reactive):
         o_delattr = self.__syncwave_original_cls__.__delattr__
         o_delattr(self, name)
 
+    def __str__(self) -> str:
+        if not self.__syncwave_live__:
+            return f"{type(self).__qualname__}()"
+        return self.__syncwave_original_cls__.__str__(self)
+
+    def __repr__(self) -> str:
+        if not self.__syncwave_live__:
+            return f"{type(self).__qualname__}()"
+        return self.__syncwave_original_cls__.__repr__(self)
+
 
 def create_sync_model(cls: type[_SMS], rename: bool | str = True) -> type[SyncModel]:
     cls_name = f"Sync{cls.__name__}" if rename is True else rename or cls.__name__
