@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses as dc
 from dataclasses import dataclass
 from inspect import isclass
-from typing import TYPE_CHECKING, Any, Callable, Union
+from typing import TYPE_CHECKING, Any, Union
 from typing_extensions import Self, TypeGuard
 
 import pydantic.dataclasses as py_dc
@@ -96,8 +96,6 @@ class SyncModel(Reactive):
                 assert_never()
 
     def __syncwave_kill__(self) -> None:
-        # TODO doesn't really work, isn't really clean
-        # e.g. can't call `repr` on the instance after killing it
         for name in self.__syncwave_ctx__.fields_ctx:
             value = getattr(self, name, None)
             if isinstance(value, Reactive):
@@ -126,7 +124,7 @@ class SyncModel(Reactive):
             # case 3: union content type
             elif isinstance(field_ctx, ContextMap):
                 old_value = getattr(self, name, None)
-                _setattr_union(self, name, old_value, new_value, field_ctx, o_setattr)
+                self.__setattr_union(name, old_value, new_value, field_ctx)
             else:
                 assert_never()
 
@@ -135,20 +133,18 @@ class SyncModel(Reactive):
         # Instead, we pop the fields from __dict__ when the instance is killed
         # so subsequent attribute access triggers __getattr__,
         # and we can raise DeadReferenceError.
-
-        live = self.__dict__.get("__syncwave_live__")
-        if live is not None:  # instance is initialized
-            ctx = self.__syncwave_ctx__
-            if name in ctx.fields_type_adapter:
-                if live:
-                    # __getattr__ should never be called for a tracked field
-                    # if the instance is still alive
-                    assert_never()
+        ctx = self.__syncwave_ctx__
+        if name in ctx.fields_type_adapter:
+            if not self.__syncwave_live__:
                 raise DeadReferenceError(reference=self)
+            # __getattr__ shouldn't be called for a tracked field on a live instance
+            assert_never()
 
-        # TODO: may not have a __getattr__
-        o_getattr = self.__syncwave_original_cls__.__getattr__
-        return o_getattr(self, name)
+        if hasattr(self.__syncwave_original_cls__, "__getattr__"):
+            o_getattr = self.__syncwave_original_cls__.__getattr__
+            return o_getattr(self, name)
+        cls_name = type(self).__name__
+        raise AttributeError(f"{cls_name!r} object has no attribute {name!r}")
 
     @mut_atomic
     def __setattr__(self, name: str, new_value: Any) -> None:
@@ -175,7 +171,7 @@ class SyncModel(Reactive):
         # case 3: union content type
         elif isinstance(field_ctx, ContextMap):
             old_value = getattr(self, name, None)
-            _setattr_union(self, name, old_value, new_value, field_ctx, o_setattr)
+            self.__setattr_union(name, old_value, new_value, field_ctx)
         else:
             assert_never()
 
@@ -200,6 +196,23 @@ class SyncModel(Reactive):
             return f"{type(self).__qualname__}()"
         return self.__syncwave_original_cls__.__repr__(self)
 
+    def __setattr_union(self, f: str, o: Any, n: Any, u_ctx: ContextMap) -> None:
+        o_setattr = self.__syncwave_original_cls__.__setattr__
+
+        old_is_reactive = isinstance(o, Reactive)
+        new_is_reactive = isinstance(n, Reactive)
+        same_type = type(o) is (new_type := type(n))
+
+        if old_is_reactive and new_is_reactive and same_type:
+            o.__syncwave_update__(n)
+            o_setattr(self, f, o)  # TODO: necessary?
+        else:
+            if old_is_reactive:
+                o.__syncwave_kill__()
+            if new_is_reactive:
+                n.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
+            o_setattr(self, f, n)
+
 
 def create_sync_model(cls: type[_SMS], rename: bool | str = True) -> type[SyncModel]:
     cls_name = f"Sync{cls.__name__}" if rename is True else rename or cls.__name__
@@ -211,26 +224,3 @@ def create_sync_model(cls: type[_SMS], rename: bool | str = True) -> type[SyncMo
     if dc.is_dataclass(Model) and not py_dc.is_pydantic_dataclass(Model):
         return py_dc.dataclass(Model)
     return Model
-
-
-def _setattr_union(
-    self: SyncModel,
-    field_name: str,
-    old_value: Any,
-    new_value: Any,
-    u_ctx: ContextMap,
-    original_setattr: Callable[[Any, Any, Any], None],
-) -> None:
-    old_is_reactive = isinstance(old_value, Reactive)
-    new_is_reactive = isinstance(new_value, Reactive)
-    same_type = type(old_value) is (new_type := type(new_value))
-
-    if old_is_reactive and new_is_reactive and same_type:
-        old_value.__syncwave_update__(new_value)
-        original_setattr(self, field_name, old_value)  # TODO: necessary?
-    else:
-        if old_is_reactive:
-            old_value.__syncwave_kill__()
-        if new_is_reactive:
-            new_value.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
-        original_setattr(self, field_name, new_value)
