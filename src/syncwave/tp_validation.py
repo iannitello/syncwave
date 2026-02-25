@@ -290,28 +290,28 @@ def _validate_hashable(tp: Any, _err: str) -> None:
 
 # Types that round-trip as dict keys through JSON (dump_json/validate_json).
 # See: docs.pydantic.dev/latest/concepts/conversion_table/
-_VALID_DICT_KEY_TYPES: list[type] = [
-    str,
-    int,
-    float,
-    bool,
-    bytes,
-    Decimal,
-    Pattern,
-    Path,
-    date,
-    datetime,
-    time,
-    timedelta,
-    UUID,
-    IPv4Address,
-    IPv4Interface,
-    IPv4Network,
-    IPv6Address,
-    IPv6Interface,
-    IPv6Network,
-    ByteSize,
-]
+_VALID_DICT_KEY_TYPES: list[type] = {
+    str: "str",
+    int: "int",
+    float: "float",
+    bool: "bool",
+    bytes: "bytes",
+    Decimal: "Decimal",
+    Pattern: "Pattern",
+    Path: "Path",
+    date: "date",
+    datetime: "datetime",
+    time: "time",
+    timedelta: "timedelta",
+    UUID: "UUID",
+    IPv4Address: "IPv4Address",
+    IPv4Interface: "IPv4Interface",
+    IPv4Network: "IPv4Network",
+    IPv6Address: "IPv6Address",
+    IPv6Interface: "IPv6Interface",
+    IPv6Network: "IPv6Network",
+    ByteSize: "ByteSize",
+}
 
 
 _VALID_DICT_KEY_TYPES_STR = (
@@ -348,7 +348,7 @@ def _validate_key_tp(tp: Any) -> None:
     if isclass(origin) and issubclass(origin, Enum):
         [_validate_key_tp(type(member.value)) for member in origin]
         return
-    if origin in _VALID_DICT_KEY_TYPES:
+    if origin in _VALID_DICT_KEY_TYPES or origin in _VALID_DICT_KEY_TYPES.values():
         return
 
     raise TypeError(
