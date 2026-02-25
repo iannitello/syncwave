@@ -16,6 +16,7 @@ from ipaddress import (
 )
 from pathlib import Path
 from re import Pattern
+from types import GenericAlias
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_origin
 from uuid import UUID
 
@@ -60,33 +61,34 @@ def collection_wrap(
     cls: type[_SMS],
     sync_model: type[SyncModel],
     collection: type[SyncDict] | type[SyncList] | Literal["auto"] | None,
-) -> type:
+) -> type | GenericAlias:
     resolved_collection = collection  # non "auto" case
     if collection == "auto":
         if issubclass(cls, RootModel):
             resolved_collection = None
         elif "key" in (fields := _get_fields(cls)):
-            resolved_collection = SyncDict[fields["key"].tp]
+            resolved_collection = GenericAlias(SyncDict, (fields["key"].tp,))
         else:
             resolved_collection = SyncList
 
     origin = get_origin(resolved_collection) or resolved_collection
     args = get_args(resolved_collection)
+    tp_name = getattr(origin, "__qualname__", repr(origin))
 
     if (len_args := len(args)) > 0:
         if origin is not SyncDict:
-            raise TypeError(f"`{origin.__qualname__}` does not support type arguments.")
+            raise TypeError(f"`{tp_name}` does not support type arguments.")
         if origin is SyncDict and len_args > 1:
             raise TypeError("`SyncDict` supports only one type argument for the key.")
         _validate_key_tp(args[0])
-        return SyncDict[args[0], sync_model]
+        return GenericAlias(SyncDict, (args[0], sync_model))
 
     if origin is None:
         return sync_model
     if origin is SyncDict:
-        return SyncDict[str, sync_model]
+        return GenericAlias(SyncDict, (str, sync_model))
     if origin is SyncList:
-        return SyncList[sync_model]
+        return GenericAlias(SyncList, (sync_model,))
 
     err = "`collection` must be one of: `SyncDict`, `SyncList`, `None`, or `'auto'`."
     if origin is SyncSet:
@@ -104,7 +106,7 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None
 
     if (union_members := _handle_union(origin, args)) is not None:
         ctxs = [drill_tp(member, _err_if_reactive) for member in union_members]
-        ctx_map = {ctx.tp: ctx for ctx in ctxs if ctx is not None}
+        ctx_map = {ctx.tp: ctx for ctx in ctxs if isinstance(ctx, Context)}
         return ContextMap(ctx_map) if ctx_map else None
 
     _handle_literal(origin, args)  # nothing to do, just to check there are args
@@ -191,8 +193,10 @@ def _parse_model(cls: type, as_sync_model: bool = False) -> SyncModelCtx | None:
         fields_type_adapter[field_name] = TypeAdapter(field.tp)
 
     if is_sync_model:
+        # `is_sync_model` means `cls` is type[SyncModel],
+        # but aliased conditional expressions are not supported by ty
         return SyncModelCtx(
-            tp=cls,
+            tp=cls,  # ty: ignore[invalid-argument-type]
             fields_ctx=fields_ctx,
             fields_type_adapter=fields_type_adapter,
         )
@@ -290,7 +294,7 @@ def _validate_hashable(tp: Any, _err: str) -> None:
 
 # Types that round-trip as dict keys through JSON (dump_json/validate_json).
 # See: docs.pydantic.dev/latest/concepts/conversion_table/
-_VALID_DICT_KEY_TYPES: list[type] = {
+_VALID_DICT_KEY_TYPES: dict[type, str] = {
     str: "str",
     int: "int",
     float: "float",

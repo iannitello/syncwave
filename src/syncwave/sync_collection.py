@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, MutableMapping, MutableSequence, MutableSet
 from dataclasses import dataclass
+from types import GenericAlias
 from typing import Any, Generic, NoReturn, TypeVar, Union, final, get_args
 from typing_extensions import Self
 
@@ -64,8 +65,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
         args = get_args(src)
         if args:
-            kt, vt = args[0], args[1]
-            dict_schema = handler.generate_schema(dict[kt, vt])
+            dict_schema = handler.generate_schema(GenericAlias(dict, args))
         else:
             dict_schema = handler.generate_schema(dict)
 
@@ -235,8 +235,7 @@ class SyncList(MutableSequence[VT], Reactive):
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
         args = get_args(src)
         if args:
-            vt = args[0]
-            list_schema = handler.generate_schema(list[vt])
+            list_schema = handler.generate_schema(GenericAlias(list, args))
         else:
             list_schema = handler.generate_schema(list)
 
@@ -425,8 +424,7 @@ class SyncSet(MutableSet[VT], Reactive):
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
         args = get_args(src)
         if args:
-            vt = args[0]
-            set_schema = handler.generate_schema(set[vt])
+            set_schema = handler.generate_schema(GenericAlias(set, args))
         else:
             set_schema = handler.generate_schema(set)
 

@@ -6,6 +6,7 @@ from functools import partial, wraps
 from keyword import iskeyword
 from pathlib import Path
 from threading import RLock
+from types import GenericAlias
 from typing import TYPE_CHECKING, Any, Callable, Literal, TypeVar
 from typing_extensions import ParamSpec
 from weakref import WeakSet
@@ -169,7 +170,7 @@ class Syncwave(MutableMapping[str, Any]):
             raise ValueError(f"Unable to create store '{name}' without default value.")
         return value
 
-    def __create_store(self, tp: type, name: str) -> None:
+    def __create_store(self, tp: type | GenericAlias, name: str) -> None:
         try:
             type_adapter = TypeAdapter(tp)
         except PydanticSchemaGenerationError as e:
