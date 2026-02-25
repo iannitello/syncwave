@@ -40,9 +40,9 @@ def global_lock(func: Callable[P, R]) -> Callable[P, R]:
     @wraps(func)
     def wrapper(self: Syncwave, *args: P.args, **kwargs: P.kwargs) -> R:
         with self.__syncwave_lock__:
-            return func(self, *args, **kwargs)
+            return func(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
 
-    return wrapper
+    return wrapper  # ty: ignore[invalid-return-type]
 
 
 # Has to be thread-safe, this is a temporary solution just to start the implementation.
@@ -108,18 +108,16 @@ class Syncwave(MutableMapping[str, Any]):
         return "{" + items + "}"
 
     def __repr__(self) -> str:
-        return f"<Syncwave stores={list(self.__stores.keys())!r}>"
-
-    @global_lock
-    def reactive(self, _cls: type[_SMS]) -> type[SyncModel]:
-        sync_model_guard(_cls, self.__models)
-        sync_model = create_sync_model(_cls, rename=False)
-        self.__models.add(_cls)
-        return sync_model
+        items = {k: v[0] for k, v in self.__stores.items()}
+        return f"<Syncwave {items!r}>"
 
     @global_lock
     def make_reactive(
-        self, cls: type[_SMS], /, cls_name: str | None = None
+        self,
+        cls: type[_SMS],
+        /,
+        *,
+        cls_name: str | None = None,
     ) -> type[SyncModel]:
         sync_model_guard(cls, self.__models)
 
@@ -133,36 +131,43 @@ class Syncwave(MutableMapping[str, Any]):
         return sync_model
 
     @global_lock
-    def store(
+    def register(
         self,
         *,
         name: str,
         collection: type[SyncDict] | type[SyncList] | Literal["auto"] | None = "auto",
-    ) -> Callable[[type[_SMS]], type[SyncModel]]:
+    ) -> Callable[[type[_SMS]], type[_SMS]]:
         if name in self.__stores:
             raise ValueError(f"Store '{name}' already exists.")
 
         str_guard("name", name)
         io.file_name_guard(name)
 
-        def decorator(cls: type[_SMS]) -> type[SyncModel]:
+        def decorator(cls: type[_SMS]) -> type[_SMS]:
             sync_model_guard(cls, self.__models)
-            sync_model = create_sync_model(cls, rename=False)
+            sync_model = create_sync_model(cls)
             store_tp = collection_wrap(cls, sync_model, collection)
-            self.__create_store(store_tp, name=name or cls.__name__)
+            self.__create_store(store_tp, name=name)
             self.__models.add(cls)
-            return sync_model
+            return cls
 
         return decorator
 
     @global_lock
-    def create_store(self, tp: type, /, *, name: str) -> None:
+    def create_store(self, tp: type, /, *, name: str, default: Any = EmptyFile) -> Any:
         if name in self.__stores:
             raise ValueError(f"Store '{name}' already exists.")
 
         str_guard("name", name)
         io.file_name_guard(name)
         self.__create_store(tp, name)
+
+        if (value := self.__stores[name][0]) is EmptyFile:
+            if default is not EmptyFile:
+                self.__set_store(name, default)
+                return default
+            raise ValueError(f"Unable to create store '{name}' without default value.")
+        return value
 
     def __create_store(self, tp: type, name: str) -> None:
         try:
@@ -177,8 +182,16 @@ class Syncwave(MutableMapping[str, Any]):
 
         value = io.init_json(path, type_adapter)
         if isinstance(value, Reactive):
-            value.__syncwave_init__(sref, ctx)
+            if ctx is None:
+                assert_never()
+            elif isinstance(ctx, Context):
+                value.__syncwave_init__(sref, ctx)
+            elif isinstance(ctx, ContextMap):
+                value.__syncwave_init__(sref, ctx[type(value)])
+            else:
+                assert_never()
         self.__stores[name] = (value, store_info)
+
         watcher.watch(path, self.__on_file_change, store_info)
 
     @global_lock
@@ -212,7 +225,7 @@ class Syncwave(MutableMapping[str, Any]):
                 self.__stores[key] = (new_value, store_info)
             # case 2: fixed reactive content type
             elif isinstance(ctx, Context):
-                if old_value is not EmptyFile:
+                if not isinstance(old_value, EmptyFileType):
                     old_value.__syncwave_update__(new_value)
                 else:
                     new_value.__syncwave_init__(sref, ctx)
@@ -224,10 +237,13 @@ class Syncwave(MutableMapping[str, Any]):
                 same_type = type(old_value) is (new_type := type(new_value))
 
                 if old_is_reactive and new_is_reactive and same_type:
-                    old_value.__syncwave_update__(new_value)
+                    # `old_is_reactive` means `old_value` is not EmptyFile,
+                    # but aliased conditional expressions are not supported by ty
+                    old_value.__syncwave_update__(new_value)  # ty: ignore[unresolved-attribute]
                 else:
                     if old_is_reactive:
-                        old_value.__syncwave_kill__()
+                        # same reason as above, `old_value` can't be EmptyFile
+                        old_value.__syncwave_kill__()  # ty: ignore[unresolved-attribute]
                     if new_is_reactive:
                         new_value.__syncwave_init__(sref, ctx[new_type])
                     self.__stores[key] = (new_value, store_info)

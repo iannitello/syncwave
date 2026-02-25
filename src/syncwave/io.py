@@ -93,7 +93,9 @@ class _IO:
             if default is not EmptyFile:
                 self._atomic_write(path, self._serialize(default, ta))
             return default
-        return self._deserialize(content, ta, path)
+        init_value = self._deserialize(content, ta, path)
+        self._atomic_write(path, self._serialize(init_value, ta))
+        return init_value
 
     def read_json(self, path: Path, ta: TypeAdapter = _any_ta) -> Any:
         # never returns EmptyFile, it throws an error if the file is empty
