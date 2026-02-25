@@ -167,9 +167,10 @@ class _EventHandler(FileSystemEventHandler):
         raw_paths = [event.src_path]
         if dest_path := getattr(event, "dest_path", None):
             raw_paths.append(dest_path)
+        raw_paths_str = [p if isinstance(p, str) else p.decode() for p in raw_paths]
         return [
             Path(p).resolve()
-            for p in raw_paths
+            for p in raw_paths_str
             if p and self._watcher.TMP_FILE_PREFIX not in p
         ]
 
