@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, MutableMapping
 from dataclasses import dataclass
-from functools import partial, wraps
+from functools import partial
 from keyword import iskeyword
 from pathlib import Path
 from threading import RLock
@@ -37,15 +37,6 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-def global_lock(func: Callable[P, R]) -> Callable[P, R]:
-    @wraps(func)
-    def wrapper(self: Syncwave, *args: P.args, **kwargs: P.kwargs) -> R:
-        with self.__syncwave_lock__:
-            return func(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
-
-    return wrapper  # ty: ignore[invalid-return-type]
-
-
 # Has to be thread-safe, this is a temporary solution just to start the implementation.
 class Syncwave(MutableMapping[str, Any]):
     def __init__(self, stores_dir: str | Path = "") -> None:
@@ -55,7 +46,6 @@ class Syncwave(MutableMapping[str, Any]):
             else io.sanitize_path(stores_dir)
         )
         io.create_dir(stores_dir)
-        self.__syncwave_lock__ = RLock()
         self.__stores_dir = stores_dir
         self.__stores: dict[str, tuple[Any | EmptyFileType, StoreInfo]] = {}
         self.__models: WeakSet[type[_SMS]] = WeakSet()
@@ -64,15 +54,16 @@ class Syncwave(MutableMapping[str, Any]):
     def stores_dir(self) -> Path:
         return self.__stores_dir
 
-    @global_lock
     def __getitem__(self, key: str) -> Any:
         if key not in self.__stores:
             raise KeyError(f"Store '{key}' does not exist.")
-        if (value := self.__stores[key][0]) is EmptyFile:
-            raise ValueError(f"Store '{key}' has not been initialized.")
-        return value
 
-    @global_lock
+        value, store_info = self.__stores[key]
+        with store_info.sref.lock:
+            if value is EmptyFile:
+                raise ValueError(f"Store '{key}' has not been initialized.")
+            return value
+
     def __setitem__(self, key: str, value: Any) -> None:
         if key not in self.__stores:
             raise KeyError(
@@ -80,9 +71,11 @@ class Syncwave(MutableMapping[str, Any]):
                 "Use `syncwave.create_store(...)`, or `@syncwave.store(...)` first."
             )
         str_guard("key", key)
-        self.__set_store(key, value)
 
-    @global_lock
+        _, store_info = self.__stores[key]
+        with store_info.sref.lock:
+            self.__set_store(key, value)
+
     def __delitem__(self, key: str) -> None:
         if key not in self.__stores:
             raise KeyError(f"Store '{key}' does not exist.")
@@ -95,12 +88,10 @@ class Syncwave(MutableMapping[str, Any]):
         del self.__stores[key]
         io.remove_file(store_info.path)
 
-    @global_lock
     def __iter__(self) -> Iterator[str]:
         # first convert to a list so the iterator is over a frozen object
         return iter(list(self.__stores.keys()))
 
-    @global_lock
     def __len__(self) -> int:
         return len(self.__stores)
 
@@ -112,7 +103,6 @@ class Syncwave(MutableMapping[str, Any]):
         items = {k: v[0] for k, v in self.__stores.items()}
         return f"<Syncwave {items!r}>"
 
-    @global_lock
     def make_reactive(
         self,
         cls: type[_SMS],
@@ -131,7 +121,6 @@ class Syncwave(MutableMapping[str, Any]):
         self.__models.add(cls)
         return sync_model
 
-    @global_lock
     def register(
         self,
         *,
@@ -154,7 +143,6 @@ class Syncwave(MutableMapping[str, Any]):
 
         return decorator
 
-    @global_lock
     def create_store(self, tp: type, /, *, name: str, default: Any = EmptyFile) -> Any:
         if name in self.__stores:
             raise ValueError(f"Store '{name}' already exists.")
@@ -163,12 +151,14 @@ class Syncwave(MutableMapping[str, Any]):
         io.file_name_guard(name)
         self.__create_store(tp, name)
 
-        if (value := self.__stores[name][0]) is EmptyFile:
-            if default is not EmptyFile:
-                self.__set_store(name, default)
-                return default
-            raise ValueError(f"Unable to create store '{name}' without default value.")
-        return value
+        value, store_info = self.__stores[name]
+        with store_info.sref.lock:
+            if value is EmptyFile:
+                if default is not EmptyFile:
+                    self.__set_store(name, default)
+                    return default
+                raise ValueError(f"Unable to create store '{name}' without a default.")
+            return value
 
     def __create_store(self, tp: type | GenericAlias, name: str) -> None:
         try:
@@ -195,8 +185,8 @@ class Syncwave(MutableMapping[str, Any]):
 
         watcher.watch(path, self.__on_file_change, store_info)
 
-    @global_lock
     def __on_store_change(self, name: str) -> None:
+        # always called from within the store lock context
         value, store_info = self.__stores[name]
         io.write_json(store_info.path, value, store_info.type_adapter)
 
@@ -204,18 +194,18 @@ class Syncwave(MutableMapping[str, Any]):
         try:
             new_value = io.read_json(store_info.path, store_info.type_adapter)
         except (FileNotFoundError, ValueError):
-            with self.__syncwave_lock__:
+            with store_info.sref.lock:
                 old_value = self.__stores[store_info.name][0]
-            io.write_json(store_info.path, old_value, store_info.type_adapter)
-            return
+                io.write_json(store_info.path, old_value, store_info.type_adapter)
+                return
 
-        with self.__syncwave_lock__:
-            if store_info.name not in self.__stores:
-                return  # Store was deleted, ignore this event
+        if store_info.name not in self.__stores:
+            return  # store was deleted, ignore this event
+        with store_info.sref.lock:
             self.__set_store(store_info.name, new_value)
 
     def __set_store(self, key: str, value: Any) -> None:
-        # always called from within the global lock context
+        # always called from within the store lock context
         old_value, store_info = self.__stores[key]
         new_value = store_info.type_adapter.validate_python(value)
         ctx, sref = store_info.ctx, store_info.sref

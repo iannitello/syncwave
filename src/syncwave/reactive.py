@@ -76,9 +76,7 @@ def mut_atomic(fn: Callable[P, R]) -> Callable[P, None]:
             result = fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
             if result is not None:
                 assert_never()
-        # TODO make sure it's really necessary to release the store lock before.
-        #      Like, why is `on_change` protected by the global syncwave lock?
-        self.__syncwave_sref__.on_change()
+            self.__syncwave_sref__.on_change()
 
     return wrapper  # ty: ignore[invalid-return-type]
 
