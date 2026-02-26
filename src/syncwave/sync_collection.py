@@ -8,7 +8,16 @@ from __future__ import annotations
 from collections.abc import Iterator, MutableMapping, MutableSequence, MutableSet
 from dataclasses import dataclass
 from types import GenericAlias
-from typing import Any, Generic, NoReturn, TypeVar, Union, final, get_args
+from typing import (
+    Any,
+    Generic,
+    NoReturn,
+    SupportsIndex,
+    TypeVar,
+    Union,
+    final,
+    get_args,
+)
 from typing_extensions import Self
 
 from pydantic import GetCoreSchemaHandler as Handler
@@ -186,9 +195,6 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         status = "live" if self.__syncwave_live__ else "dead"
         return f"<SyncDict {self.__data!r} ({status})>"
 
-    # __eq__ to be implemented?
-    # __hash__ to be implemented?
-
     def __setitem_reactive(self, k: KT, o: VT | None, n: VT, ctx: Context) -> None:
         if o is not None:
             o.__syncwave_update__(n)
@@ -328,34 +334,37 @@ class SyncList(MutableSequence[VT], Reactive):
             assert_never()
 
     @atomic
-    def __getitem__(self, index: int) -> VT:
-        return self.__data[index]
+    def __getitem__(self, index: SupportsIndex) -> VT:
+        i = _get_index(index)
+        return self.__data[i]
 
     @mut_atomic
-    def __setitem__(self, index: int, value: VT) -> None:
+    def __setitem__(self, index: SupportsIndex, value: VT) -> None:
+        i = _get_index(index)
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         new_item = self.__syncwave_ctx__.inner_type_adapter.validate_python(value)
 
         # case 1: non-reactive content type
         if inner_ctx is None:
-            self.__data[index] = new_item
+            self.__data[i] = new_item
         # case 2: fixed reactive content type
         elif isinstance(inner_ctx, Context):
-            self.__data[index].__syncwave_update__(new_item)
+            self.__data[i].__syncwave_update__(new_item)
         # case 3: union content type
         elif isinstance(inner_ctx, ContextMap):
-            old_item = self.__data[index]
-            self.__setitem_union(index, old_item, new_item, inner_ctx)
+            old_item = self.__data[i]
+            self.__setitem_union(i, old_item, new_item, inner_ctx)
         else:
             assert_never()
 
     @mut_atomic
-    def __delitem__(self, index: int) -> None:
+    def __delitem__(self, index: SupportsIndex) -> None:
+        i = _get_index(index)
         if self.__syncwave_ctx__.inner_ctx is None:
-            del self.__data[index]
+            del self.__data[i]
         else:
             data_copy = self.__data.copy()
-            del data_copy[index]
+            del data_copy[i]
             self_copy = self.__new(data_copy)
             self.__syncwave_update__(self_copy)
 
@@ -364,15 +373,16 @@ class SyncList(MutableSequence[VT], Reactive):
         return len(self.__data)
 
     @mut_atomic
-    def insert(self, index: int, value: VT) -> None:
+    def insert(self, index: SupportsIndex, value: VT) -> None:
+        i = _get_index(index)
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         new_item = self.__syncwave_ctx__.inner_type_adapter.validate_python(value)
 
         if inner_ctx is None:
-            self.__data.insert(index, new_item)
+            self.__data.insert(i, new_item)
         else:
             data_copy = self.__data.copy()
-            data_copy.insert(index, new_item)
+            data_copy.insert(i, new_item)
             self_copy = self.__new(data_copy)
             self.__syncwave_update__(self_copy)
 
@@ -383,9 +393,6 @@ class SyncList(MutableSequence[VT], Reactive):
     def __repr__(self) -> str:
         status = "live" if self.__syncwave_live__ else "dead"
         return f"<SyncList {self.__data!r} ({status})>"
-
-    # __eq__ to be implemented?
-    # __hash__ to be implemented?
 
     def __setitem_union(self, i: int, o: VT, n: VT, u_ctx: ContextMap) -> None:
         old_is_reactive = isinstance(o, Reactive)
@@ -400,6 +407,16 @@ class SyncList(MutableSequence[VT], Reactive):
             if new_is_reactive:
                 n.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
             self.__data[i] = n
+
+
+def _get_index(index: Any) -> int:
+    if isinstance(index, int):
+        return index
+    if isinstance(index, SupportsIndex):
+        return index.__index__()
+    if isinstance(index, slice):
+        raise TypeError("Slice indices are not supported (yet).")
+    raise TypeError(f"SyncList indices must be integers, not {type(index).__name__}.")
 
 
 @dataclass(frozen=True)
@@ -485,9 +502,6 @@ class SyncSet(MutableSet[VT], Reactive):
     def __repr__(self) -> str:
         status = "live" if self.__syncwave_live__ else "dead"
         return f"<SyncSet {self.__data!r} ({status})>"
-
-    # __eq__ to be implemented?
-    # __hash__ to be implemented?
 
 
 SyncCollection.register(SyncDict)
