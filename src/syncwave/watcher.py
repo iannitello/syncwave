@@ -113,6 +113,9 @@ class _EventHandler(FileSystemEventHandler):
 
     def unset_callback(self, file_path: FilePath) -> None:
         with self._lock:
+            if timer := self._debounce_timers.pop(file_path, None):
+                timer.cancel()
+            self._self_writes_ts.pop(file_path, None)
             self._callbacks.pop(file_path, None)
 
     def mark_self_write(self, file_path: FilePath) -> None:

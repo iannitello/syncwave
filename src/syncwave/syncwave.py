@@ -68,7 +68,7 @@ class Syncwave(MutableMapping[str, Any]):
         if key not in self.__stores:
             raise KeyError(
                 f"Store '{key}' does not exist. "
-                "Use `syncwave.create_store(...)`, or `@syncwave.store(...)` first."
+                "Use `syncwave.create_store(...)`, or `@syncwave.register(...)` first."
             )
         str_guard("key", key)
 
@@ -121,6 +121,23 @@ class Syncwave(MutableMapping[str, Any]):
         self.__models.add(cls)
         return sync_model
 
+    def create_store(self, tp: type, /, *, name: str, default: Any = EmptyFile) -> Any:
+        if name in self.__stores:
+            raise ValueError(f"Store '{name}' already exists.")
+
+        str_guard("name", name)
+        io.file_name_guard(name)
+        self.__create_store(tp, name)
+
+        value, store_info = self.__stores[name]
+        with store_info.sref.lock:
+            if value is EmptyFile:
+                if default is not EmptyFile:
+                    self.__set_store(name, default)
+                    return default
+                raise ValueError(f"Unable to create store '{name}' without a default.")
+            return value
+
     def register(
         self,
         *,
@@ -142,23 +159,6 @@ class Syncwave(MutableMapping[str, Any]):
             return cls
 
         return decorator
-
-    def create_store(self, tp: type, /, *, name: str, default: Any = EmptyFile) -> Any:
-        if name in self.__stores:
-            raise ValueError(f"Store '{name}' already exists.")
-
-        str_guard("name", name)
-        io.file_name_guard(name)
-        self.__create_store(tp, name)
-
-        value, store_info = self.__stores[name]
-        with store_info.sref.lock:
-            if value is EmptyFile:
-                if default is not EmptyFile:
-                    self.__set_store(name, default)
-                    return default
-                raise ValueError(f"Unable to create store '{name}' without a default.")
-            return value
 
     def __create_store(self, tp: type | GenericAlias, name: str) -> None:
         try:
