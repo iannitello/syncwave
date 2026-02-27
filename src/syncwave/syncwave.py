@@ -21,7 +21,7 @@ from .tp_validation import collection_wrap, drill_tp, str_guard, sync_model_guar
 from .watcher import watcher
 
 if TYPE_CHECKING:
-    from .sync_model import _SMS
+    from .sync_model import SMS
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,7 @@ class Syncwave(MutableMapping[str, Any]):
         io.create_dir(stores_dir)
         self.__stores_dir = stores_dir
         self.__stores: dict[str, tuple[Any | EmptyFileType, StoreInfo]] = {}
-        self.__models: WeakSet[type[_SMS]] = WeakSet()
+        self.__models: WeakSet[type[SMS]] = WeakSet()
 
     @property
     def stores_dir(self) -> Path:
@@ -105,7 +105,7 @@ class Syncwave(MutableMapping[str, Any]):
 
     def make_reactive(
         self,
-        cls: type[_SMS],
+        cls: type[SMS],
         /,
         *,
         cls_name: str | None = None,
@@ -143,14 +143,14 @@ class Syncwave(MutableMapping[str, Any]):
         *,
         name: str,
         collection: type[SyncDict] | type[SyncList] | Literal["auto"] | None = "auto",
-    ) -> Callable[[type[_SMS]], type[_SMS]]:
+    ) -> Callable[[type[SMS]], type[SMS]]:
         if name in self.__stores:
             raise ValueError(f"Store '{name}' already exists.")
 
         str_guard("name", name)
         io.file_name_guard(name)
 
-        def decorator(cls: type[_SMS]) -> type[_SMS]:
+        def decorator(cls: type[SMS]) -> type[SMS]:
             sync_model_guard(cls, self.__models)
             sync_model = create_sync_model(cls)
             store_tp = collection_wrap(cls, sync_model, collection)
