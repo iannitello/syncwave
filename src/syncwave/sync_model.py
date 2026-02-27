@@ -45,8 +45,8 @@ def is_sync_model_supported(cls: type) -> TypeGuard[type[_SMS]]:
 @dataclass(frozen=True)
 class SyncModelCtx(Context):
     tp: type[SyncModel]
-    fields_type_adapter: dict[str, TypeAdapter[Any]]
     fields_ctx: dict[str, Context | ContextMap]
+    fields_type_adapter: dict[str, TypeAdapter[Any]]
 
 
 class SyncModel(Reactive):
@@ -120,7 +120,7 @@ class SyncModel(Reactive):
             elif isinstance(field_ctx, Context):
                 old_value = getattr(self, name)  # can't be None
                 old_value.__syncwave_update__(new_value)
-                o_setattr(self, name, old_value)  # TODO: necessary?
+                o_setattr(self, name, old_value)  # in case there's a hook to trigger
             # case 3: union content type
             elif isinstance(field_ctx, ContextMap):
                 old_value = getattr(self, name, None)
@@ -205,7 +205,7 @@ class SyncModel(Reactive):
 
         if old_is_reactive and new_is_reactive and same_type:
             o.__syncwave_update__(n)
-            o_setattr(self, f, o)  # TODO: necessary?
+            o_setattr(self, f, o)  # in case there's a hook to trigger
         else:
             if old_is_reactive:
                 o.__syncwave_kill__()

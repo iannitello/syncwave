@@ -357,8 +357,8 @@ def _validate_key_tp(tp: Any) -> None:
 
     raise TypeError(
         f"`{tp_name}` is not a valid dict key type. This is either because:\n"
-        "  1. it cannot be serialized to `str` (JSON keys are always strings), or\n"
-        "  2. it cannot be deserialized from JSON back to the same type.\n"
+        "  1. it cannot be serialized to `str` (JSON keys are always strings),\n"
+        "  2. it cannot be deserialized from JSON back to the same type,\n"
         "  3. it is not hashable.\n\n"
         f"The key types currently supported are: {_VALID_DICT_KEY_TYPES_STR}."
     )

@@ -120,7 +120,7 @@ class _IO:
     def _scheduled_write(self, path: Path) -> None:
         with self._lock:
             if path not in self._pending_writes:
-                return  # TODO is this possible? should it be an error?
+                return  # defensive check, should never happen
             value, ta, _ = self._pending_writes.pop(path)
         self._atomic_write(path, self._serialize(value, ta))
 
