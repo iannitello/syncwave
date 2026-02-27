@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Container
-from dataclasses import dataclass
+from dataclasses import is_dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from enum import Enum
@@ -20,6 +20,7 @@ from types import GenericAlias
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_origin
 from uuid import UUID
 
+import pydantic.dataclasses as py_dc
 from pydantic import ByteSize, RootModel, TypeAdapter
 
 from .reactive import Context, ContextMap, Reactive, assert_never
@@ -36,7 +37,7 @@ from .sync_collection import (
 from .sync_model import SyncModel, SyncModelCtx, is_sync_model_supported
 
 if TYPE_CHECKING:
-    from .sync_model import _SMS
+    from .sync_model import SMS
 
 
 def str_guard(param: str, value: Any) -> None:
@@ -47,18 +48,28 @@ def str_guard(param: str, value: Any) -> None:
         raise ValueError(f"'{param}' cannot be empty or whitespace only.")
 
 
-def sync_model_guard(cls: type[_SMS], known_models: Container[type[_SMS]]) -> None:
+def sync_model_guard(cls: Any, known_models: Container[type[SMS]]) -> None:
     if cls in known_models:
         raise ValueError(f"Class '{cls.__qualname__}' has already been made reactive.")
     if not isclass(cls):
         raise TypeError(f"Expected a class, got `{type(cls).__qualname__}`.")
     if not is_sync_model_supported(cls):
-        raise TypeError(f"Expected a SyncModelSupported, got `{cls.__qualname__}`.")
+        if is_dataclass(cls):
+            raise TypeError(
+                "Standard `dataclasses.dataclass` are not supported, "
+                "use `pydantic.dataclasses.dataclass` instead."
+            )
+        raise TypeError(
+            f"'{cls.__qualname__}' cannot be made reactive. The supported types are:\n"
+            "  1. subclasses of `pydantic.BaseModel`,\n"
+            "  2. subclasses of `pydantic.RootModel`,\n"
+            "  3. classes decorated with `@pydantic.dataclasses.dataclass`."
+        )
     _parse_model(cls, as_sync_model=True)
 
 
 def collection_wrap(
-    cls: type[_SMS],
+    cls: type[SMS],
     sync_model: type[SyncModel],
     collection: type[SyncDict] | type[SyncList] | Literal["auto"] | None,
 ) -> type | GenericAlias:
@@ -66,8 +77,9 @@ def collection_wrap(
     if collection == "auto":
         if issubclass(cls, RootModel):
             resolved_collection = None
-        elif "key" in (fields := _get_fields(cls)):
-            resolved_collection = GenericAlias(SyncDict, (fields["key"].tp,))
+        elif "key" in cls.__pydantic_fields__:
+            key_tp = cls.__pydantic_fields__["key"].annotation
+            resolved_collection = GenericAlias(SyncDict, (key_tp,))
         else:
             resolved_collection = SyncList
 
@@ -126,6 +138,8 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None
             assert_never()
         if is_sync_model_supported(origin):
             return _parse_model(origin)
+        if is_dataclass(origin):
+            return _parse_model(py_dc.dataclass(origin))  # ty: ignore[invalid-argument-type]
 
         if issubclass(origin, dict) and args:
             _validate_key_tp(args[0])
@@ -140,57 +154,30 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None
     return None
 
 
-@dataclass(frozen=True)
-class _Field:
-    tp: Any
-    is_frozen: bool
-
-
-def _get_fields(cls: type[_SMS]) -> dict[str, _Field]:
-    fields = (
-        getattr(cls, "model_fields", None)
-        or getattr(cls, "__pydantic_fields__", None)
-        or getattr(cls, "__dataclass_fields__", None)
-    )
-    if not fields:
-        raise TypeError(f"`{cls.__qualname__}` has no fields.")
-    return {
-        field_name: _Field(
-            tp=getattr(field, "annotation", None) or field.type,
-            is_frozen=getattr(field, "frozen", False),
-        )
-        for field_name, field in fields.items()
-    }
-
-
-def _parse_model(cls: type, as_sync_model: bool = False) -> SyncModelCtx | None:
+def _parse_model(cls: type[SMS], as_sync_model: bool = False) -> SyncModelCtx | None:
     is_sync_model = issubclass(cls, SyncModel)
     treat_as_sync_model = is_sync_model or as_sync_model
 
-    model_is_frozen: bool = (
-        getattr(cls, "model_config", {}).get("frozen", False)
-        or getattr(cls, "__pydantic_config__", {}).get("frozen", False)
-        or getattr(getattr(cls, "__dataclass_params__", None), "frozen", False)
-    )
-    if model_is_frozen and treat_as_sync_model:
+    config = getattr(cls, "model_config", {}) or getattr(cls, "__pydantic_config__", {})
+    if treat_as_sync_model and config.get("frozen", False):
         raise TypeError(f"`{cls.__qualname__}` is frozen and cannot be made reactive.")
 
     fields_ctx: dict[str, Context | ContextMap] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
 
-    for field_name, field in _get_fields(cls).items():
+    for field_name, field in cls.__pydantic_fields__.items():
         err = f"Field `{field_name}` in `{cls.__qualname__}` cannot be reactive because"
         if not treat_as_sync_model:
             err += " it is not contained in a `SyncModel` (breaks the reactive chain)."
-        elif field.is_frozen:
+        elif field.frozen:
             err += " it is frozen."
         else:
             err = ""
 
-        field_ctx = drill_tp(field.tp, _err_if_reactive=err)
+        field_ctx = drill_tp(field.annotation, _err_if_reactive=err)
         if field_ctx is not None:
             fields_ctx[field_name] = field_ctx
-        fields_type_adapter[field_name] = TypeAdapter(field.tp)
+        fields_type_adapter[field_name] = TypeAdapter(field.annotation)
 
     if is_sync_model:
         # `is_sync_model` means `cls` is type[SyncModel],

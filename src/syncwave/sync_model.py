@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import dataclasses as dc
 from dataclasses import dataclass
 from inspect import isclass
 from typing import TYPE_CHECKING, Any, Union
 from typing_extensions import Self, TypeGuard
 
-import pydantic.dataclasses as py_dc
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, RootModel, TypeAdapter
 from pydantic import GetCoreSchemaHandler as Handler
+from pydantic.dataclasses import is_pydantic_dataclass
 from pydantic_core import core_schema as cs
 
 from .reactive import (
@@ -22,24 +21,31 @@ from .reactive import (
 )
 
 if TYPE_CHECKING:
-    from _typeshed import DataclassInstance as Dataclass
+    from typing import ClassVar, Protocol
+
+    from _typeshed import DataclassInstance as StandardDataclass
+    from pydantic import ConfigDict
+    from pydantic.fields import FieldInfo
+
+    class PydanticDataclass(StandardDataclass, Protocol):
+        __pydantic_config__: ClassVar[ConfigDict]
+        __pydantic_fields__: ClassVar[dict[str, FieldInfo]]
 
     # SyncModelSupported
-    # A user-defined class that can be made reactive, either one of the following:
-    #   1. a subclass of `pydantic.BaseModel`,
-    #   2. a subclass of `pydantic.RootModel`,
-    #   3. a class decorated with `@pydantic.dataclasses.dataclass`, or
-    #   4. a class decorated with `@dataclasses.dataclass`.
-    _SMS = Union[BaseModel, Dataclass]
+    # A user-defined class that can be made reactive. The supported types are:
+    #   1. subclasses of `pydantic.BaseModel`,
+    #   2. subclasses of `pydantic.RootModel`,
+    #   3. classes decorated with `@pydantic.dataclasses.dataclass`.
+    SMS = Union[BaseModel, RootModel, PydanticDataclass]
 
 
-def is_sync_model_supported(cls: type) -> TypeGuard[type[_SMS]]:
+def is_sync_model_supported(cls: Any) -> TypeGuard[type[SMS]]:
     if not isclass(cls):
         return False
     if issubclass(cls, SyncModel):
         return False
-    # RootModel is a subclass of BaseModel, and a pydantic dataclass is a dataclass
-    return issubclass(cls, BaseModel) or dc.is_dataclass(cls)
+    # RootModel is a subclass of BaseModel
+    return issubclass(cls, BaseModel) or is_pydantic_dataclass(cls)
 
 
 @dataclass(frozen=True)
@@ -51,10 +57,10 @@ class SyncModelCtx(Context):
 
 class SyncModel(Reactive):
     __syncwave_ctx__: SyncModelCtx
-    __syncwave_original_cls__: type[_SMS]
+    __syncwave_original_cls__: type[SMS]
 
     @classmethod
-    def __new(cls, instance: _SMS) -> Self:
+    def __new(cls, instance: SMS) -> Self:
         instance.__class__ = cls
         instance: Self = instance  # ty: ignore[invalid-assignment]
         return instance
@@ -140,8 +146,8 @@ class SyncModel(Reactive):
             # __getattr__ shouldn't be called for a tracked field on a live instance
             assert_never()
 
-        if hasattr(self.__syncwave_original_cls__, "__getattr__"):
-            o_getattr = self.__syncwave_original_cls__.__getattr__
+        if issubclass(self.__syncwave_original_cls__, BaseModel):
+            o_getattr = self.__syncwave_original_cls__.__getattr__  # ty: ignore[unresolved-attribute]
             return o_getattr(self, name)
         cls_name = type(self).__name__
         raise AttributeError(f"{cls_name!r} object has no attribute {name!r}")
@@ -189,12 +195,12 @@ class SyncModel(Reactive):
     def __str__(self) -> str:
         if not self.__syncwave_live__:
             return f"{type(self).__qualname__}()"
-        return self.__syncwave_original_cls__.__str__(self)
+        return self.__syncwave_original_cls__.__str__(self)  # ty: ignore[invalid-argument-type]
 
     def __repr__(self) -> str:
         if not self.__syncwave_live__:
             return f"{type(self).__qualname__}()"
-        return self.__syncwave_original_cls__.__repr__(self)
+        return self.__syncwave_original_cls__.__repr__(self)  # ty: ignore[invalid-argument-type]
 
     def __setattr_union(self, f: str, o: Any, n: Any, u_ctx: ContextMap) -> None:
         o_setattr = self.__syncwave_original_cls__.__setattr__
@@ -214,13 +220,10 @@ class SyncModel(Reactive):
             o_setattr(self, f, n)
 
 
-def create_sync_model(cls: type[_SMS], rename: bool | str = True) -> type[SyncModel]:
+def create_sync_model(cls: type[SMS], rename: bool | str = True) -> type[SyncModel]:
     cls_name = f"Sync{cls.__name__}" if rename is True else rename or cls.__name__
-    Model = type(
+    return type(
         cls_name,
         (SyncModel, cls),
         {"__module__": cls.__module__, "__syncwave_original_cls__": cls},
     )
-    if dc.is_dataclass(Model) and not py_dc.is_pydantic_dataclass(Model):
-        return py_dc.dataclass(Model)
-    return Model
