@@ -14,7 +14,7 @@ from weakref import WeakSet
 from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
 from .io import EmptyFile, EmptyFileType, io
-from .reactive import Context, ContextMap, Reactive, StoreRef, assert_never
+from .reactive import Context, ContextMap, Reactive, StoreRef, unreachable
 from .sync_collection import SyncDict, SyncList
 from .sync_model import SyncModel, create_sync_model
 from .tp_validation import collection_wrap, drill_tp, str_guard, sync_model_guard
@@ -134,7 +134,10 @@ class Syncwave(MutableMapping[str, Any]):
             if value is EmptyFile:
                 if default is not EmptyFile:
                     self.__set_store(name, default)
-                    return default
+                    return self.__stores[name][0]
+                # cleanup before raising
+                watcher.unwatch(store_info.path)
+                del self.__stores[name]
                 raise ValueError(f"Unable to create store '{name}' without a default.")
             return value
 
@@ -174,15 +177,14 @@ class Syncwave(MutableMapping[str, Any]):
         value = io.init_json(path, type_adapter)
         if isinstance(value, Reactive):
             if ctx is None:
-                assert_never()
+                unreachable()
             elif isinstance(ctx, Context):
                 value.__syncwave_init__(sref, ctx)
             elif isinstance(ctx, ContextMap):
                 value.__syncwave_init__(sref, ctx[type(value)])
             else:
-                assert_never()
+                unreachable()
         self.__stores[name] = (value, store_info)
-
         watcher.watch(path, self.__on_file_change, store_info)
 
     def __on_store_change(self, name: str) -> None:
@@ -210,35 +212,34 @@ class Syncwave(MutableMapping[str, Any]):
         new_value = store_info.type_adapter.validate_python(value)
         ctx, sref = store_info.ctx, store_info.sref
 
-        with sref.lock:
-            # case 1: non-reactive content type
-            if ctx is None:
-                self.__stores[key] = (new_value, store_info)
-            # case 2: fixed reactive content type
-            elif isinstance(ctx, Context):
-                if not isinstance(old_value, EmptyFileType):
-                    old_value.__syncwave_update__(new_value)
-                else:
-                    new_value.__syncwave_init__(sref, ctx)
-                    self.__stores[key] = (new_value, store_info)
-            # case 3: union content type
-            elif isinstance(ctx, ContextMap):
-                old_is_reactive = isinstance(old_value, Reactive)
-                new_is_reactive = isinstance(new_value, Reactive)
-                same_type = type(old_value) is (new_type := type(new_value))
-
-                if old_is_reactive and new_is_reactive and same_type:
-                    # `old_is_reactive` means `old_value` is not EmptyFile,
-                    # but aliased conditional expressions are not supported by ty
-                    old_value.__syncwave_update__(new_value)  # ty: ignore[unresolved-attribute]
-                else:
-                    if old_is_reactive:
-                        # same reason as above, `old_value` can't be EmptyFile
-                        old_value.__syncwave_kill__()  # ty: ignore[unresolved-attribute]
-                    if new_is_reactive:
-                        new_value.__syncwave_init__(sref, ctx[new_type])
-                    self.__stores[key] = (new_value, store_info)
+        # case 1: non-reactive content type
+        if ctx is None:
+            self.__stores[key] = (new_value, store_info)
+        # case 2: fixed reactive content type
+        elif isinstance(ctx, Context):
+            if not isinstance(old_value, EmptyFileType):
+                old_value.__syncwave_update__(new_value)
             else:
-                assert_never()
+                new_value.__syncwave_init__(sref, ctx)
+                self.__stores[key] = (new_value, store_info)
+        # case 3: union content type
+        elif isinstance(ctx, ContextMap):
+            old_is_reactive = isinstance(old_value, Reactive)
+            new_is_reactive = isinstance(new_value, Reactive)
+            same_type = type(old_value) is (new_type := type(new_value))
+
+            if old_is_reactive and new_is_reactive and same_type:
+                # `old_is_reactive` means `old_value` is not EmptyFile,
+                # but aliased conditional expressions are not supported by ty
+                old_value.__syncwave_update__(new_value)  # ty: ignore[unresolved-attribute]
+            else:
+                if old_is_reactive:
+                    # same reason as above, `old_value` can't be EmptyFile
+                    old_value.__syncwave_kill__()  # ty: ignore[unresolved-attribute]
+                if new_is_reactive:
+                    new_value.__syncwave_init__(sref, ctx[new_type])
+                self.__stores[key] = (new_value, store_info)
+        else:
+            unreachable()
 
         sref.on_change()

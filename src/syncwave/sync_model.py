@@ -16,8 +16,8 @@ from .reactive import (
     DeadReferenceError,
     Reactive,
     StoreRef,
-    assert_never,
     mut_atomic,
+    unreachable,
 )
 
 if TYPE_CHECKING:
@@ -67,8 +67,7 @@ class SyncModel(Reactive):
 
     @classmethod
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
-        original_cls = cls.__syncwave_original_cls__
-        cls_schema = handler.generate_schema(original_cls)
+        cls_schema = handler.generate_schema(cls.__syncwave_original_cls__)
 
         inst_schema = cs.is_instance_schema(cls)
         non_inst_schema = cs.no_info_after_validator_function(cls.__new, cls_schema)
@@ -99,7 +98,7 @@ class SyncModel(Reactive):
                 if isinstance(value, Reactive):
                     value.__syncwave_init__(sref, field_ctx[type(value)])
             else:
-                assert_never()
+                unreachable()
 
     def __syncwave_kill__(self) -> None:
         for name in self.__syncwave_ctx__.fields_ctx:
@@ -132,7 +131,7 @@ class SyncModel(Reactive):
                 old_value = getattr(self, name, None)
                 self.__setattr_union(name, old_value, new_value, field_ctx)
             else:
-                assert_never()
+                unreachable()
 
     def __getattr__(self, name: str) -> Any:
         # __getattribute__ would always trigger (methods, internal properties, etc.).
@@ -144,7 +143,7 @@ class SyncModel(Reactive):
             if not self.__syncwave_live__:
                 raise DeadReferenceError(reference=self)
             # __getattr__ shouldn't be called for a tracked field on a live instance
-            assert_never()
+            unreachable()
 
         if issubclass(self.__syncwave_original_cls__, BaseModel):
             o_getattr = self.__syncwave_original_cls__.__getattr__  # ty: ignore[unresolved-attribute]
@@ -160,6 +159,7 @@ class SyncModel(Reactive):
         field_ta = ctx.fields_type_adapter.get(name)
         # case for a non-model field
         if field_ta is None:
+            # will still trigger `on_change` even though the field is not tracked
             o_setattr(self, name, new_value)
             return
 
@@ -179,7 +179,7 @@ class SyncModel(Reactive):
             old_value = getattr(self, name, None)
             self.__setattr_union(name, old_value, new_value, field_ctx)
         else:
-            assert_never()
+            unreachable()
 
     @mut_atomic
     def __delattr__(self, name: str) -> None:
