@@ -123,7 +123,7 @@ class _EventHandler(FileSystemEventHandler):
             self._self_writes_ts[file_path] = monotonic()
 
     def _is_self_write(self, file_path: FilePath) -> bool:
-        # not protected by the lock because it's only called internally
+        # caller must hold the lock
         ts = self._self_writes_ts.get(file_path)
         return ts is not None and monotonic() - ts < self.SELF_WRITE_WINDOW
 
@@ -156,14 +156,17 @@ class _EventHandler(FileSystemEventHandler):
             timer = Timer(
                 self.DEBOUNCE_WINDOW,
                 self._scheduled_callback,
-                args=(file_path, self._callbacks[file_path]),
+                args=(file_path,),
             )
             self._debounce_timers[file_path] = timer
             timer.start()
 
-    def _scheduled_callback(self, file_path: FilePath, callback: Callback) -> None:
+    def _scheduled_callback(self, file_path: FilePath) -> None:
         with self._lock:
             self._debounce_timers.pop(file_path, None)
+            callback = self._callbacks.get(file_path)
+            if callback is None:  # case when unset_callback was called in the meantime
+                return
         callback()
 
     def _paths_from_event(self, event: FileSystemEvent) -> list[Path]:

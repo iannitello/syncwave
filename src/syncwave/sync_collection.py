@@ -29,9 +29,9 @@ from .reactive import (
     ContextMap,
     Reactive,
     StoreRef,
-    assert_never,
     atomic,
     mut_atomic,
+    unreachable,
 )
 
 KT = TypeVar("KT")
@@ -108,7 +108,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
                 if isinstance(item, Reactive):
                     item.__syncwave_init__(sref, inner_ctx[type(item)])
         else:
-            assert_never()
+            unreachable()
 
     def __syncwave_kill__(self) -> None:
         for item in self.__data.values():
@@ -147,7 +147,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
                 if isinstance(old_item, Reactive):
                     old_item.__syncwave_kill__()
         else:
-            assert_never()
+            unreachable()
 
     @atomic
     def __getitem__(self, key: KT) -> VT:
@@ -170,7 +170,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
             old_item = self.__data.get(key)
             self.__setitem_union(key, old_item, new_item, inner_ctx)
         else:
-            assert_never()
+            unreachable()
 
     @mut_atomic
     def __delitem__(self, key: KT) -> None:
@@ -275,7 +275,7 @@ class SyncList(MutableSequence[VT], Reactive):
                 if isinstance(item, Reactive):
                     item.__syncwave_init__(sref, inner_ctx[type(item)])
         else:
-            assert_never()
+            unreachable()
 
     def __syncwave_kill__(self) -> None:
         for item in self.__data:
@@ -331,7 +331,7 @@ class SyncList(MutableSequence[VT], Reactive):
                     if isinstance(old_item, Reactive):
                         old_item.__syncwave_kill__()
         else:
-            assert_never()
+            unreachable()
 
     @atomic
     def __getitem__(self, index: SupportsIndex) -> VT:
@@ -355,18 +355,19 @@ class SyncList(MutableSequence[VT], Reactive):
             old_item = self.__data[i]
             self.__setitem_union(i, old_item, new_item, inner_ctx)
         else:
-            assert_never()
+            unreachable()
 
     @mut_atomic
     def __delitem__(self, index: SupportsIndex) -> None:
         i = _get_index(index)
         if self.__syncwave_ctx__.inner_ctx is None:
             del self.__data[i]
-        else:
-            data_copy = self.__data.copy()
-            del data_copy[i]
-            self_copy = self.__new(data_copy)
-            self.__syncwave_update__(self_copy)
+            return
+
+        data_copy = self.__roundtrip_copy()
+        del data_copy[i]
+        self_copy = self.__new(data_copy)
+        self.__syncwave_update__(self_copy)
 
     @atomic
     def __len__(self) -> int:
@@ -380,11 +381,12 @@ class SyncList(MutableSequence[VT], Reactive):
 
         if inner_ctx is None:
             self.__data.insert(i, new_item)
-        else:
-            data_copy = self.__data.copy()
-            data_copy.insert(i, new_item)
-            self_copy = self.__new(data_copy)
-            self.__syncwave_update__(self_copy)
+            return
+
+        data_copy = self.__roundtrip_copy()
+        data_copy.insert(i, new_item)
+        self_copy = self.__new(data_copy)
+        self.__syncwave_update__(self_copy)
 
     def __str__(self) -> str:
         items = ", ".join(str(item) for item in self.__data)
@@ -407,6 +409,10 @@ class SyncList(MutableSequence[VT], Reactive):
             if new_is_reactive:
                 n.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
             self.__data[i] = n
+
+    def __roundtrip_copy(self) -> list[VT]:
+        ta = self.__syncwave_ctx__.inner_type_adapter
+        return [ta.validate_python(ta.dump_python(item)) for item in self.__data]
 
 
 def _get_index(index: Any) -> int:

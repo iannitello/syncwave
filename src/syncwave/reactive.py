@@ -75,7 +75,7 @@ def mut_atomic(fn: Callable[P, R]) -> Callable[P, None]:
                 raise DeadReferenceError(reference=self)
             result = fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
             if result is not None:
-                assert_never()
+                unreachable()
             self.__syncwave_sref__.on_change()
 
     return wrapper  # ty: ignore[invalid-return-type]
@@ -87,5 +87,5 @@ class DeadReferenceError(RuntimeError):
         super().__init__(message)
 
 
-def assert_never() -> NoReturn:
+def unreachable() -> NoReturn:
     raise RuntimeError("Internal Error")

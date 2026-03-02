@@ -23,7 +23,7 @@ from uuid import UUID
 import pydantic.dataclasses as py_dc
 from pydantic import ByteSize, RootModel, TypeAdapter
 
-from .reactive import Context, ContextMap, Reactive, assert_never
+from .reactive import Context, ContextMap, Reactive, unreachable
 from .sync_collection import (
     KT,
     VT,
@@ -135,7 +135,7 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None
                 return _get_sync_set_ctx(tp)
             if issubclass(origin, SyncModel):
                 return _parse_model(origin)
-            assert_never()
+            unreachable()
         if is_sync_model_supported(origin):
             return _parse_model(origin)
         if is_dataclass(origin):
@@ -281,28 +281,28 @@ def _validate_hashable(tp: Any, _err: str) -> None:
 
 # Types that round-trip as dict keys through JSON (dump_json/validate_json).
 # See: docs.pydantic.dev/latest/concepts/conversion_table/
-_VALID_DICT_KEY_TYPES: dict[type, str] = {
-    str: "str",
-    int: "int",
-    float: "float",
-    bool: "bool",
-    bytes: "bytes",
-    Decimal: "Decimal",
-    Pattern: "Pattern",
-    Path: "Path",
-    date: "date",
-    datetime: "datetime",
-    time: "time",
-    timedelta: "timedelta",
-    UUID: "UUID",
-    IPv4Address: "IPv4Address",
-    IPv4Interface: "IPv4Interface",
-    IPv4Network: "IPv4Network",
-    IPv6Address: "IPv6Address",
-    IPv6Interface: "IPv6Interface",
-    IPv6Network: "IPv6Network",
-    ByteSize: "ByteSize",
-}
+_VALID_DICT_KEY_TYPES: list[type] = [
+    str,
+    int,
+    float,
+    bool,
+    bytes,
+    Decimal,
+    Pattern,
+    Path,
+    date,
+    datetime,
+    time,
+    timedelta,
+    UUID,
+    IPv4Address,
+    IPv4Interface,
+    IPv4Network,
+    IPv6Address,
+    IPv6Interface,
+    IPv6Network,
+    ByteSize,
+]
 
 
 _VALID_DICT_KEY_TYPES_STR = (
@@ -339,7 +339,7 @@ def _validate_key_tp(tp: Any) -> None:
     if isclass(origin) and issubclass(origin, Enum):
         [_validate_key_tp(type(member.value)) for member in origin]
         return
-    if origin in _VALID_DICT_KEY_TYPES or origin in _VALID_DICT_KEY_TYPES.values():
+    if origin in _VALID_DICT_KEY_TYPES:
         return
 
     raise TypeError(
