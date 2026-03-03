@@ -234,3 +234,6 @@ class Syncwave(MutableMapping[str, Any]):
             unreachable()
 
         sref.on_change()
+
+
+Reactive.register(Syncwave)
