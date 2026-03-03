@@ -7,8 +7,7 @@ from keyword import iskeyword
 from pathlib import Path
 from threading import RLock
 from types import GenericAlias
-from typing import TYPE_CHECKING, Any, Callable, Literal, TypeVar
-from typing_extensions import ParamSpec
+from typing import TYPE_CHECKING, Any, Callable, Literal
 from weakref import WeakSet
 
 from pydantic import PydanticSchemaGenerationError, TypeAdapter
@@ -33,26 +32,18 @@ class StoreInfo:
     ctx: Context | ContextMap | None
 
 
-P = ParamSpec("P")
-R = TypeVar("R")
-
-
 # Has to be thread-safe, this is a temporary solution just to start the implementation.
 class Syncwave(MutableMapping[str, Any]):
-    def __init__(self, stores_dir: str | Path = "") -> None:
-        stores_dir = (
-            io.get_root_dir() / "syncstores"
-            if stores_dir == ""
-            else io.sanitize_path(stores_dir)
-        )
-        io.create_dir(stores_dir)
-        self.__stores_dir = stores_dir
+    def __init__(self, root_path: str | Path = "") -> None:
+        root = io.sanitize_path(root_path or Path.cwd() / "syncstores")
+        io.create_dir(root)
+        self.__root_path = root
         self.__stores: dict[str, tuple[Any | EmptyFileType, StoreInfo]] = {}
         self.__models: WeakSet[type[SMS]] = WeakSet()
 
     @property
-    def stores_dir(self) -> Path:
-        return self.__stores_dir
+    def root_path(self) -> Path:
+        return self.__root_path
 
     def __getitem__(self, key: str) -> Any:
         if key not in self.__stores:
@@ -169,7 +160,7 @@ class Syncwave(MutableMapping[str, Any]):
         except PydanticSchemaGenerationError as e:
             raise TypeError(f"Type `{tp}` is not supported by Pydantic.") from e
 
-        path = self.__stores_dir / f"{name}.json"
+        path = self.__root_path / f"{name}.json"
         sref = StoreRef(lock=RLock(), on_change=partial(self.__on_store_change, name))
         ctx = drill_tp(tp)
         store_info = StoreInfo(name, path, type_adapter, sref, ctx)
