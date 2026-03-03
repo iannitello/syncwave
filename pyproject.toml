@@ -6,8 +6,8 @@ readme = "README.md"
 authors = [{ name = "Lucas Iannitello", email = "lucas.iannitello@protonmail.com" }]
 requires-python = ">=3.9"
 dependencies = [
-    "pydantic>=2.11.7",
-    "typing-extensions>=4.14.1",
+    "pydantic>=2.12.5",
+    "typing-extensions>=4.15.0",
     "watchdog>=6.0.0",
 ]
 license = { file = "LICENSE" }
@@ -27,7 +27,7 @@ build-backend = "uv_build"
 dev = [
     "fastapi[standard]>=0.128.8",
     "ruff>=0.15.4",
-    "ty>=0.0.19",
+    "ty>=0.0.20",
 ]
 
 [tool.ruff.lint]
