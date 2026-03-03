@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory, mkstemp
 from threading import Lock, Timer
@@ -50,14 +49,6 @@ class _IO:
         path_str = os.path.expandvars(path_str)
         path_str = os.path.expanduser(path_str)
         return Path(path_str).resolve()
-
-    def get_root_dir(self) -> Path:
-        main_module = sys.modules.get("__main__")
-        if file_attr := getattr(main_module, "__file__", None):
-            path = Path(file_attr).parent
-        else:
-            path = Path.cwd()
-        return self.sanitize_path(path)
 
     def create_dir(self, path: Path) -> None:
         if path.exists() and not path.is_dir():
