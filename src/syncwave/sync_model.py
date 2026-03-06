@@ -220,7 +220,7 @@ class SyncModel(Reactive):
             o_setattr(self, f, n)
 
 
-def create_sync_model(cls: type[SMS], rename: bool | str = True) -> type[SyncModel]:
+def create_sync_model(cls: type[SMS], *, rename: bool | str = True) -> type[SyncModel]:
     cls_name = f"Sync{cls.__name__}" if rename is True else rename or cls.__name__
     return type(
         cls_name,
