@@ -54,7 +54,7 @@ class SyncCollection(Reactive):
 
 
 @dataclass(frozen=True)
-class SyncDictCtx(Generic[KT, VT], Context):
+class SyncDictCtx(Context, Generic[KT, VT]):
     tp: type[SyncDict]
     inner_ctx: Context | ContextMap | None
     inner_type_adapter: TypeAdapter[VT]
@@ -221,7 +221,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
 
 
 @dataclass(frozen=True)
-class SyncListCtx(Generic[VT], Context):
+class SyncListCtx(Context, Generic[VT]):
     tp: type[SyncList]
     inner_ctx: Context | ContextMap | None
     inner_type_adapter: TypeAdapter[VT]
@@ -426,7 +426,7 @@ def _get_index(index: Any) -> int:
 
 
 @dataclass(frozen=True)
-class SyncSetCtx(Generic[VT], Context):
+class SyncSetCtx(Context, Generic[VT]):
     tp: type[SyncSet]
     inner_ctx: None  # never holds reactive items
     inner_type_adapter: TypeAdapter[VT]

@@ -6,7 +6,6 @@ from functools import partial
 from keyword import iskeyword
 from pathlib import Path
 from threading import RLock
-from types import GenericAlias
 from typing import TYPE_CHECKING, Any, Callable, Literal
 from weakref import WeakSet
 
@@ -20,6 +19,8 @@ from .tp_validation import collection_wrap, drill_tp, str_guard, sync_model_guar
 from .watcher import watcher
 
 if TYPE_CHECKING:
+    from types import GenericAlias
+
     from .sync_model import SMS
 
 
@@ -136,7 +137,7 @@ class Syncwave(MutableMapping[str, Any]):
         self,
         *,
         name: str,
-        collection: type[SyncDict] | type[SyncList] | Literal["auto"] | None = "auto",
+        collection: type[SyncDict | SyncList] | Literal["auto"] | None = "auto",
     ) -> Callable[[type[SMS]], type[SMS]]:
         if name in self.__stores:
             raise ValueError(f"Store '{name}' already exists.")

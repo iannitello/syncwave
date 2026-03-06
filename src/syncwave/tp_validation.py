@@ -71,7 +71,7 @@ def sync_model_guard(cls: Any, known_models: Container[type[SMS]]) -> None:
 def collection_wrap(
     cls: type[SMS],
     sync_model: type[SyncModel],
-    collection: type[SyncDict] | type[SyncList] | Literal["auto"] | None,
+    collection: type[SyncDict | SyncList] | Literal["auto"] | None,
 ) -> type | GenericAlias:
     resolved_collection = collection  # non "auto" case
     if collection == "auto":
@@ -154,7 +154,7 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None
     return None
 
 
-def _parse_model(cls: type[SMS], as_sync_model: bool = False) -> SyncModelCtx | None:
+def _parse_model(cls: type[SMS], *, as_sync_model: bool = False) -> SyncModelCtx | None:
     is_sync_model = issubclass(cls, SyncModel)
     treat_as_sync_model = is_sync_model or as_sync_model
 
