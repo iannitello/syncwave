@@ -34,6 +34,9 @@ from .reactive import (
     unreachable,
 )
 
+__all__ = ["SyncCollection", "SyncDict", "SyncList", "SyncSet"]
+
+
 KT = TypeVar("KT")
 VT = TypeVar("VT", bound=Union[Reactive, Any])
 

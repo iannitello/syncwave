@@ -38,6 +38,8 @@ if TYPE_CHECKING:
     #   3. classes decorated with `@pydantic.dataclasses.dataclass`.
     SMS = Union[BaseModel, RootModel, PydanticDataclass]
 
+__all__ = ["SyncModel", "is_sync_model_supported"]
+
 
 def is_sync_model_supported(cls: Any) -> TypeGuard[type[SMS]]:
     if not isclass(cls):

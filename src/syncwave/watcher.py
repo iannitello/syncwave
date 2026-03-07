@@ -15,6 +15,9 @@ from watchdog.events import (
 from watchdog.observers import Observer
 from watchdog.observers.api import ObservedWatch
 
+__all__ = []
+
+
 DirPath = Path
 FilePath = Path
 Callback = Callable[..., None]

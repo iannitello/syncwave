@@ -39,6 +39,8 @@ from .sync_model import SyncModel, SyncModelCtx, is_sync_model_supported
 if TYPE_CHECKING:
     from .sync_model import SMS
 
+__all__ = []
+
 
 def str_guard(param: str, value: Any) -> None:
     if not isinstance(value, str):

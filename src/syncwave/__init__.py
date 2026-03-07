@@ -1,3 +1,5 @@
+"""Turn plain JSONs into live data stores, two-way synced with Python objects."""
+
 __version__ = "0.2.0"
 
 
