@@ -1,5 +1,4 @@
-"""
-A minimal, interactive tour of Syncwave.
+"""A minimal, interactive tour of Syncwave.
 
 It will create two simple Pydantic models (`Customer` and `Order`) that are kept in-sync
 with two JSON files on disk. Type a command shown in the menu to play with the data and

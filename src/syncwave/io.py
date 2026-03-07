@@ -11,6 +11,9 @@ from pydantic import TypeAdapter, ValidationError
 
 from .watcher import watcher
 
+__all__ = []
+
+
 PendingWrite = tuple[Any, TypeAdapter, Timer]
 
 

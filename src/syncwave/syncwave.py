@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 
     from .sync_model import SMS
 
+__all__ = ["Syncwave"]
+
 
 @dataclass(frozen=True)
 class StoreInfo:

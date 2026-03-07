@@ -7,6 +7,8 @@ from threading import RLock
 from typing import Any, Callable, NoReturn, TypeVar, final
 from typing_extensions import ParamSpec
 
+__all__ = ["DeadReferenceError", "Reactive"]
+
 
 @dataclass(frozen=True)
 class StoreRef:
@@ -28,7 +30,7 @@ ReactiveSubCls = TypeVar("ReactiveSubCls", bound="Reactive")
 
 class Reactive(metaclass=ABCMeta):
     __syncwave_sref__: StoreRef
-    __syncwave_ctx__: CtxSubCls
+    __syncwave_ctx__: Context
     __syncwave_live__: bool
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
