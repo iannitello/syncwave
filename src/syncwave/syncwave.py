@@ -184,15 +184,15 @@ class Syncwave(MutableMapping[str, Any]):
     def __on_store_change(self, name: str) -> None:
         # always called from within the store lock context
         value, store_info = self.__stores[name]
-        io.write_json(store_info.path, value, store_info.type_adapter)
+        io.dump(store_info.path, value, store_info.type_adapter)
 
     def __on_file_change(self, store_info: StoreInfo) -> None:
         try:
-            new_value = io.read_json(store_info.path, store_info.type_adapter)
+            new_value = io.load(store_info.path, store_info.type_adapter)
         except (FileNotFoundError, ValueError):
             with store_info.sref.lock:
                 old_value = self.__stores[store_info.name][0]
-                io.write_json(store_info.path, old_value, store_info.type_adapter)
+                io.dump(store_info.path, old_value, store_info.type_adapter)
                 return
 
         if store_info.name not in self.__stores:
@@ -237,6 +237,19 @@ class Syncwave(MutableMapping[str, Any]):
             unreachable()
 
         sref.on_change()
+
+    def read_store_json(self, name: str) -> str:
+        if name not in self.__stores:
+            raise KeyError(f"Store '{name}' does not exist.")
+        store_info = self.__stores[name][1]
+        return io.read_json(store_info.path)
+
+    def write_store_json(self, name: str, text: str) -> None:
+        if name not in self.__stores:
+            raise KeyError(f"Store '{name}' does not exist.")
+        store_info = self.__stores[name][1]
+        io.write_json(store_info.path, text)
+        self.__on_file_change(store_info)
 
 
 Reactive.register(Syncwave)

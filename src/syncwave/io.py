@@ -91,7 +91,7 @@ class _IO:
         self._atomic_write(path, self._serialize(init_value, ta))
         return init_value
 
-    def read_json(self, path: Path, ta: TypeAdapter = _any_ta) -> Any:
+    def load(self, path: Path, ta: TypeAdapter = _any_ta) -> Any:
         # never returns EmptyFile, it throws an error if the file is empty
         with self._lock:
             if path in self._pending_writes:
@@ -103,13 +103,27 @@ class _IO:
         text = path.read_text(encoding=self.ENCODING).strip()
         return self._deserialize(text, ta, path)
 
-    def write_json(self, path: Path, value: Any, ta: TypeAdapter = _any_ta) -> None:
+    def dump(self, path: Path, value: Any, ta: TypeAdapter = _any_ta) -> None:
         with self._lock:
             if path in self._pending_writes:
                 self._pending_writes[path][2].cancel()
             timer = Timer(self.DEBOUNCE_WINDOW, self._scheduled_write, args=(path,))
             self._pending_writes[path] = (value, ta, timer)
             timer.start()
+
+    def read_json(self, path: Path) -> str:
+        with self._lock:
+            if path in self._pending_writes:
+                value, ta, _ = self._pending_writes[path]
+                return self._serialize(value, ta)
+        return path.read_text(encoding=self.ENCODING).strip()
+
+    def write_json(self, path: Path, text: str) -> None:
+        with self._lock:
+            if path in self._pending_writes:
+                _, _, timer = self._pending_writes.pop(path)
+                timer.cancel()
+        self._atomic_write(path, text)
 
     def _scheduled_write(self, path: Path) -> None:
         with self._lock:
