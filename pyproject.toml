@@ -26,6 +26,8 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "fastapi[standard]>=0.128.8",
+    "mkdocs-material>=9.7.5",
+    "mkdocstrings-python>=1.18.2",
     "ruff>=0.15.4",
     "ty>=0.0.20",
 ]
@@ -46,6 +48,8 @@ select = [
     "RUF",  # ruff
     "UP",   # pyupgrade
 ]
+pydocstyle = { convention = "google" }
+extend-select = ["D401","D404","D413"]
 ignore = [
     "D105",    # missing docstring in magic method
     "ANN401",  # typing.Any disallowed
@@ -53,7 +57,6 @@ ignore = [
 unfixable = [
     "F401"  # disable fix for unused imports
 ]
-pydocstyle = { convention = "google" }
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["I002"]
@@ -63,3 +66,4 @@ pydocstyle = { convention = "google" }
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
 extra-standard-library = ["typing_extensions"]
+known-third-party = ["fastapi", "pydantic", "syncwave"]
