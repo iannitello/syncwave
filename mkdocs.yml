@@ -44,8 +44,8 @@ theme:
     - toc.follow
     - search.suggest
 
-  favicon: 'favicon.png'
-  logo: 'white-icon.svg'
+  favicon: "favicon.png"
+  logo: "white-icon.svg"
 
 repo_name: syncwave
 repo_url: https://github.com/iannitello/syncwave
@@ -62,9 +62,13 @@ plugins:
             show_root_heading: true
 
 nav:
-  - Home: index.md
-  - Reactivity: reactivity.md
-  - API: api.md
+  - Get Started: index.md
+  - Concepts:
+    - Reactivity: concepts/reactivity.md
+  - API:
+    - Syncwave: api/syncwave.md
+  - Examples:
+    - First Example: examples/first.md
 
 
 markdown_extensions:
