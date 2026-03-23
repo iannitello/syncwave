@@ -60,6 +60,8 @@ plugins:
         - url: https://docs.python.org/3/objects.inv
           domains: [py, std]
         - url: https://typing-extensions.readthedocs.io/en/latest/objects.inv
+        - url: https://docs.pydantic.dev/latest/objects.inv
+          base_url: https://docs.pydantic.dev/latest/
         options:
           # headings
           show_root_heading: true
@@ -94,6 +96,7 @@ nav:
 markdown_extensions:
 # Python Markdown
 - abbr
+- admonition
 - attr_list
 - def_list
 - footnotes
