@@ -100,7 +100,7 @@ class _IO:
                     return value
                 text = self._serialize(value, previous_ta)
                 return self._deserialize(text, ta, path)
-        text = path.read_text(encoding=self.ENCODING).strip()
+        text = path.read_text(encoding=self.ENCODING)
         return self._deserialize(text, ta, path)
 
     def dump(self, path: Path, value: Any, ta: TypeAdapter = _any_ta) -> None:
@@ -116,7 +116,7 @@ class _IO:
             if path in self._pending_writes:
                 value, ta, _ = self._pending_writes[path]
                 return self._serialize(value, ta)
-        return path.read_text(encoding=self.ENCODING).strip()
+        return path.read_text(encoding=self.ENCODING)
 
     def write_json(self, path: Path, text: str) -> None:
         with self._lock:

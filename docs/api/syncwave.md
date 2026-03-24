@@ -1,3 +1,1 @@
-# API Reference
-
 ::: syncwave.Syncwave
