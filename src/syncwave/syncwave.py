@@ -417,7 +417,6 @@ class Syncwave(MutableMapping[str, Any]):
 
         Example:
         ```python
-        from pathlib import Path
         from time import sleep
 
         from syncwave import SyncList, Syncwave
@@ -425,7 +424,7 @@ class Syncwave(MutableMapping[str, Any]):
         syncwave = Syncwave()
 
         name = "numbers"
-        path = Path(syncwave.root_path / f"{name}.json")
+        path = syncwave.root_path / f"{name}.json"
 
         numbers = syncwave.create_store(SyncList[int], name=name)
         numbers.extend([1, 2, 3])
@@ -463,7 +462,6 @@ class Syncwave(MutableMapping[str, Any]):
 
         Example:
         ```python
-        from pathlib import Path
         from time import sleep
 
         from syncwave import SyncList, Syncwave
@@ -471,10 +469,10 @@ class Syncwave(MutableMapping[str, Any]):
         syncwave = Syncwave()
 
         name = "numbers"
-        path = Path(syncwave.root_path / f"{name}.json")
+        path = syncwave.root_path / f"{name}.json"
 
         numbers = syncwave.create_store(SyncList[int], name=name)
-        sleep(0.5)  # to avoid race a condition when creating the file
+        sleep(0.5)  # to avoid a race condition when creating the file
 
         path.write_text("[1, 2, 3]")
         print("Content: ", numbers)  # still shows "[]"
