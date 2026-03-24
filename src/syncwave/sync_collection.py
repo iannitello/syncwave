@@ -43,6 +43,26 @@ VT = TypeVar("VT", bound=Union[Reactive, Any])
 
 @final
 class SyncCollection(Reactive):
+    """Virtual base class for Syncwave's reactive collection types.
+
+    The `SyncCollection` types are `SyncDict`, `SyncList`, and `SyncSet`.
+
+    `SyncCollection` itself cannot be instantiated or subclassed. Can be used for
+    `isinstance` and `issubclass` checks.
+
+    Example:
+    ```python
+    from syncwave import SyncCollection, SyncList, Syncwave
+
+    syncwave = Syncwave()
+    sync_list = syncwave.create_store(SyncList[int], name="sync_list")
+
+    print(isinstance(sync_list, SyncCollection))  # True
+    print(issubclass(SyncList, SyncCollection))  # True
+    ```
+
+    """
+
     def __init_subclass__(cls, /, **kwargs: Any) -> NoReturn:
         raise TypeError("SyncCollection cannot be subclassed.")
 
@@ -64,6 +84,38 @@ class SyncDictCtx(Context, Generic[KT, VT]):
 
 
 class SyncDict(MutableMapping[KT, VT], Reactive):
+    """A reactive dictionary.
+
+    `SyncDict` behaves like a regular `dict`. Assignments, updates, and deletions
+    trigger a write to the backing JSON file, and external changes to the file are
+    reflected in place.
+
+    References to reactive values are stable by key: a reference to `store["alice"]`
+    continues to represent whatever is stored under `"alice"` until that key is removed,
+    at which point `sync_live` is set to `False` and any further operation raises
+    `DeadReferenceError`.
+
+    Example:
+    ```python
+    from syncwave import SyncDict, Syncwave
+
+    syncwave = Syncwave()
+    sync_dict = syncwave.create_store(SyncDict[str, int], name="sync_dict")
+
+    sync_dict["a"] = 1
+    sync_dict["b"] = 2
+    sync_dict["c"] = 3
+    print(sync_dict)
+    print(list(sync_dict.items()))
+    ```
+
+    ---
+
+    Abstract: Usage Documentation
+        [SyncDict](https://placeholder.dev/usage/syncwave/)
+
+    """
+
     __syncwave_ctx__: SyncDictCtx[KT, VT]
     __data: dict[KT, VT]
 
@@ -231,6 +283,36 @@ class SyncListCtx(Context, Generic[VT]):
 
 
 class SyncList(MutableSequence[VT], Reactive):
+    """A reactive list.
+
+    `SyncList` behaves like a regular `list`. Appending, replacing, inserting, and
+    deleting items trigger a write to the backing JSON file, and external changes to the
+    file are reflected in place.
+
+    When a `SyncList` holds reactive items, references are stable by position, not by
+    value. A reference to `store[0]` represents whatever is at index `0`. Inserting a
+    new element at the beginning shifts that reference to the new element, not to the
+    one that was there before.
+
+    Example:
+    ```python
+    from syncwave import SyncList, Syncwave
+
+    syncwave = Syncwave()
+    sync_list = syncwave.create_store(SyncList[int], name="sync_list")
+
+    sync_list.append(1)
+    sync_list.extend([2, 3])
+    print(sync_list)
+    ```
+
+    ---
+
+    Abstract: Usage Documentation
+        [SyncList](https://placeholder.dev/usage/syncwave/)
+
+    """
+
     __syncwave_ctx__: SyncListCtx[VT]
     __data: list[VT]
 
@@ -377,7 +459,7 @@ class SyncList(MutableSequence[VT], Reactive):
         return len(self.__data)
 
     @mut_atomic
-    def insert(self, index: SupportsIndex, value: VT) -> None:
+    def insert(self, index: SupportsIndex, value: VT) -> None:  # noqa: D102
         i = _get_index(index)
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         new_item = self.__syncwave_ctx__.inner_type_adapter.validate_python(value)
@@ -436,6 +518,35 @@ class SyncSetCtx(Context, Generic[VT]):
 
 
 class SyncSet(MutableSet[VT], Reactive):
+    """A reactive set.
+
+    `SyncSet` behaves like a regular `set`. Adding and discarding items trigger a write
+    to the backing JSON file, and external changes to the file are reflected in place.
+
+    `SyncSet` can only hold non-reactive, hashable values such as `str`, `int`, `UUID`,
+    etc. Reactive types like `SyncCollection` or `SyncModel` are mutable and therefore
+    not supported.
+
+    Example:
+    ```python
+    from syncwave import SyncSet, Syncwave
+
+    syncwave = Syncwave()
+    sync_set: SyncSet[int] = syncwave.create_store(SyncSet[int], name="sync_set")
+
+    sync_set.add(1)
+    sync_set.add(2)
+    sync_set.discard(2)
+    print(sync_set)
+    ```
+
+    ---
+
+    Abstract: Usage Documentation
+        [SyncSet](https://placeholder.dev/usage/syncwave/)
+
+    """
+
     # SyncSet cannot hold reactive items because a reactive item is mutable
     __syncwave_ctx__: SyncSetCtx[VT]
     __data: set[VT]
@@ -493,12 +604,12 @@ class SyncSet(MutableSet[VT], Reactive):
         return len(self.__data)
 
     @mut_atomic
-    def add(self, value: VT) -> None:
+    def add(self, value: VT) -> None:  # noqa: D102
         new_item = self.__syncwave_ctx__.inner_type_adapter.validate_python(value)
         self.__data.add(new_item)
 
     @mut_atomic
-    def discard(self, value: VT) -> None:
+    def discard(self, value: VT) -> None:  # noqa: D102
         if value in self.__data:
             self.__data.discard(value)
 
