@@ -42,6 +42,44 @@ __all__ = ["SyncModel", "is_sync_model_supported"]
 
 
 def is_sync_model_supported(cls: Any) -> TypeGuard[type[SMS]]:
+    """Return whether `cls` can be made into a `SyncModel`.
+
+    Supported classes are:
+
+    - subclasses of `pydantic.BaseModel`
+    - subclasses of `pydantic.RootModel`
+    - classes decorated with `pydantic.dataclasses.dataclass`
+
+    Standard-library dataclasses or plain Python classes are not supported.
+
+    Example:
+    ```python
+    from pydantic import BaseModel
+    from syncwave import is_sync_model_supported
+
+
+    class Customer(BaseModel):
+        name: str
+
+
+    is_sync_model_supported(Customer)  # True
+    is_sync_model_supported(dict)  # False
+    ```
+
+    ---
+
+    Abstract: Usage Documentation
+        [is_sync_model_supported](https://placeholder.dev/usage/syncwave/)
+
+    Args:
+        cls: Object to test.
+
+    Returns:
+        `True` if `cls` can be passed to [Syncwave.make_reactive](https://placeholder.dev/api/syncwave/#syncwave.Syncwave.make_reactive)
+            or used with [Syncwave.register](https://placeholder.dev/api/syncwave/#syncwave.Syncwave.register),
+            and False otherwise.
+
+    """
     if not isclass(cls):
         return False
     if issubclass(cls, SyncModel):
@@ -58,6 +96,46 @@ class SyncModelCtx(Context):
 
 
 class SyncModel(Reactive):
+    """Base class for reactive models.
+
+    Instances of `SyncModel` behave just like the original model: field access and
+    assignment work exactly the same way. The difference is that every field assignment
+    triggers a write to the backing JSON file, and external changes to the file are
+    reflected in the same object.
+
+    You will rarely interact with `SyncModel` directly. Instances appear when you access
+    reactive model values from a store, and `isinstance(value, SyncModel)` is the main
+    way to check for them.
+
+    Example:
+    ```python
+    from pydantic import BaseModel
+    from syncwave import SyncModel, Syncwave
+
+    syncwave = Syncwave()
+
+
+    @syncwave.register(name="customers")
+    class Customer(BaseModel):
+        name: str
+        age: int
+
+
+    customers = syncwave["customers"]
+    customers.append({"name": "Alice", "age": 30})
+    alice = customers[0]
+    isinstance(alice, SyncModel)  # True
+    alice.age = 31  # writes to customers.json immediately
+    print(alice)  # name='Alice' age=31
+    ```
+
+    ---
+
+    Abstract: Usage Documentation
+        [SyncModel](https://placeholder.dev/usage/syncwave/)
+
+    """
+
     __syncwave_ctx__: SyncModelCtx
     __syncwave_original_cls__: type[SMS]
 

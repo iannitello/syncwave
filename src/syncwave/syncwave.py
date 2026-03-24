@@ -252,8 +252,9 @@ class Syncwave(MutableMapping[str, Any]):
     ) -> Callable[[type[SMS]], type[SMS]]:
         """Register a model as a store with a class decorator.
 
-        This is a convenience method that can be thought of as `make_reactive` +
-        `create_store` in one step.
+        This is a convenience method that can be thought of as combining [Syncwave.make_reactive](https://placeholder.dev/api/syncwave/#syncwave.Syncwave.make_reactive)
+        and [Syncwave.create_store](https://placeholder.dev/api/syncwave/#syncwave.Syncwave.create_store)
+        in one step.
 
         The decorated class is left unchanged, but Syncwave uses it to create a new
         reactive class that is then wrapped in a collection (controlled by the
