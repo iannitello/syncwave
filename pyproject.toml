@@ -34,7 +34,6 @@ dev = [
 
 [tool.ruff.format]
 docstring-code-format = true
-docstring-code-line-length = 88
 
 [tool.ruff.lint]
 select = [
@@ -60,12 +59,6 @@ ignore = [
 unfixable = [
     "F401"  # disable fix for unused imports
 ]
-
-# The linter only starts flagging "Line too long" (E501) at 110 characters,
-# but the formatter still splits lines at 88 (the default).
-# This gives more flexibility for long strings (e.g., docstrings and error messages).
-pycodestyle = { max-line-length = 110 }
-
 pydocstyle = { convention = "google" }
 
 [tool.ruff.lint.per-file-ignores]
