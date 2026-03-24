@@ -37,8 +37,36 @@ class StoreInfo:
 
 # Has to be thread-safe, this is a temporary solution just to start the implementation.
 class Syncwave(MutableMapping[str, Any]):
-    def __init__(self, root_path: str | Path = "") -> None:
-        root = io.sanitize_path(root_path or Path.cwd() / "syncstores")
+    """The main entry point to Syncwave.
+
+    Start by creating an instance to interact with the stores.
+
+    Example:
+    ```python
+    from syncwave import Syncwave
+
+    syncwave = Syncwave()
+    ```
+
+    ---
+
+    Abstract: Usage Documentation
+        [Syncwave](https://placeholder.dev/usage/syncwave/)
+
+    """
+
+    def __init__(self, root_path: str | Path = "syncstores") -> None:
+        """Initialize a new `Syncwave` instance.
+
+        Args:
+            root_path: Directory holding the JSON files associated with the stores. The
+                given value will be normalized (if relative, it will be made absolute
+                relative to the current working directory, shell variables will be
+                expanded, etc.). The directory will be created if it doesn't already
+                exist.
+
+        """
+        root = io.sanitize_path(root_path)
         io.create_dir(root)
         self.__root_path = root
         self.__stores: dict[str, tuple[Any | EmptyFileType, StoreInfo]] = {}
@@ -46,6 +74,7 @@ class Syncwave(MutableMapping[str, Any]):
 
     @property
     def root_path(self) -> Path:
+        """The normalized path to the directory holding the stores' JSON files."""
         return self.__root_path
 
     def __getitem__(self, key: str) -> Any:
@@ -104,6 +133,47 @@ class Syncwave(MutableMapping[str, Any]):
         *,
         cls_name: str | None = None,
     ) -> type[SyncModel]:
+        """Make a new reactive model from a regular model.
+
+        The returned class can be used when defining a store and its instances will be
+        reactive. This method offers more flexibility than [Syncwave.register](https://placeholder.dev/api/syncwave/#syncwave.Syncwave.register),
+        which is the higher-level alternative.
+
+        The returned class inherits from both SyncModel and the original class `cls`.
+        The original class is not mutated by this method.
+
+        Example:
+        ```python
+        from pydantic import BaseModel
+        from syncwave import SyncList, Syncwave
+
+        syncwave = Syncwave()
+
+
+        class Customer(BaseModel):
+            name: str
+            age: int
+
+
+        SyncCustomer = syncwave.make_reactive(Customer)
+        customers = syncwave.create_store(SyncList[SyncCustomer], name="customers")
+        customers.append(Customer(name="Alice", age=30))
+        ```
+
+        ---
+
+        Abstract: Usage Documentation
+            [Syncwave](https://placeholder.dev/usage/syncwave/)
+
+        Args:
+            cls: Base class for the new reactive model.
+            cls_name: Custom name for the new class. Defaults to `"Sync" + cls.__name__`
+                if `None` is given.
+
+        Returns:
+            The new reactive model class.
+
+        """
         sync_model_guard(cls, self.__models)
 
         if cls_name is not None:
@@ -116,6 +186,45 @@ class Syncwave(MutableMapping[str, Any]):
         return sync_model
 
     def create_store(self, tp: type, /, *, name: str, default: Any = EmptyFile) -> Any:
+        """Create a store persisted to a JSON file and two-way synced with it.
+
+        A store is an item (key/value pair) on a `Syncwave` instance, and each store has
+        a corresponding JSON file at `<root_path>/<name>.json` where the value is
+        persisted. Changes to the store occurring in Python are reflected in the JSON,
+        and changes occurring in the JSON file are reflected in the store.
+
+        Before any changes are made to the store, the value is validated against the
+        type `tp`.
+
+        Example:
+        ```python
+        from syncwave import SyncSet, Syncwave
+
+        syncwave = Syncwave()
+
+        tags = syncwave.create_store(SyncSet[str], name="tags")
+        tags.add("python")
+        ```
+
+        ---
+
+        Abstract: Usage Documentation
+            [Syncwave](https://placeholder.dev/usage/syncwave/)
+
+        Args:
+            tp: Type of the store, e.g. `list[int]`, `SyncSet[str]`, `typing.Any`, etc.
+            name: Name of the store. This is also the key used to access the store
+                (`syncwave[name]`), and the name of the corresponding JSON file
+                (`<root_path>/<name>.json`).
+            default: Default fallback value if no reasonable default can be inferred for
+                the type (and if the file doesn't exist already or is empty). Usually
+                only needed if the store is a single value (i.e. not a collection). This
+                parameter is ignored if a default can be inferred.
+
+        Returns:
+            The current store value, loaded from disk or the initial value.
+
+        """
         if name in self.__stores:
             raise ValueError(f"Store '{name}' already exists.")
 
@@ -141,6 +250,66 @@ class Syncwave(MutableMapping[str, Any]):
         name: str,
         collection: type[SyncDict | SyncList] | Literal["auto"] | None = "auto",
     ) -> Callable[[type[SMS]], type[SMS]]:
+        """Register a model as a store with a class decorator.
+
+        This is a convenience method that can be thought of as `make_reactive` +
+        `create_store` in one step.
+
+        The decorated class is left unchanged, but Syncwave uses it to create a new
+        reactive class that is then wrapped in a collection (controlled by the
+        `collection` parameter). The resulting type is used to create a new store.
+
+        Example:
+        ```python
+        from pydantic import BaseModel
+        from syncwave import Syncwave
+
+        syncwave = Syncwave()
+
+
+        @syncwave.register(name="customers")
+        class Customer(BaseModel):
+            name: str
+            age: int
+
+
+        customers = syncwave["customers"]
+        customers.append(Customer(name="Alice", age=30))
+
+
+        # equivalent to...
+
+        # from syncwave import SyncList
+
+
+        # class Customer(BaseModel):
+        #     name: str
+        #     age: int
+
+
+        # SyncCustomer = syncwave.make_reactive(Customer)
+        # customers = syncwave.create_store(SyncList[SyncCustomer], name="customers")
+        # customers.append(Customer(name="Alice", age=30))
+        ```
+
+        ---
+
+        Abstract: Usage Documentation
+            [Syncwave](https://placeholder.dev/usage/syncwave/)
+
+        Args:
+            name: Name of the store. This is also the key used to access the store
+                (`syncwave[name]`), and the name of the corresponding JSON file
+                (`<root_path>/<name>.json`).
+            collection: Controls how the model is wrapped in a collection. See
+                [usage](https://placeholder.dev/usage/syncwave/) for more details on the
+                available options.
+
+        Returns:
+            A decorator that accepts a class as an argument to create a new reactive
+                store and returns the original class unchanged.
+
+        """
         if name in self.__stores:
             raise ValueError(f"Store '{name}' already exists.")
 
@@ -239,12 +408,93 @@ class Syncwave(MutableMapping[str, Any]):
         sref.on_change()
 
     def read_store_json(self, name: str) -> str:
+        """Safely read the content of the JSON file associated with a store.
+
+        Reading directly from the file is prone to race conditions, since writes are
+        debounced and the file may lag behind the in-memory state. Use this method
+        instead to always get the most up-to-date content.
+
+        Example:
+        ```python
+        from pathlib import Path
+        from time import sleep
+
+        from syncwave import SyncList, Syncwave
+
+        syncwave = Syncwave()
+
+        name = "numbers"
+        path = Path(syncwave.root_path / f"{name}.json")
+
+        numbers = syncwave.create_store(SyncList[int], name=name)
+        numbers.extend([1, 2, 3])
+
+        print("read_store_json: ", syncwave.read_store_json(name))  # shows "[1, 2, 3]"
+        print("read_text: ", path.read_text())  # still shows "[]"
+
+        sleep(0.5)
+        print("read_text after delay: ", path.read_text())  # now shows "[1, 2, 3]"
+        ```
+
+        ---
+
+        Abstract: Usage Documentation
+            [Syncwave](https://placeholder.dev/usage/syncwave/)
+
+        Args:
+            name: Name of the store.
+
+        Returns:
+            The content of the JSON file associated with the store.
+
+        """
         if name not in self.__stores:
             raise KeyError(f"Store '{name}' does not exist.")
         store_info = self.__stores[name][1]
         return io.read_json(store_info.path)
 
     def write_store_json(self, name: str, text: str) -> None:
+        """Safely write to the JSON file associated with a store.
+
+        Writing directly to the file is prone to race conditions, since file system
+        events are debounced and the store may lag behind the new file content. Use this
+        method instead to ensure the store is updated immediately after the write.
+
+        Example:
+        ```python
+        from pathlib import Path
+        from time import sleep
+
+        from syncwave import SyncList, Syncwave
+
+        syncwave = Syncwave()
+
+        name = "numbers"
+        path = Path(syncwave.root_path / f"{name}.json")
+
+        numbers = syncwave.create_store(SyncList[int], name=name)
+        sleep(0.5)  # to avoid race a condition when creating the file
+
+        path.write_text("[1, 2, 3]")
+        print("Content: ", numbers)  # still shows "[]"
+        sleep(0.5)
+        print("Content after delay: ", numbers)  # now shows "[1, 2, 3]"
+
+        numbers.clear()
+        syncwave.write_store_json(name, "[9, 8, 7]")
+        print("Content after write_store_json: ", numbers)  # shows "[9, 8, 7]"
+        ```
+
+        ---
+
+        Abstract: Usage Documentation
+            [Syncwave](https://placeholder.dev/usage/syncwave/)
+
+        Args:
+            name: Name of the store.
+            text: Text to write to the JSON file.
+
+        """
         if name not in self.__stores:
             raise KeyError(f"Store '{name}' does not exist.")
         store_info = self.__stores[name][1]
