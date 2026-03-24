@@ -69,7 +69,6 @@ plugins:
           show_symbol_type_toc: true
           # members
           members_order: source
-          inherited_members: true
           # docstring
           docstring_options:
             ignore_init_summary: true
@@ -89,6 +88,7 @@ nav:
 - API Reference:
   - Syncwave: api/syncwave.md
   - SyncCollection: api/sync_collections.md
+  - SyncModel: api/sync_model.md
 - Examples:
   - First Example: examples/first.md
 
