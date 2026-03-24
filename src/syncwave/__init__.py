@@ -1,6 +1,6 @@
 """Turn plain JSONs into live data stores, two-way synced with Python objects."""
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 
 from .reactive import DeadReferenceError, Reactive
