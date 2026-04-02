@@ -87,10 +87,10 @@ nav:
   - Syncwave: usage/syncwave.md
   - Reactivity: usage/reactivity.md
 - API Reference:
-  - Reactive: api/reactive.md
   - Syncwave: api/syncwave.md
   - SyncCollection: api/sync_collections.md
   - SyncModel: api/sync_model.md
+  - Reactive: api/reactive.md
 - Examples:
   - First Example: examples/first.md
 
