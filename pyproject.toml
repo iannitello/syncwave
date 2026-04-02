@@ -26,11 +26,14 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "fastapi[standard]>=0.128.8",
-    "mkdocs-material>=9.7.5",
+    "mkdocs-material>=9.7.4",
     "mkdocstrings-python>=1.18.2",
     "ruff>=0.15.4",
     "ty>=0.0.20",
 ]
+
+[tool.uv]
+exclude-newer = "28 days"
 
 [tool.ruff.format]
 docstring-code-format = true
