@@ -33,3 +33,113 @@ Something I always found nice is that VSCode is "two-way synced" with the file: 
 Say you want to change the editor's theme. You can open the settings panel and go to **Workbench > Appearance > Color Theme** and select your theme, or you can open `settings.json` and set `"workbench.colorTheme"` to the value you want. Regardless of where you make the change (panel or file), you see the other place get updated instantly, and the app takes on the new appearance. Very satisfying!
 
 I needed something similar for a Python project I was working on. I looked for a library to achieve this, but found nothing resembling what I wanted. Syncwave started as a way to fill in that gap.
+
+### The Missing Piece
+
+[FastAPI](https://fastapi.tiangolo.com) + [Pydantic](https://pydantic.dev/docs/validation/latest/get-started/) make
+building an API trivially easy. Consider the following example:
+
+```python title="main.py"
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class Customer(BaseModel):
+    name: str
+    age: int
+
+
+customers = [
+    Customer(name="John Doe", age=30),
+    Customer(name="Jane Doe", age=25),
+]
+
+
+@app.get("/customers")
+def get_customers() -> list[Customer]:
+    return customers
+
+
+@app.post("/customers")
+def create_customer(customer: Customer) -> Customer:
+    customers.append(customer)
+    return customer
+```
+
+!!! note
+
+    Syncwave is a standalone library, not a FastAPI plugin. It works in any Python project (CLI tools, desktop apps, scripts, etc.). If you're not familiar with it, don't worry, there will be plenty of other examples. You can also check out the [First Steps](https://fastapi.tiangolo.com/tutorial/first-steps/) guide.
+
+    That said, Syncwave especially shines with long-running processes like web servers, since the two-way sync stays active for as long as the program is running.
+
+!!! tip "Running this example"
+
+    You'll need `"fastapi[standard]"` and `pydantic` installed. Copy the code into `main.py`, run `fastapi dev`, and open [http://localhost:8000/docs]() to interact with the API.
+
+With these few lines you already have a working API with two routes, data validation, and interactive documentation.
+
+However, there's an obvious missing piece: persistence. The initial list of customers is just hard-coded, and as soon as you restart the server your data is gone.
+
+For a real server you'd need to set up a database (PostgreSQL, SQLite, Redis, MongoDB, etc.), install a Python client or ORM to talk to it, manage connections and sessions, and write queries to read and write data. That's a lot to add on top of what was otherwise a very simple setup.
+
+Syncwave takes a radically different approach which has its own set of trade-offs, but it's definitely simpler and more direct. Here's how we can update the example above to add persistence:
+
+```python title="main.py" hl_lines="3 6 9 15"
+from fastapi import FastAPI
+from pydantic import BaseModel
+from syncwave import Syncwave
+
+app = FastAPI()
+syncwave = Syncwave()
+
+
+@syncwave.register(name="customers")
+class Customer(BaseModel):
+    name: str
+    age: int
+
+
+customers = syncwave["customers"]
+
+
+@app.get("/customers")
+def get_customers() -> list[Customer]:
+    return customers
+
+
+@app.post("/customers")
+def create_customer(customer: Customer) -> Customer:
+    customers.append(customer)
+    return customer
+```
+
+With these four highlighted lines, you now have persistence. Notice how little changed between the two examples. You still define your data with a Pydantic model, you still work with a normal Python list, and your FastAPI routes are identical. Syncwave builds on JSON Schema and Pydantic to give you persistence with almost no effort. If you know Python types and how to define a Pydantic model, you already know everything you need.
+
+If you run that example, Syncwave creates a JSON file to back the data:
+
+```json title="syncstores/customers.json"
+[]
+```
+
+It starts as an empty array. But if the file already contained data (say, the John and Jane Doe customers from the first example), Syncwave would load it into `customers` at startup.
+
+```json title="syncstores/customers.json"
+[
+  {
+    "name": "John Doe",
+    "age": 30
+  },
+  {
+    "name": "Jane Doe",
+    "age": 25
+  }
+]
+```
+
+From here, `customers` and the JSON file are two-way synced. Add a customer through the API, the file updates. Modify `customers` from anywhere in your Python code, same thing. It works the other way too: open `customers.json` in a text editor and make a change, or have another program write to it, and the in-memory list picks it up.
+
+All changes are validated both ways. You can't add just anything to the list; it has to be a valid `Customer` as defined by your Pydantic model. This goes for edits to the JSON file too. If someone writes invalid data into it, Syncwave rejects the change and reverts the file to its last valid state.
+
+One benefit I really wanted was transparency. With most databases, your data lives in a binary file managed by the database engine. You need a client or some tooling just to look at what's in there, and usually the server has to be running too. With Syncwave, each store is a JSON file. You can open it, read it, edit it at any time, even while the backend is running. No extra tools, no queries, no scripts.
