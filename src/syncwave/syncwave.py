@@ -51,7 +51,7 @@ class Syncwave(MutableMapping[str, Any]):
     ---
 
     Abstract: Usage Documentation
-        [Syncwave](https://placeholder.dev/usage/syncwave/)
+        [Syncwave](https://syncwave.dev/usage/syncwave/)
 
     """
 
@@ -136,7 +136,7 @@ class Syncwave(MutableMapping[str, Any]):
         """Make a new reactive model from a regular model.
 
         The returned class can be used when defining a store and its instances will be
-        reactive. This method offers more flexibility than [Syncwave.register](https://placeholder.dev/api/syncwave/#syncwave.Syncwave.register),
+        reactive. This method offers more flexibility than [Syncwave.register](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.register),
         which is the higher-level alternative.
 
         The returned class inherits from both SyncModel and the original class `cls`.
@@ -163,7 +163,7 @@ class Syncwave(MutableMapping[str, Any]):
         ---
 
         Abstract: Usage Documentation
-            [Syncwave](https://placeholder.dev/usage/syncwave/)
+            [Syncwave](https://syncwave.dev/usage/syncwave/)
 
         Args:
             cls: Base class for the new reactive model.
@@ -209,7 +209,7 @@ class Syncwave(MutableMapping[str, Any]):
         ---
 
         Abstract: Usage Documentation
-            [Syncwave](https://placeholder.dev/usage/syncwave/)
+            [Syncwave](https://syncwave.dev/usage/syncwave/)
 
         Args:
             tp: Type of the store, e.g. `list[int]`, `SyncSet[str]`, `typing.Any`, etc.
@@ -252,8 +252,8 @@ class Syncwave(MutableMapping[str, Any]):
     ) -> Callable[[type[SMS]], type[SMS]]:
         """Register a model as a store with a class decorator.
 
-        This is a convenience method that can be thought of as combining [Syncwave.make_reactive](https://placeholder.dev/api/syncwave/#syncwave.Syncwave.make_reactive)
-        and [Syncwave.create_store](https://placeholder.dev/api/syncwave/#syncwave.Syncwave.create_store)
+        This is a convenience method that can be thought of as combining [Syncwave.make_reactive](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.make_reactive)
+        and [Syncwave.create_store](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.create_store)
         in one step.
 
         The decorated class is left unchanged, but Syncwave uses it to create a new
@@ -296,14 +296,14 @@ class Syncwave(MutableMapping[str, Any]):
         ---
 
         Abstract: Usage Documentation
-            [Syncwave](https://placeholder.dev/usage/syncwave/)
+            [Syncwave](https://syncwave.dev/usage/syncwave/)
 
         Args:
             name: Name of the store. This is also the key used to access the store
                 (`syncwave[name]`), and the name of the corresponding JSON file
                 (`<root_path>/<name>.json`).
             collection: Controls how the model is wrapped in a collection. See
-                [usage](https://placeholder.dev/usage/syncwave/) for more details on the
+                [usage](https://syncwave.dev/usage/syncwave/) for more details on the
                 available options.
 
         Returns:
@@ -439,7 +439,7 @@ class Syncwave(MutableMapping[str, Any]):
         ---
 
         Abstract: Usage Documentation
-            [Syncwave](https://placeholder.dev/usage/syncwave/)
+            [Syncwave](https://syncwave.dev/usage/syncwave/)
 
         Args:
             name: Name of the store.
@@ -487,7 +487,7 @@ class Syncwave(MutableMapping[str, Any]):
         ---
 
         Abstract: Usage Documentation
-            [Syncwave](https://placeholder.dev/usage/syncwave/)
+            [Syncwave](https://syncwave.dev/usage/syncwave/)
 
         Args:
             name: Name of the store.

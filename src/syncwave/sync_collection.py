@@ -112,7 +112,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
     ---
 
     Abstract: Usage Documentation
-        [SyncDict](https://placeholder.dev/usage/syncwave/)
+        [SyncDict](https://syncwave.dev/usage/syncwave/)
 
     """
 
@@ -309,7 +309,7 @@ class SyncList(MutableSequence[VT], Reactive):
     ---
 
     Abstract: Usage Documentation
-        [SyncList](https://placeholder.dev/usage/syncwave/)
+        [SyncList](https://syncwave.dev/usage/syncwave/)
 
     """
 
@@ -543,7 +543,7 @@ class SyncSet(MutableSet[VT], Reactive):
     ---
 
     Abstract: Usage Documentation
-        [SyncSet](https://placeholder.dev/usage/syncwave/)
+        [SyncSet](https://syncwave.dev/usage/syncwave/)
 
     """
 

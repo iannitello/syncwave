@@ -52,7 +52,7 @@ class Reactive(metaclass=ABCMeta):
     ---
 
     Abstract: Usage Documentation
-        [Reactive](https://placeholder.dev/usage/syncwave/)
+        [Reactive](https://syncwave.dev/usage/syncwave/)
 
     """
 
@@ -97,7 +97,7 @@ class Reactive(metaclass=ABCMeta):
         ---
 
         Abstract: Usage Documentation
-            [Reactive](https://placeholder.dev/usage/syncwave/)
+            [Reactive](https://syncwave.dev/usage/syncwave/)
 
         """
         return self.__syncwave_live__  # atomic, no need to lock

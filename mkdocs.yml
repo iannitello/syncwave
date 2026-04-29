@@ -1,5 +1,5 @@
 site_name: Syncwave
-site_url: https://iannitello.github.io/syncwave/
+site_url: https://syncwave.dev/
 
 theme:
   name: material
@@ -60,8 +60,7 @@ plugins:
         - url: https://docs.python.org/3/objects.inv
           domains: [py, std]
         - url: https://typing-extensions.readthedocs.io/en/latest/objects.inv
-        - url: https://docs.pydantic.dev/latest/objects.inv
-          base_url: https://docs.pydantic.dev/latest/
+        - url: https://pydantic.dev/docs/validation/latest/objects.inv
         options:
           # headings
           show_root_heading: true

@@ -69,14 +69,14 @@ def is_sync_model_supported(cls: Any) -> TypeGuard[type[SMS]]:
     ---
 
     Abstract: Usage Documentation
-        [is_sync_model_supported](https://placeholder.dev/usage/syncwave/)
+        [is_sync_model_supported](https://syncwave.dev/usage/syncwave/)
 
     Args:
         cls: Object to test.
 
     Returns:
-        `True` if `cls` can be passed to [Syncwave.make_reactive](https://placeholder.dev/api/syncwave/#syncwave.Syncwave.make_reactive)
-            or used with [Syncwave.register](https://placeholder.dev/api/syncwave/#syncwave.Syncwave.register),
+        `True` if `cls` can be passed to [Syncwave.make_reactive](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.make_reactive)
+            or used with [Syncwave.register](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.register),
             and False otherwise.
 
     """
@@ -132,7 +132,7 @@ class SyncModel(Reactive):
     ---
 
     Abstract: Usage Documentation
-        [SyncModel](https://placeholder.dev/usage/syncwave/)
+        [SyncModel](https://syncwave.dev/usage/syncwave/)
 
     """
 
