@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import wraps
 from threading import RLock
-from typing import Any, Callable, NoReturn, TypeVar, final
+from typing import Any, NoReturn, TypeVar, final
 from typing_extensions import ParamSpec
 
 __all__ = ["DeadReferenceError", "Reactive"]

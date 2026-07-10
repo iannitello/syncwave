@@ -8,16 +8,7 @@ from __future__ import annotations
 from collections.abc import Iterator, MutableMapping, MutableSequence, MutableSet
 from dataclasses import dataclass
 from types import GenericAlias
-from typing import (
-    Any,
-    Generic,
-    NoReturn,
-    SupportsIndex,
-    TypeVar,
-    Union,
-    final,
-    get_args,
-)
+from typing import Any, Generic, NoReturn, SupportsIndex, TypeVar, final, get_args
 from typing_extensions import Self
 
 from pydantic import GetCoreSchemaHandler as Handler
@@ -38,7 +29,7 @@ __all__ = ["SyncCollection", "SyncDict", "SyncList", "SyncSet"]
 
 
 KT = TypeVar("KT")
-VT = TypeVar("VT", bound=Union[Reactive, Any])
+VT = TypeVar("VT", bound=Reactive | Any)
 
 
 @final
@@ -263,13 +254,10 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         same_type = type(o) is (new_type := type(n))
 
         if old_is_reactive and new_is_reactive and same_type:
-            # `old_is_reactive` means `o` is not None,
-            # but aliased conditional expressions are not supported by ty
-            o.__syncwave_update__(n)  # ty: ignore[unresolved-attribute]
+            o.__syncwave_update__(n)
         else:
             if old_is_reactive:
-                # same reason as above, `o` can't be None
-                o.__syncwave_kill__()  # ty: ignore[unresolved-attribute]
+                o.__syncwave_kill__()
             if new_is_reactive:
                 n.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
             self.__data[k] = n

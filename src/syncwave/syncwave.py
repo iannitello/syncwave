@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Iterator, MutableMapping
+from collections.abc import Callable, Iterator, MutableMapping
 from dataclasses import dataclass
 from functools import partial
 from keyword import iskeyword
 from pathlib import Path
 from threading import RLock
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from weakref import WeakSet
 
 from pydantic import PydanticSchemaGenerationError, TypeAdapter
@@ -393,13 +393,10 @@ class Syncwave(MutableMapping[str, Any]):
             same_type = type(old_value) is (new_type := type(new_value))
 
             if old_is_reactive and new_is_reactive and same_type:
-                # `old_is_reactive` means `old_value` is not EmptyFile,
-                # but aliased conditional expressions are not supported by ty
-                old_value.__syncwave_update__(new_value)  # ty: ignore[unresolved-attribute]
+                old_value.__syncwave_update__(new_value)
             else:
                 if old_is_reactive:
-                    # same reason as above, `old_value` can't be EmptyFile
-                    old_value.__syncwave_kill__()  # ty: ignore[unresolved-attribute]
+                    old_value.__syncwave_kill__()
                 if new_is_reactive:
                     new_value.__syncwave_init__(sref, ctx[new_type])
                 self.__stores[key] = (new_value, store_info)
