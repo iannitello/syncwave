@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 from threading import Lock, Timer
 from time import monotonic, sleep
-from typing import Any, Callable, Final
+from typing import Any, Final
 
 from watchdog.events import (
     DirDeletedEvent,

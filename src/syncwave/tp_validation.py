@@ -182,10 +182,8 @@ def _parse_model(cls: type[SMS], *, as_sync_model: bool = False) -> SyncModelCtx
         fields_type_adapter[field_name] = TypeAdapter(field.annotation)
 
     if is_sync_model:
-        # `is_sync_model` means `cls` is type[SyncModel],
-        # but aliased conditional expressions are not supported by ty
         return SyncModelCtx(
-            tp=cls,  # ty: ignore[invalid-argument-type]
+            tp=cls,
             fields_ctx=fields_ctx,
             fields_type_adapter=fields_type_adapter,
         )

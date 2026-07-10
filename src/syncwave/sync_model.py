@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from inspect import isclass
-from typing import TYPE_CHECKING, Any, Union
-from typing_extensions import Self, TypeGuard
+from typing import TYPE_CHECKING, Any, TypeGuard
+from typing_extensions import Self
 
 from pydantic import BaseModel, RootModel, TypeAdapter
 from pydantic import GetCoreSchemaHandler as Handler
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     #   1. subclasses of `pydantic.BaseModel`,
     #   2. subclasses of `pydantic.RootModel`,
     #   3. classes decorated with `@pydantic.dataclasses.dataclass`.
-    SMS = Union[BaseModel, RootModel, PydanticDataclass]
+    SMS = BaseModel | RootModel | PydanticDataclass
 
 __all__ = ["SyncModel", "is_sync_model_supported"]
 

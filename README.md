@@ -20,7 +20,7 @@ pip install syncwave
 uv add syncwave
 ```
 
-Requires Python 3.9+.
+Requires Python 10+.
 
 ## Quick Start
 

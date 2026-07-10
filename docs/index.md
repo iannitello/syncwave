@@ -20,7 +20,7 @@ Install from [PyPI](https://pypi.org/project/syncwave/).
     uv add syncwave
     ```
 
-Requires Python 3.9+.
+Requires Python 3.10+.
 
 ## Motivation
 
