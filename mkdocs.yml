@@ -1,128 +1,133 @@
 site_name: Syncwave
 site_url: https://syncwave.dev/
-
-theme:
-  name: material
-  palette:
-  # Palette toggle for automatic mode
-  - media: "(prefers-color-scheme)"
-    toggle:
-      icon: material/circle-half-full
-      name: Switch to light mode
-
-  # Palette toggle for light mode
-  - media: "(prefers-color-scheme: light)"
-    scheme: default 
-    primary: cyan
-    accent: cyan
-    toggle:
-      icon: material/circle
-      name: Switch to dark mode
-
-  # Palette toggle for dark mode
-  - media: "(prefers-color-scheme: dark)"
-    scheme: slate
-    primary: cyan
-    accent: cyan
-    toggle:
-      icon: material/circle-outline
-      name: Switch to system preference
-
-  features:
-  - content.code.copy
-  - content.code.annotate
-  - navigation.instant
-  - navigation.instant.prefetch
-  - navigation.instant.progress
-  - navigation.tracking
-  - navigation.tabs
-  - navigation.tabs.sticky
-  - navigation.sections
-  - navigation.path
-  - navigation.indexes
-  - navigation.top
-  - toc.follow
-  - search.suggest
-
-  favicon: "favicon.png"
-  logo: "white-icon.svg"
+site_description: Make your code reactive; Turn plain JSONs into a live data store, two-way synced with Python objects.
 
 repo_name: syncwave
 repo_url: https://github.com/iannitello/syncwave
 
+copyright: "Copyright &copy; 2026 Lucas Iannitello"
+
+theme:
+  name: material
+  favicon: "favicon.png"
+  logo: "logo.svg"
+  language: en
+
+  palette:
+    # Palette toggle for automatic mode
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: "lucide/sun-moon"
+        name: Switch to light mode
+
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: cyan
+      accent: cyan
+      toggle:
+        icon: "lucide/sun"
+        name: Switch to dark mode
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: cyan
+      accent: cyan
+      toggle:
+        icon: "lucide/moon"
+        name: Switch to system preference
+
+  features:
+    - content.code.copy
+    - content.code.annotate
+    - content.tooltips
+    - content.tabs.link
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.path
+    - navigation.indexes
+    - navigation.top
+    - toc.follow
+    - search.highlight
+
 plugins:
-- search
-- mkdocstrings:
-    handlers:
-      python:
-        paths: [src]
-        inventories:
-        - url: https://docs.python.org/3/objects.inv
-          domains: [py, std]
-        - url: https://typing-extensions.readthedocs.io/en/latest/objects.inv
-        - url: https://pydantic.dev/docs/validation/latest/objects.inv
-        options:
-          # headings
-          show_root_heading: true
-          show_symbol_type_heading: true
-          show_symbol_type_toc: true
-          show_root_full_path: false
-          # members
-          members_order: source
-          # docstring
-          docstring_options:
-            ignore_init_summary: true
-          merge_init_into_class: true
-          docstring_section_style: spacy
-          # signature
-          show_signature_annotations: true
-          separate_signature: true
-          signature_crossrefs: true
-
-nav:
-- Get Started:
-  - Index: index.md
-- Usage:
-  - Syncwave: usage/syncwave.md
-  - Reactivity: usage/reactivity.md
-- API Reference:
-  - Syncwave: api/syncwave.md
-  - SyncCollection: api/sync_collections.md
-  - SyncModel: api/sync_model.md
-  - Reactive: api/reactive.md
-- Examples:
-  - First Example: examples/first.md
-
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          inventories:
+            - url: https://docs.python.org/3/objects.inv
+              domains: [py, std]
+            - url: https://typing-extensions.readthedocs.io/en/latest/objects.inv
+            - url: https://pydantic.dev/docs/validation/latest/objects.inv
+          options:
+            # headings
+            show_root_heading: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            show_root_full_path: false
+            # members
+            members_order: source
+            # docstring
+            docstring_options:
+              ignore_init_summary: true
+            merge_init_into_class: true
+            docstring_section_style: spacy
+            # signature
+            show_signature_annotations: true
+            separate_signature: true
+            signature_crossrefs: true
 
 markdown_extensions:
-# Python Markdown
-- abbr
-- admonition
-- attr_list
-- def_list
-- footnotes
-- md_in_html
-- toc:
-    permalink: true
+  # Python Markdown
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
 
-# Python Markdown Extensions
-- pymdownx.arithmatex:
-    generic: true
-- pymdownx.betterem:
-    smart_enable: all
-- pymdownx.caret
-- pymdownx.details
-- pymdownx.emoji:
-    emoji_index: !!python/name:material.extensions.emoji.twemoji
-    emoji_generator: !!python/name:material.extensions.emoji.to_svg
-- pymdownx.highlight
-- pymdownx.inlinehilite
-- pymdownx.keys
-- pymdownx.mark
-- pymdownx.smartsymbols
-- pymdownx.superfences
-- pymdownx.tabbed:
-    alternate_style: true
-- pymdownx.tasklist:
-    custom_checkbox: true
-- pymdownx.tilde
+  # Python Markdown Extensions
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+nav:
+  - Get Started:
+      - Index: index.md
+  - Usage:
+      - Syncwave: usage/syncwave.md
+      - Reactivity: usage/reactivity.md
+  - API Reference:
+      - Syncwave: api/syncwave.md
+      - SyncCollection: api/sync_collections.md
+      - SyncModel: api/sync_model.md
+      - Reactive: api/reactive.md
+  - Examples:
+      - First Example: examples/first.md

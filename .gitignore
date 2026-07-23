@@ -16,5 +16,6 @@ wheels/
 .vscode/
 .cursor/
 .references/
+site/
 syncstores/
 main.py
