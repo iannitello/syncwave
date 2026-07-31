@@ -1,6 +1,6 @@
 site_name: Syncwave
 site_url: https://syncwave.dev/
-site_description: Make your code reactive; Turn plain JSONs into a live data store, two-way synced with Python objects.
+site_description: Turn plain JSON files into a live data store, two-way synced with your Python objects.
 
 repo_name: syncwave
 repo_url: https://github.com/iannitello/syncwave
@@ -42,6 +42,7 @@ theme:
     - content.code.copy
     - content.code.annotate
     - content.tooltips
+    - content.footnote.tooltips
     - content.tabs.link
     - navigation.instant
     - navigation.instant.prefetch

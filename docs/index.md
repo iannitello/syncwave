@@ -2,7 +2,7 @@
 
 ## Welcome to Syncwave
 
-Turn plain JSONs into a live data store, two-way synced with Python objects.
+Turn plain JSON files into a live data store, two-way synced with your Python objects.
 
 ## Installation
 
