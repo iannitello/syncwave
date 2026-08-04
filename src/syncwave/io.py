@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory, mkstemp
 from threading import Lock, Timer
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -14,7 +14,10 @@ from .watcher import watcher
 __all__ = []
 
 
-PendingWrite = tuple[Any, TypeAdapter, Timer]
+class PendingWrite(NamedTuple):
+    value: Any
+    ta: TypeAdapter
+    timer: Timer
 
 
 class EmptyFileType: ...
@@ -106,9 +109,9 @@ class _IO:
     def dump(self, path: Path, value: Any, ta: TypeAdapter = _any_ta) -> None:
         with self._lock:
             if path in self._pending_writes:
-                self._pending_writes[path][2].cancel()
+                self._pending_writes[path].timer.cancel()
             timer = Timer(self.DEBOUNCE_WINDOW, self._scheduled_write, args=(path,))
-            self._pending_writes[path] = (value, ta, timer)
+            self._pending_writes[path] = PendingWrite(value, ta, timer)
             timer.start()
 
     def read_json(self, path: Path) -> str:
@@ -121,8 +124,7 @@ class _IO:
     def write_json(self, path: Path, text: str) -> None:
         with self._lock:
             if path in self._pending_writes:
-                _, _, timer = self._pending_writes.pop(path)
-                timer.cancel()
+                self._pending_writes.pop(path).timer.cancel()
         self._atomic_write(path, text)
 
     def _scheduled_write(self, path: Path) -> None:
