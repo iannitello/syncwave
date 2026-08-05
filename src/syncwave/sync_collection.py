@@ -21,6 +21,7 @@ from .reactive import (
     Reactive,
     StoreRef,
     atomic,
+    is_reactive,
     mut_atomic,
     unreachable,
 )
@@ -151,14 +152,14 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         # case 3: union content type
         elif isinstance(inner_ctx, ContextMap):
             for item in self.__data.values():
-                if isinstance(item, Reactive):
+                if is_reactive(item):
                     item.__syncwave_init__(sref, inner_ctx[type(item)])
         else:
             unreachable()
 
     def __syncwave_kill__(self) -> None:
         for item in self.__data.values():
-            if isinstance(item, Reactive):
+            if is_reactive(item):
                 item.__syncwave_kill__()
         self.__data = {}
         self.__syncwave_live__ = False
@@ -190,7 +191,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
             # items to remove
             for key in old_keys - new_keys:
                 old_item = self.__data.pop(key)
-                if isinstance(old_item, Reactive):
+                if is_reactive(old_item):
                     old_item.__syncwave_kill__()
         else:
             unreachable()
@@ -221,7 +222,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
     @mut_atomic
     def __delitem__(self, key: KT) -> None:
         old_item = self.__data.pop(key)
-        if isinstance(old_item, Reactive):
+        if is_reactive(old_item):
             old_item.__syncwave_kill__()
 
     @atomic
@@ -249,8 +250,8 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
             self.__data[k] = n
 
     def __setitem_union(self, k: KT, o: VT | None, n: VT, u_ctx: ContextMap) -> None:
-        old_is_reactive = isinstance(o, Reactive)
-        new_is_reactive = isinstance(n, Reactive)
+        old_is_reactive = is_reactive(o)
+        new_is_reactive = is_reactive(n)
         same_type = type(o) is (new_type := type(n))
 
         if old_is_reactive and new_is_reactive and same_type:
@@ -345,14 +346,14 @@ class SyncList(MutableSequence[VT], Reactive):
         # case 3: union content type
         elif isinstance(inner_ctx, ContextMap):
             for item in self.__data:
-                if isinstance(item, Reactive):
+                if is_reactive(item):
                     item.__syncwave_init__(sref, inner_ctx[type(item)])
         else:
             unreachable()
 
     def __syncwave_kill__(self) -> None:
         for item in self.__data:
-            if isinstance(item, Reactive):
+            if is_reactive(item):
                 item.__syncwave_kill__()
         self.__data = []
         self.__syncwave_live__ = False
@@ -392,7 +393,7 @@ class SyncList(MutableSequence[VT], Reactive):
             if new_len > old_len:
                 for i in range(old_len, new_len):
                     new_item = new.__data[i]
-                    if isinstance(new_item, Reactive):
+                    if is_reactive(new_item):
                         new_item.__syncwave_init__(
                             self.__syncwave_sref__, inner_ctx[type(new_item)]
                         )
@@ -401,7 +402,7 @@ class SyncList(MutableSequence[VT], Reactive):
             elif old_len > new_len:
                 for _ in range(old_len - new_len):
                     old_item = self.__data.pop()
-                    if isinstance(old_item, Reactive):
+                    if is_reactive(old_item):
                         old_item.__syncwave_kill__()
         else:
             unreachable()
@@ -470,8 +471,8 @@ class SyncList(MutableSequence[VT], Reactive):
         return f"<SyncList {self.__data!r} ({status})>"
 
     def __setitem_union(self, i: int, o: VT, n: VT, u_ctx: ContextMap) -> None:
-        old_is_reactive = isinstance(o, Reactive)
-        new_is_reactive = isinstance(n, Reactive)
+        old_is_reactive = is_reactive(o)
+        new_is_reactive = is_reactive(n)
         same_type = type(o) is (new_type := type(n))
 
         if old_is_reactive and new_is_reactive and same_type:

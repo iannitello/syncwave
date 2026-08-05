@@ -12,7 +12,7 @@ from weakref import WeakSet
 from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
 from .io import EmptyFile, EmptyFileType, io
-from .reactive import Context, ContextMap, Reactive, StoreRef, unreachable
+from .reactive import Context, ContextMap, Reactive, StoreRef, is_reactive, unreachable
 from .sync_collection import SyncDict, SyncList
 from .sync_model import SyncModel, create_sync_model
 from .tp_validation import collection_wrap, drill_tp, str_guard, sync_model_guard
@@ -106,7 +106,7 @@ class Syncwave(MutableMapping[str, Any]):
         value, store_info = self.__stores[key]
         watcher.unwatch(store_info.path)
         with store_info.sref.lock:
-            if isinstance(value, Reactive):
+            if is_reactive(value):
                 value.__syncwave_kill__()
         del self.__stores[key]
         io.remove_file(store_info.path)
@@ -339,7 +339,7 @@ class Syncwave(MutableMapping[str, Any]):
         store_info = StoreInfo(name, path, type_adapter, sref, ctx)
 
         value = io.init_json(path, type_adapter)
-        if isinstance(value, Reactive):
+        if is_reactive(value):
             if ctx is None:
                 unreachable()
             elif isinstance(ctx, Context):
@@ -388,8 +388,8 @@ class Syncwave(MutableMapping[str, Any]):
                 self.__stores[key] = (new_value, store_info)
         # case 3: union content type
         elif isinstance(ctx, ContextMap):
-            old_is_reactive = isinstance(old_value, Reactive)
-            new_is_reactive = isinstance(new_value, Reactive)
+            old_is_reactive = is_reactive(old_value)
+            new_is_reactive = is_reactive(new_value)
             same_type = type(old_value) is (new_type := type(new_value))
 
             if old_is_reactive and new_is_reactive and same_type:

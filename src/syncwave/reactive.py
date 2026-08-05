@@ -5,8 +5,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import wraps
 from threading import RLock
-from typing import Any, NoReturn, TypeVar, final
-from typing_extensions import ParamSpec
+from typing import Any, NoReturn, ParamSpec, TypeVar, final
+from typing_extensions import TypeIs
 
 __all__ = ["DeadReferenceError", "Reactive"]
 
@@ -57,6 +57,7 @@ class Reactive(metaclass=ABCMeta):
 
     """
 
+    __syncwave_reactive__ = True
     __syncwave_sref__: StoreRef
     __syncwave_ctx__: Context
     __syncwave_live__: bool
@@ -114,6 +115,12 @@ class Reactive(metaclass=ABCMeta):
     @abstractmethod
     def __syncwave_update__(self, new: ReactiveSubCls) -> None:
         raise NotImplementedError
+
+
+def is_reactive(value: Any) -> TypeIs[Reactive]:
+    # Internal faster replacement for `isinstance(value, Reactive)`.
+    # See https://github.com/python/cpython/issues/92810
+    return getattr(type(value), "__syncwave_reactive__", False)
 
 
 P = ParamSpec("P")

@@ -16,6 +16,7 @@ from .reactive import (
     DeadReferenceError,
     Reactive,
     StoreRef,
+    is_reactive,
     mut_atomic,
     unreachable,
 )
@@ -175,7 +176,7 @@ class SyncModel(Reactive):
                 value.__syncwave_init__(sref, field_ctx)  # ty: ignore[unresolved-attribute]
             # case 3: union content type
             elif isinstance(field_ctx, ContextMap):
-                if isinstance(value, Reactive):
+                if is_reactive(value):
                     value.__syncwave_init__(sref, field_ctx[type(value)])
             else:
                 unreachable()
@@ -183,7 +184,7 @@ class SyncModel(Reactive):
     def __syncwave_kill__(self) -> None:
         for name in self.__syncwave_ctx__.fields_ctx:
             value = getattr(self, name, None)
-            if isinstance(value, Reactive):
+            if is_reactive(value):
                 value.__syncwave_kill__()
         # see the comment in __getattr__ for why we pop the fields from __dict__
         for name in self.__syncwave_ctx__.fields_type_adapter:
@@ -285,8 +286,8 @@ class SyncModel(Reactive):
     def __setattr_union(self, f: str, o: Any, n: Any, u_ctx: ContextMap) -> None:
         o_setattr = self.__syncwave_original_cls__.__setattr__
 
-        old_is_reactive = isinstance(o, Reactive)
-        new_is_reactive = isinstance(n, Reactive)
+        old_is_reactive = is_reactive(o)
+        new_is_reactive = is_reactive(n)
         same_type = type(o) is (new_type := type(n))
 
         if old_is_reactive and new_is_reactive and same_type:
