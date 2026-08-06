@@ -77,6 +77,21 @@ class Syncwave(MutableMapping[str, Any]):
         """The normalized path to the directory holding the stores' JSON files."""
         return self.__root_path
 
+    @property
+    def sync_live(self) -> bool:
+        """Whether this instance is still connected to its stores.
+
+        A `Syncwave` instance is a reactive object, but unlike other reactive objects,
+        it can never be killed, so `sync_live` always returns `True`.
+
+        ---
+
+        Abstract: Usage Documentation
+            [Reactive](https://syncwave.dev/usage/syncwave/)
+
+        """
+        return True
+
     def __getitem__(self, key: str) -> Any:
         if key not in self.__stores:
             raise KeyError(f"Store '{key}' does not exist.")
@@ -498,4 +513,8 @@ class Syncwave(MutableMapping[str, Any]):
         self.__on_file_change(store_info)
 
 
+# From the user's POV a Syncwave instance is reactive (in-place changes sync to disk),
+# so `isinstance(syncwave, Reactive)` should be True. It is only a virtual subclass:
+# it does not implement the internal Reactive protocol and `is_reactive` (intentionally)
+# returns False for it.
 Reactive.register(Syncwave)
