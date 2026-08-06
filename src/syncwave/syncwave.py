@@ -12,6 +12,7 @@ from weakref import WeakSet
 from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
 from .io import EmptyFile, EmptyFileType, io
+from .ownership import detach, ingest
 from .reactive import Context, ContextMap, Reactive, StoreRef, is_reactive, unreachable
 from .sync_collection import SyncDict, SyncList
 from .sync_model import SyncModel, create_sync_model
@@ -100,7 +101,7 @@ class Syncwave(MutableMapping[str, Any]):
         with store_info.sref.lock:
             if value is EmptyFile:
                 raise ValueError(f"Store '{key}' has not been initialized.")
-            return value
+            return detach(value, store_info.type_adapter)
 
     def __setitem__(self, key: str, value: Any) -> None:
         if key not in self.__stores:
@@ -252,12 +253,12 @@ class Syncwave(MutableMapping[str, Any]):
             if value is EmptyFile:
                 if default is not EmptyFile:
                     self.__set_store(name, default)
-                    return self.__stores[name][0]
+                    return detach(self.__stores[name][0], store_info.type_adapter)
                 # cleanup before raising
                 watcher.unwatch(store_info.path)
                 del self.__stores[name]
                 raise ValueError(f"Unable to create store '{name}' without a default.")
-            return value
+            return detach(value, store_info.type_adapter)
 
     def register(
         self,
@@ -383,12 +384,16 @@ class Syncwave(MutableMapping[str, Any]):
         if store_info.name not in self.__stores:
             return  # store was deleted, ignore this event
         with store_info.sref.lock:
-            self.__set_store(store_info.name, new_value)
+            self.__set_store(store_info.name, new_value, from_json=True)
 
-    def __set_store(self, key: str, value: Any) -> None:
+    def __set_store(self, key: str, value: Any, *, from_json: bool = False) -> None:
         # always called from within the store lock context
         old_value, store_info = self.__stores[key]
-        new_value = store_info.type_adapter.validate_python(value)
+        if from_json:
+            # only difference is we know we own the value, so we can skip `ingest`
+            new_value = store_info.type_adapter.validate_python(value)
+        else:
+            new_value = ingest(value, store_info.type_adapter)
         ctx, sref = store_info.ctx, store_info.sref
 
         # case 1: non-reactive content type
