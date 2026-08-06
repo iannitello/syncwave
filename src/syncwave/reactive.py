@@ -63,12 +63,15 @@ class Reactive(metaclass=ABCMeta):
     __syncwave_live__: bool
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:  # noqa: D102
-        raise TypeError("Reactive types can never be instantiated directly.")
+        raise TypeError(
+            f"`{cls.__qualname__}` cannot be instantiated directly. "
+            "Reactive instances are created automatically when a value enters a store."
+        )
 
     @final
     @property
     def sync_live(self) -> bool:
-        """Whether this reactive object is still connected to the store.
+        """Whether this reactive object is still connected to its store.
 
         Returns `False` once the object has been removed or replaced in its parent
         store, for example because a key was deleted from a `SyncDict`. After that, any
@@ -120,6 +123,7 @@ class Reactive(metaclass=ABCMeta):
 def is_reactive(value: Any) -> TypeIs[Reactive]:
     # Internal faster replacement for `isinstance(value, Reactive)`.
     # See https://github.com/python/cpython/issues/92810
+    # This intentionally returns False for `Syncwave` (virtual subclass of `Reactive`).
     return getattr(type(value), "__syncwave_reactive__", False)
 
 
