@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import contextlib
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory, mkstemp
 from threading import Lock, Timer
-from typing import Any, Final, NamedTuple
+from typing import Any, Final
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -14,7 +15,8 @@ from .watcher import watcher
 __all__ = []
 
 
-class PendingWrite(NamedTuple):
+@dataclass(frozen=True)
+class PendingWrite:
     value: Any
     ta: TypeAdapter
     timer: Timer
@@ -98,10 +100,10 @@ class _IO:
         # never returns EmptyFile, it throws an error if the file is empty
         with self._lock:
             if path in self._pending_writes:
-                value, previous_ta, _ = self._pending_writes[path]
-                if previous_ta is ta:
-                    return value
-                text = self._serialize(value, previous_ta)
+                pending = self._pending_writes[path]
+                if pending.ta is ta:
+                    return pending.value
+                text = self._serialize(pending.value, pending.ta)
                 return self._deserialize(text, ta, path)
         text = path.read_text(encoding=self.ENCODING)
         return self._deserialize(text, ta, path)
@@ -117,8 +119,8 @@ class _IO:
     def read_json(self, path: Path) -> str:
         with self._lock:
             if path in self._pending_writes:
-                value, ta, _ = self._pending_writes[path]
-                return self._serialize(value, ta)
+                pending = self._pending_writes[path]
+                return self._serialize(pending.value, pending.ta)
         return path.read_text(encoding=self.ENCODING)
 
     def write_json(self, path: Path, text: str) -> None:
@@ -131,8 +133,8 @@ class _IO:
         with self._lock:
             if path not in self._pending_writes:
                 return  # defensive check, should never happen
-            value, ta, _ = self._pending_writes.pop(path)
-        self._atomic_write(path, self._serialize(value, ta))
+            pending = self._pending_writes.pop(path)
+        self._atomic_write(path, self._serialize(pending.value, pending.ta))
 
     def _atomic_write(self, path: Path, text: str) -> None:
         fd, tmp_path = mkstemp(prefix=watcher.TMP_FILE_PREFIX, dir=path.parent)
