@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from copy import copy
 from dataclasses import dataclass
 from inspect import isclass
-from typing import TYPE_CHECKING, Any, TypeGuard
+from typing import TYPE_CHECKING, Any, Final, TypeGuard
 from typing_extensions import Self
 
 from pydantic import BaseModel, RootModel, TypeAdapter
@@ -10,6 +11,7 @@ from pydantic import GetCoreSchemaHandler as Handler
 from pydantic.dataclasses import is_pydantic_dataclass
 from pydantic_core import core_schema as cs
 
+from .ownership import detach, ingest
 from .reactive import (
     Context,
     ContextMap,
@@ -40,6 +42,9 @@ if TYPE_CHECKING:
     SMS = BaseModel | RootModel | PydanticDataclass
 
 __all__ = ["SyncModel", "is_sync_model_supported"]
+
+
+_MISSING: Final = object()
 
 
 def is_sync_model_supported(cls: Any) -> TypeGuard[type[SMS]]:
@@ -142,9 +147,9 @@ class SyncModel(Reactive):
 
     @classmethod
     def __new(cls, instance: SMS) -> Self:
-        instance.__class__ = cls
-        instance: Self = instance  # ty: ignore[invalid-assignment]
-        return instance
+        instance = copy(instance)  # shallow copy to avoid mutating the original
+        instance.__class__ = cls  # swap the class which makes it a SyncModel
+        return instance  # ty: ignore[invalid-return-type]
 
     @classmethod
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
@@ -167,7 +172,7 @@ class SyncModel(Reactive):
         object.__setattr__(self, "__syncwave_live__", True)
 
         for name, field_ctx in ctx.fields_ctx.items():
-            value = getattr(self, name, None)
+            value = self.__dict__.get(name)
             # case 1: non-reactive content type
             # skipped since fields_ctx only contains reactive fields
             # case 2: fixed reactive content type
@@ -183,12 +188,9 @@ class SyncModel(Reactive):
 
     def __syncwave_kill__(self) -> None:
         for name in self.__syncwave_ctx__.fields_ctx:
-            value = getattr(self, name, None)
+            value = self.__dict__.get(name)
             if is_reactive(value):
                 value.__syncwave_kill__()
-        # see the comment in __getattr__ for why we pop the fields from __dict__
-        for name in self.__syncwave_ctx__.fields_type_adapter:
-            self.__dict__.pop(name, None)
         object.__setattr__(self, "__syncwave_live__", False)
 
     def __syncwave_update__(self, new: Self) -> None:
@@ -197,40 +199,35 @@ class SyncModel(Reactive):
 
         for name in ctx.fields_type_adapter:
             field_ctx = ctx.fields_ctx.get(name)
-            new_value = getattr(new, name, None)
+            new_value = new.__dict__.get(name)
 
             # case 1: non-reactive content type
             if field_ctx is None:
                 o_setattr(self, name, new_value)
             # case 2: fixed reactive content type
             elif isinstance(field_ctx, Context):
-                old_value = getattr(self, name)  # can't be None
+                old_value = self.__dict__[name]  # can't be None
                 old_value.__syncwave_update__(new_value)
                 o_setattr(self, name, old_value)  # in case there's a hook to trigger
             # case 3: union content type
             elif isinstance(field_ctx, ContextMap):
-                old_value = getattr(self, name, None)
+                old_value = self.__dict__.get(name)
                 self.__setattr_union(name, old_value, new_value, field_ctx)
             else:
                 unreachable()
 
-    def __getattr__(self, name: str) -> Any:
-        # __getattribute__ would always trigger (methods, internal properties, etc.).
-        # Instead, we pop the fields from __dict__ when the instance is killed
-        # so subsequent attribute access triggers __getattr__,
-        # and we can raise DeadReferenceError.
-        ctx = self.__syncwave_ctx__
-        if name in ctx.fields_type_adapter:
-            if not self.__syncwave_live__:
-                raise DeadReferenceError(reference=self)
-            # __getattr__ shouldn't be called for a tracked field on a live instance
-            unreachable()
-
-        if issubclass(self.__syncwave_original_cls__, BaseModel):
-            o_getattr = self.__syncwave_original_cls__.__getattr__  # ty: ignore[unresolved-attribute]
-            return o_getattr(self, name)
-        cls_name = type(self).__name__
-        raise AttributeError(f"{cls_name!r} object has no attribute {name!r}")
+    def __getattribute__(self, name: str) -> Any:
+        __dict__ = object.__getattribute__(self, "__dict__")
+        ctx: SyncModelCtx | None = __dict__.get("__syncwave_ctx__")
+        if ctx is not None:
+            field_ta = ctx.fields_type_adapter.get(name)
+            if field_ta is not None:
+                if not __dict__["__syncwave_live__"]:
+                    raise DeadReferenceError(reference=self)
+                value = __dict__.get(name, _MISSING)
+                if value is not _MISSING:
+                    return detach(value, field_ta)
+        return object.__getattribute__(self, name)
 
     @mut_atomic
     def __setattr__(self, name: str, new_value: Any) -> None:
@@ -245,19 +242,19 @@ class SyncModel(Reactive):
             return
 
         field_ctx = ctx.fields_ctx.get(name)
-        new_value = field_ta.validate_python(new_value)
+        new_value = ingest(new_value, field_ta)
 
         # case 1: non-reactive content type
         if field_ctx is None:
             o_setattr(self, name, new_value)
         # case 2: fixed reactive content type
         elif isinstance(field_ctx, Context):
-            old_value = getattr(self, name)  # can't be None
+            old_value = self.__dict__[name]  # can't be None
             old_value.__syncwave_update__(new_value)
             o_setattr(self, name, old_value)
         # case 3: union content type
         elif isinstance(field_ctx, ContextMap):
-            old_value = getattr(self, name, None)
+            old_value = self.__dict__.get(name)
             self.__setattr_union(name, old_value, new_value, field_ctx)
         else:
             unreachable()

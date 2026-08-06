@@ -15,6 +15,7 @@ from pydantic import GetCoreSchemaHandler as Handler
 from pydantic import TypeAdapter
 from pydantic_core import core_schema as cs
 
+from .ownership import detach, ingest
 from .reactive import (
     Context,
     ContextMap,
@@ -198,12 +199,12 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
 
     @atomic
     def __getitem__(self, key: KT) -> VT:
-        return self.__data[key]
+        return detach(self.__data[key], self.__syncwave_ctx__.inner_type_adapter)
 
     @mut_atomic
     def __setitem__(self, key: KT, value: VT) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
-        new_item = self.__syncwave_ctx__.inner_type_adapter.validate_python(value)
+        new_item = ingest(value, self.__syncwave_ctx__.inner_type_adapter)
 
         # case 1: non-reactive content type
         if inner_ctx is None:
@@ -410,13 +411,13 @@ class SyncList(MutableSequence[VT], Reactive):
     @atomic
     def __getitem__(self, index: SupportsIndex) -> VT:
         i = _get_index(index)
-        return self.__data[i]
+        return detach(self.__data[i], self.__syncwave_ctx__.inner_type_adapter)
 
     @mut_atomic
     def __setitem__(self, index: SupportsIndex, value: VT) -> None:
         i = _get_index(index)
         inner_ctx = self.__syncwave_ctx__.inner_ctx
-        new_item = self.__syncwave_ctx__.inner_type_adapter.validate_python(value)
+        new_item = ingest(value, self.__syncwave_ctx__.inner_type_adapter)
 
         # case 1: non-reactive content type
         if inner_ctx is None:
@@ -451,7 +452,7 @@ class SyncList(MutableSequence[VT], Reactive):
     def insert(self, index: SupportsIndex, value: VT) -> None:  # noqa: D102
         i = _get_index(index)
         inner_ctx = self.__syncwave_ctx__.inner_ctx
-        new_item = self.__syncwave_ctx__.inner_type_adapter.validate_python(value)
+        new_item = ingest(value, self.__syncwave_ctx__.inner_type_adapter)
 
         if inner_ctx is None:
             self.__data.insert(i, new_item)
@@ -594,7 +595,7 @@ class SyncSet(MutableSet[VT], Reactive):
 
     @mut_atomic
     def add(self, value: VT) -> None:  # noqa: D102
-        new_item = self.__syncwave_ctx__.inner_type_adapter.validate_python(value)
+        new_item = ingest(value, self.__syncwave_ctx__.inner_type_adapter)
         self.__data.add(new_item)
 
     @mut_atomic
