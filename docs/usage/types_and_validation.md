@@ -4,9 +4,13 @@ Every store has a type, and that type is the contract Syncwave enforces on both 
 
 ## The JSON Schema Foundation
 
-The domain of Python objects is vast; the domain of things a JSON file can hold is small. Syncwave bridges the two the same way Pydantic and FastAPI do: through **JSON Schema**. The guiding principle is simple — if a type can be described by a JSON Schema, it can round-trip between Python and a JSON file, and Syncwave can sync it.
+The domain of Python objects is vast, while a JSON file can only hold a few kinds of values: objects, arrays, strings, numbers, booleans, and `null`. Syncwave bridges the two the same way Pydantic and FastAPI do: through **JSON Schema**. The principle: if a type can be described by a JSON Schema, it can round-trip between Python and a JSON file, and Syncwave can sync it.
 
 In practice, Syncwave delegates all of this to [Pydantic](https://docs.pydantic.dev/latest/). Any type Pydantic can validate and serialize is a valid store type: primitives, containers, `datetime` and friends, `UUID`, `Enum`, `Literal`, your own models, unions, and arbitrary nesting of all of the above.
+
+Since JSON is the smaller domain, the mapping is many-to-one: distinct Python types share a JSON representation. The list `[1, 2, 3]` and the set `{1, 2, 3}` both serialize to the array `[1, 2, 3]`, and a `date` lands in the file as a plain string. What settles the ambiguity is the store's declared type, which tells Pydantic what to rebuild from the file. This is also why [a store cannot exist without a type](./syncwave/#create-a-store): the JSON alone doesn't carry enough information.
+
+The same foundation draws the hard limit. A Python object with no JSON Schema representation (a thread, an open socket) cannot be a store; at some point JSON is simply not rich enough. In practice you'll rarely hit that limit: what JSON can't represent is usually behavior rather than data, and stores are about data.
 
 ## What Can Be a Store
 
@@ -36,18 +40,18 @@ syncwave.create_store(Annotated[int, Field(ge=0)], name="count", default=0)
 syncwave["count"] = -1  # ValidationError: Input should be greater than or equal to 0
 ```
 
-And if you don't want a schema at all, `typing.Any` accepts any JSON-serializable data:
+And if you don't want a schema at all, `typing.Any` (or `object`) accepts any JSON-serializable data, which effectively skips validation:
 
 ```python
 from typing import Any
 
-syncwave.create_store(Any, name="anything", default=None)
+syncwave.create_store(Any, name="anything")
 syncwave["anything"] = {"mixed": [1, "two", None]}
 ```
 
 ## Initial Values
 
-When a store is created and its file is missing or empty, Syncwave needs an initial value. It first tries to infer a natural "empty" one by validating, in order: `{}`, `[]`, `""`, and `None`. The first that satisfies the store's type wins — an empty dict for mappings, an empty list for sequences and sets, and so on.
+When a store is created and its file is missing or empty, Syncwave needs an initial value. It first tries to infer a natural "empty" one by validating, in order: `{}`, `[]`, `""`, and `None`. The first that satisfies the store's type wins: an empty dict for mappings, an empty list for sequences and sets, and so on.
 
 When none of them fits, you must provide the value yourself through the `default` parameter:
 
@@ -73,10 +77,10 @@ Two details to keep in mind:
 Every path into a store goes through validation against its type:
 
 - **At creation**, when existing file content is loaded.
-- **On every Python-side change**: assigning to the store, setting an item in a sync collection, assigning to a model field. Invalid data raises a `pydantic.ValidationError` and nothing is written.
+- **On every Python-side change**: assigning to the store, setting an item in a reactive collection, assigning to a model field. Invalid data raises a `pydantic.ValidationError` and nothing is written.
 - **On every file-side change**: if the file's new content is malformed JSON or doesn't match the type, the change is rejected and the file is reverted to the last valid state.
 
-Validation runs in Pydantic's default lax mode, so the usual coercions apply — assigning `["1", 2]` to a `list[int]` store gives you `[1, 2]`. If you want stricter behavior, use Pydantic's standard tools (`Field(strict=True)`, `Strict*` types) in the store's type; Syncwave passes them through untouched.
+Validation runs in Pydantic's default lax mode, so the usual coercions apply: assigning `["1", 2]` to a `list[int]` store gives you `[1, 2]`. If you want stricter behavior, use Pydantic's standard tools (`Field(strict=True)`, `Strict*` types) in the store's type; Syncwave passes them through untouched.
 
 ## Dictionary Keys
 
@@ -102,4 +106,4 @@ This is also why a `SyncSet` can never contain reactive objects: reactive object
 
 ## Unions
 
-Union types are fully supported, including unions of reactive types — a slot typed `Union[SyncList[int], SyncDict[str, int]]` holds one member at a time and can switch between them. What a type switch means for existing references is covered in [Reactivity](./reactivity/).
+Union types are fully supported, including unions of reactive types. A slot typed `Union[SyncList[int], SyncDict[str, int]]` holds one member at a time and can switch between them. What a type switch means for existing references is covered in [Reactivity](./reactivity/).

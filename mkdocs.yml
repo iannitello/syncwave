@@ -124,8 +124,8 @@ nav:
       - Index: index.md
   - Usage:
       - Syncwave: usage/syncwave.md
-      - Sync Collections: usage/sync_collections.md
-      - Sync Models: usage/sync_models.md
+      - Collections: usage/collections.md
+      - Models: usage/models.md
       - Reactivity: usage/reactivity.md
       - Types and Validation: usage/types_and_validation.md
       - JSON Files: usage/json_files.md
