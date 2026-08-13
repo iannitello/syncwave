@@ -2,7 +2,7 @@
 
 ??? abstract "API Reference"
 
-    [`syncwave.Syncwave`](../api/syncwave)
+    [`syncwave.Syncwave`](../api/syncwave/)
 
 The `Syncwave` class is the entry point of the library. You create an instance and use it for everything else. This page covers the basics: creating stores, changing their data from Python and from the JSON file, and how validation works.
 
@@ -28,11 +28,10 @@ If you like database analogies: the `syncstores/` directory is your database, ea
 
 You interact with `syncwave` using the familiar `dict` [operations](https://docs.python.org/3/library/stdtypes.html#typesmapping). The one exception is inserting a new key, i.e. creating a store:
 
-```python title="main.py" hl_lines="6"
+```python title="main.py" hl_lines="5"
 from syncwave import Syncwave
 
 syncwave = Syncwave()
-
 
 syncwave["numbers"] = [1, 2, 3]
 ```
@@ -51,20 +50,20 @@ The only operations refused are those that would insert a key that doesn't exist
 
 So let's create your first store the right way:
 
-```python title="main.py" hl_lines="6 7"
+```python title="main.py" hl_lines="5 6"
 from syncwave import Syncwave
 
 syncwave = Syncwave()
 
-
-syncwave.create_store(list[int], name="numbers")
-print(syncwave["numbers"])
+numbers = syncwave.create_store(list[int], name="numbers")
+print(numbers)
 ```
 
-Two things are happening in the `create_store` call:
+Three things to notice:
 
 - `list[int]` declares the type of the store: a list of integers.
 - `name="numbers"` gives the store its key. It determines how you access it (`syncwave["numbers"]`) and the name of its JSON file (`syncstores/numbers.json`).
+- `create_store` returns the store's initial value and it's assigned to `numbers`.
 
 Run the program:
 
@@ -96,29 +95,15 @@ $ python main.py
 
 Content successfully loaded!
 
-### `create_store` Return Value and Variables
+### Reading a Store Returns a Copy
 
-The method `create_store` returns the store's initial value, whether that's the default or the content loaded from the file.
-
-The previous example can be rewritten as:
-
-```python title="main.py" hl_lines="6 7"
-from syncwave import Syncwave
-
-syncwave = Syncwave()
-
-
-numbers = syncwave.create_store(list[int], name="numbers")
-print(numbers)
-```
-
-However, nothing ties the `numbers` variable to the store; it's just a plain Python list:
+In the previous example, the variable `numbers` holds the store's initial value, whether that's the default or the content loaded from the file. However, nothing ties that variable to the store; it's just a plain Python list:
 
 ```python
 print(type(numbers))  # <class 'list'>
 ```
 
-That means that the value held in `syncwave["numbers"]` (and in the corresponding JSON file) may change over time, but `numbers` won't follow.
+That means the value held in `syncwave["numbers"]` (and in the corresponding JSON file) may change over time, but `numbers` won't follow.
 
 This is because on every read operation, Syncwave hands you a copy of the store's value, not a reference. And that's not just the case for the return value of `create_store`; the same is true if you directly create a variable for `syncwave["numbers"]`:
 
@@ -133,9 +118,18 @@ numbers == syncwave["numbers"]  # True
 numbers is syncwave["numbers"]  # False
 ```
 
-Think of it as a spreadsheet where cell `A1` holds some data. Creating the `numbers` variable is like copy-pasting that data into `B1`, but it's not very useful since it's static data. It would be much better to use the formula `=A1` so that `B1` follows `A1` forever. To achieve that, you need [reactive types](#why-reactivity): with them, a variable like `numbers` tracks the store, and it becomes apparent why it's useful to keep the return value of `create_store` in a variable.
+Think of it as a spreadsheet where cell `A1` holds some data. Creating the `numbers` variable is like copy-pasting that data into `B1`, but it's not very useful since it's static data. It would be much better to use the formula `=A1` so that `B1` follows `A1` forever. To achieve that, you need [reactive types](#why-reactivity). With them, a variable like `numbers` tracks the store.
 
-Until we get to reactive types, the examples will refrain from keeping such variables and always go through the `syncwave` instance instead.
+Until we get to reactive types, the examples will refrain from keeping such variables and always go through the `syncwave` instance instead:
+
+```python title="main.py" hl_lines="5 6"
+from syncwave import Syncwave
+
+syncwave = Syncwave()
+
+syncwave.create_store(list[int], name="numbers")  # return value is discarded
+print(syncwave["numbers"])
+```
 
 ### The `default` Parameter
 
@@ -165,13 +159,12 @@ In short, `default` only matters for types with no obvious empty value, like the
 
 A store is changed by assigning a new value to it, exactly like setting a key in a `dict`:
 
-```python title="main.py" hl_lines="7 8"
+```python title="main.py" hl_lines="6"
 from syncwave import Syncwave
 
 syncwave = Syncwave()
 
-
-syncwave.create_store(list[int], name="numbers")  # return value discarded
+syncwave.create_store(list[int], name="numbers")
 syncwave["numbers"] = [7, 8, 9]
 print(syncwave["numbers"])  # [7, 8, 9]
 ```
@@ -182,11 +175,11 @@ Run the program, then open the JSON file:
 [7, 8, 9]
 ```
 
-There is no save call and no query. You assigned a value, and the file was updated.
+The `[1, 2, 3]` you wrote earlier is gone, and the file now holds the new data. There was no save call and no query. You assigned a value, and the file was updated.
 
 !!! warning "In-place changes don't reach the store"
 
-    Remember that reading a store hands you a copy, so an in-place change like `syncwave["numbers"].append(10)` only modifies that copy. The same goes if you kept a variable: `numbers.append(10)` changes your list, not the store. In both cases, the store and the JSON file are untouched.
+    Reading a store hands you a copy, so an in-place change like `syncwave["numbers"].append(10)` only modifies that copy. The store and the JSON file are untouched.
 
     With plain (non-reactive) types, change a store by assigning a whole new value, and read the value fresh through the `syncwave` instance when you need it. [Reactive types](#why-reactivity) lift both restrictions.
 
@@ -194,17 +187,43 @@ There is no save call and no query. You assigned a value, and the file was updat
 
     Syncwave batches rapid successive changes and writes them to disk a fraction of a second later. If you programmatically want to read the file content at an exact moment, use [read_store_json](../api/syncwave/#syncwave.Syncwave.read_store_json), which always returns the up-to-date content. Everything about how Syncwave interacts with the disk is covered in [JSON Files](./json_files/).
 
+### Writing to a Store Keeps a Copy
+
+Consider this example:
+
+```python title="main.py" hl_lines="5 8 9"
+from syncwave import Syncwave
+
+syncwave = Syncwave()
+
+my_numbers = [7, 8, 9]
+
+syncwave.create_store(list[int], name="numbers")
+syncwave["numbers"] = my_numbers
+my_numbers.append(10)
+```
+
+Here we _first_ create the list `my_numbers`, and after it's assigned we `append` a value to it. So you might expect this mutation to reach the store, but that's not the case either:
+
+```python
+print(syncwave["numbers"])  # [7, 8, 9]
+print(my_numbers)           # [7, 8, 9, 10]
+```
+
+That's because Syncwave copies values on their way in as well: the store received a copy of `my_numbers`, and the original stayed yours. Earlier, _reading_ the store handed out a copy; this time, _writing_ to it kept one. Either way, your variable and the store hold two separate objects.
+
+That said, there's nothing wrong with this example. As long as you're aware that `my_numbers` has no relationship with the store and that `10` won't be in it, assigning a variable like that is a valid pattern.
+
 ## Change the Data from the File
 
 Synchronization also works in the other direction, which is arguably the more interesting half. As long as your program is running, Syncwave watches the JSON file and applies external changes to the store.
 
 To see it in action, make the program wait so you have time to edit the file:
 
-```python title="main.py" hl_lines="9 10"
+```python title="main.py" hl_lines="6 8 9"
 from syncwave import Syncwave
 
 syncwave = Syncwave()
-
 
 syncwave.create_store(list[int], name="numbers")
 syncwave["numbers"] = [1, 2, 3]
@@ -310,52 +329,91 @@ Be careful with that last one: deleting a store also deletes its JSON file from 
 
 ## Why Reactivity
 
-Everything on this page followed the same pattern: you read a store's current value through the `syncwave` instance, and you change it by assigning a whole new value through the instance. That's because Syncwave has no way to detect in-place changes to plain Python objects. It can't know that someone called `append` on a regular list (short of comparing the whole content over and over), so the only operations it can react to are the ones that go through the instance.[^2]
+Everything on this page followed the same pattern: you read a store's current value through the `syncwave` instance, and you change it by assigning a whole new value through the instance. That's because Syncwave has no way to detect in-place changes to plain Python objects. It can't know that someone called `append` on a regular list (short of comparing the whole content over and over), so the only operations it can react to are the ones that go through the instance.
 
-[^2]: This is also why reads hand you copies. If Syncwave gave you its own internal object, an in-place change would silently knock the store out of sync with the file; a copy keeps the store safe.
+??? note "Additional details"
+
+    This is also the reason behind the copies you encountered on this page. Syncwave keeps an internal value for each store, and that value must match the file at all times. If outside code could hold it, an in-place change Syncwave can't detect would silently knock the two out of sync.
+
+    Copying at both boundaries (read and write) prevents that. Reads hand you a copy, so mutating what you got can't touch the store. Writes keep a copy, so mutating your original afterward can't either. The internal value stays exclusively in Syncwave's hands, and the only changes that reach it are the ones made through the instance, which Syncwave sees and syncs.
+
+    There are two exceptions to the rule. First, immutable values like `int` and `str` are just passed as they are: they can't be changed in place, so a copy would protect nothing. Second, the reactive types (that you're about to see), because Syncwave can detect and react to in-place mutations on them.
 
 That word, _react_, is the heart of the library. An object is **reactive** when it stays connected to the store data: changes made through it are detected, validated, and written to the JSON file, and changes coming from the file are applied to it. The `syncwave` instance is itself reactive, which is why the assignment pattern works. Its entries are whole stores, though. To get the same behavior for values _inside_ a store, Syncwave provides its own reactive objects.
 
 Here is the earlier example again, rewritten with a `SyncList`, the reactive counterpart of `list`:
 
-```python title="main.py" hl_lines="1 6 8"
+```python title="main.py" hl_lines="1 5"
 from syncwave import SyncList, Syncwave
 
 syncwave = Syncwave()
 
+numbers = syncwave.create_store(SyncList[int], name="numbers")
+```
+
+The store type is now `SyncList[int]`. The value returned by `create_store` is kept in the `numbers` variable again, but this time it's not just a snapshot of the store, it's a reactive object:
+
+```python
+print(type(numbers))  # <class 'syncwave.sync_collection.SyncList'>
+```
+
+If you ever need to check, all reactive objects are instances of the [`Reactive`](../api/reactive/) class: `isinstance(numbers, Reactive)` returns `True`.
+
+Now, `numbers` will stay synchronized with the store when it changes:
+
+```python
+syncwave["numbers"] = [1, 2, 3]
+print(numbers)  # [1, 2, 3]
+```
+
+Notice the assignment didn't disconnect `numbers`. Instead of replacing its internal object with a new one, Syncwave updated it in place, so references like `numbers` stay connected.
+
+The same goes for writing to the store. In-place mutations reach the store, whether you do them on `syncwave["numbers"]` or on `numbers`; no assignment needed:
+
+```python
+syncwave["numbers"].append(4)
+print(numbers)  # [1, 2, 3, 4]
+
+numbers.append(5)
+print(syncwave["numbers"])  # [1, 2, 3, 4, 5]
+```
+
+As always, the corresponding JSON file follows. At that point, `syncstores/numbers.json` would be:
+
+```json title="syncstores/numbers.json"
+[1, 2, 3, 4, 5]
+```
+
+Of course, the other direction works too: a change originating from the file propagates into `numbers`. Change the example to:
+
+```python title="main.py" hl_lines="6 8 9"
+from syncwave import SyncList, Syncwave
+
+syncwave = Syncwave()
 
 numbers = syncwave.create_store(SyncList[int], name="numbers")
 syncwave["numbers"] = [1, 2, 3]
-numbers.append(4)
 
 input("Edit syncstores/numbers.json, save it, then press Enter... ")
 print(numbers)
 ```
 
-The store type is now `SyncList[int]`, and the value returned by `create_store` is kept in the `numbers` variable again. With a plain list, `numbers` would just be a snapshot, but a reactive object stays connected. You can now see why it's convenient that `create_store` hands you a reference that you can use to edit the JSON file and that gets updated when the file changes.
+Note that we print `numbers` and not `syncwave["numbers"]`.
 
-If you ever need to check, all reactive objects are instances of the [`Reactive`](../api/reactive/) class: `isinstance(numbers, Reactive)` returns `True`.
-
-Run the program. While it waits at the prompt, look at the file:
-
-```json title="syncstores/numbers.json"
-[1, 2, 3, 4]
-```
-
-Two things to note here. Assigning `[1, 2, 3]` through the instance did not disconnect `numbers`: Syncwave updated the object in place. And the `append` on `numbers`, an in-place change, was detected and written to the file. No assignment needed.
-
-Now edit the file, add a number at the end, save it, and press ++enter++:
+Run the program. While it waits at the prompt, edit the file, save it, and press ++enter++:
 
 ```console
 $ python main.py
 Edit syncstores/numbers.json, save it, then press Enter...
-[1, 2, 3, 4, 100]
+[1, 2, 3, 100]
 ```
 
-The external change landed in `numbers` too. A reactive reference stays connected in both directions, and this holds for values nested arbitrarily deep inside a store.
+A reactive object stays connected in both directions, and this holds for values nested arbitrarily deep inside a store.
+
+You can now see why it's convenient that `create_store` returns the initial value right when you create the store. Its usefulness was limited with plain types, but with a reactive type it hands you a live handle on the store: you can mutate it to change the data, and it always shows the current state. This is not special to `create_store`; a regular read like `numbers = syncwave["numbers"]` gives you the same object.
 
 !!! info "Terminology"
 
     Throughout the documentation, the word _reactive_ is used interchangeably with the prefix _sync-_. For example, saying "a reactive list" refers to a `SyncList`.
 
-Read [Sync Collections](./sync_collections/) and [Sync Models](./sync_models/) to learn how to use all the reactive types. Then, [Reactivity](./reactivity/) explains the system as a whole, including what happens to the references you keep.
+Read [Collections](./collections/) and [Models](./models/) to learn how to use all the reactive types. Then, [Reactivity](./reactivity/) explains the system as a whole, including what happens to the references you keep.
