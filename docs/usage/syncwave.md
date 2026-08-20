@@ -4,11 +4,15 @@
 
     [`syncwave.Syncwave`](../api/syncwave/)
 
-The `Syncwave` class is the entry point of the library. You create an instance and use it for everything else. This page covers the basics: creating stores, changing their data from Python and from the JSON file, and how validation works.
+This page covers the basics: creating stores, changing their data from Python and from the JSON file, and how validation protects both sides. It closes with a first look at **reactive types**, which the next pages cover in depth.
+
+## The `syncwave` Instance
 
 !!! success "First, make sure Syncwave is installed"
 
     See [Installation](../#installation) if you haven't done that yet.
+
+The `Syncwave` class is the entry point of the library. You create an instance and use it for everything else.
 
 Create a file `main.py` with:
 
@@ -42,11 +46,11 @@ This raises an error:
 KeyError: "Store 'numbers' does not exist. Use `syncwave.create_store(...)`, or `@syncwave.register(...)` first."
 ```
 
-You cannot directly insert a value (yet) because Syncwave needs additional information, most importantly a **type** the data must conform to. The correct way to create a store is to use [`syncwave.create_store(...)`](../api/syncwave/#syncwave.Syncwave.create_store): that's where you pass that type, along with other parameters to configure the store[^1].
+You cannot insert a value under a key that doesn't exist because Syncwave needs additional information, most importantly a **type** the data must conform to. The correct way to create a store is to use [`syncwave.create_store(...)`](../api/syncwave/#syncwave.Syncwave.create_store): that's where you pass that type, along with other parameters to configure the store[^1].
 
 [^1]: Configuration parameters are not implemented yet. They will be introduced in subsequent versions of the library.
 
-The only operations refused are those that would insert a key that doesn't exist yet, whether explicitly like the assignment above, or implicitly, like calling `syncwave.update(...)` with a new key. Everything else from the `dict` interface works as expected.
+The only `dict` operations rejected are those that would insert a key that doesn't exist yet, whether explicitly, like the assignment above, or implicitly, like calling `syncwave.update(...)` with a new key. Everything else from the `dict` interface works as expected.
 
 So let's create your first store the right way:
 
@@ -118,7 +122,7 @@ numbers == syncwave["numbers"]  # True
 numbers is syncwave["numbers"]  # False
 ```
 
-Think of it as a spreadsheet where cell `A1` holds some data. Creating the `numbers` variable is like copy-pasting that data into `B1`, but it's not very useful since it's static data. It would be much better to use the formula `=A1` so that `B1` follows `A1` forever. To achieve that, you need [reactive types](#why-reactivity). With them, a variable like `numbers` tracks the store.
+Think of it as a spreadsheet where cell `A1` holds some data. Creating the `numbers` variable is like copy-pasting that data into `B1`. But it's not very useful since it's static data; it would be much better to use the formula `=A1` so that `B1` follows `A1` forever. To achieve that, you need [reactive types](#why-reactivity). With them, a variable like `numbers` tracks the store.
 
 Until we get to reactive types, the examples will refrain from keeping such variables and always go through the `syncwave` instance instead:
 
@@ -147,7 +151,7 @@ The way `default` works might not be what you expect, so here are the exact rule
 
 In short, `default` only matters for types with no obvious empty value, like the `int` above. [Types and Validation](./types_and_validation/) covers initial values in more detail.
 
-??? note "Additional details"
+??? note "Why a store can never be empty"
 
     A key aspect of Syncwave is creating a mapping between Python and JSON. For instance, a `list` naturally maps to a JSON array `[]`, a `dict` to a JSON object `{}`, and `None` to a JSON `null`. However, what about an empty JSON file? Python doesn't have something like `undefined` that could represent the absence of a value.
 
@@ -179,7 +183,7 @@ The `[1, 2, 3]` you wrote earlier is gone, and the file now holds the new data. 
 
 !!! warning "In-place changes don't reach the store"
 
-    Reading a store hands you a copy, so an in-place change like `syncwave["numbers"].append(10)` only modifies that copy. The store and the JSON file are untouched.
+    Remember: reading a store hands you a copy, so an in-place change like `syncwave["numbers"].append(10)` only modifies that copy. The store and the JSON file are untouched.
 
     With plain (non-reactive) types, change a store by assigning a whole new value, and read the value fresh through the `syncwave` instance when you need it. [Reactive types](#why-reactivity) lift both restrictions.
 
@@ -291,9 +295,11 @@ Some of these have no empty value Syncwave could infer, so they are also good ex
 ```python
 from enum import Enum
 
+
 class Theme(Enum):
     LIGHT = "light"
     DARK = "dark"
+
 
 syncwave.create_store(Theme, name="theme", default=Theme.LIGHT)
 ```
@@ -315,7 +321,7 @@ You lose the guarantees that come with a real type, but the two-way sync works e
 
 ## Manage Stores
 
-Since `Syncwave` is a `MutableMapping`, the standard `dict` interface works on the instance:
+As mentioned earlier, the standard `dict` interface works on the `syncwave` instance:
 
 ```python
 len(syncwave)           # number of stores
@@ -331,7 +337,7 @@ Be careful with that last one: deleting a store also deletes its JSON file from 
 
 Everything on this page followed the same pattern: you read a store's current value through the `syncwave` instance, and you change it by assigning a whole new value through the instance. That's because Syncwave has no way to detect in-place changes to plain Python objects. It can't know that someone called `append` on a regular list (short of comparing the whole content over and over), so the only operations it can react to are the ones that go through the instance.
 
-??? note "Additional details"
+??? note "Why all the copying?"
 
     This is also the reason behind the copies you encountered on this page. Syncwave keeps an internal value for each store, and that value must match the file at all times. If outside code could hold it, an in-place change Syncwave can't detect would silently knock the two out of sync.
 
