@@ -16,7 +16,7 @@ from ipaddress import (
 )
 from pathlib import Path
 from re import Pattern
-from types import GenericAlias
+from types import GenericAlias, UnionType
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_origin
 from uuid import UUID
 
@@ -360,7 +360,7 @@ def _handle_annotated(origin: Any, args: tuple[Any, ...]) -> Any | None:
 
 
 def _handle_union(origin: Any, args: tuple[Any, ...]) -> tuple[Any, ...] | None:
-    if origin is not Union and str(origin) != "typing.Union":
+    if origin is not UnionType and origin is not Union:
         return None
     if not args:
         raise TypeError("`Union` must have at least one type argument.")
@@ -368,7 +368,7 @@ def _handle_union(origin: Any, args: tuple[Any, ...]) -> tuple[Any, ...] | None:
 
 
 def _handle_literal(origin: Any, args: tuple[Any, ...]) -> tuple[Any, ...] | None:
-    if origin is not Literal and str(origin) != "typing.Literal":
+    if origin is not Literal:
         return None
     if not args:
         raise TypeError("`Literal` must have at least one type argument.")
