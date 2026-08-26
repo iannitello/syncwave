@@ -124,7 +124,8 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         if args:
             dict_schema = handler.generate_schema(GenericAlias(dict, args))
         else:
-            dict_schema = handler.generate_schema(dict)
+            # a bare SyncDict is treated as SyncDict[str, Any]
+            dict_schema = handler.generate_schema(GenericAlias(dict, (str, Any)))
 
         inst_schema = cs.is_instance_schema(cls)
         non_inst_schema = cs.no_info_after_validator_function(cls.__new, dict_schema)
