@@ -143,8 +143,15 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None
         if is_dataclass(origin):
             return _parse_model(py_dc.dataclass(origin))  # ty: ignore[invalid-argument-type]
 
-        if issubclass(origin, dict) and args:
-            _validate_key_tp(args[0])
+        if issubclass(origin, dict):
+            if args:
+                _validate_key_tp(args[0])
+            else:
+                raise TypeError(
+                    "A bare `dict` cannot be used in a store type because its key type "
+                    "is ambiguous. Use `dict[str, Any]` instead "
+                    "(JSON object keys are always strings)."
+                )
         if issubclass(origin, (set, frozenset)) and args:
             arg_name = getattr(args[0], "__qualname__", repr(args[0]))
             err = f"`{tp_name}` must hold hashable elements, got `{arg_name}`."
