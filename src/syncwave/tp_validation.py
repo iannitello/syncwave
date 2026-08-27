@@ -204,9 +204,11 @@ def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
     if len(args) == 2:
         _validate_key_tp(args[0])
         inner_ctx = drill_tp(args[1])
+        key_type_adapter = TypeAdapter(args[0])
         inner_type_adapter = TypeAdapter(args[1])
     elif len(args) == 0:
         inner_ctx = None
+        key_type_adapter = TypeAdapter(str)
         inner_type_adapter = TypeAdapter(Any)
     else:
         raise TypeError("`SyncDict` requires 0 or 2 type arguments.")
@@ -214,6 +216,7 @@ def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
     return SyncDictCtx(
         tp=SyncDict,
         inner_ctx=inner_ctx,
+        key_type_adapter=key_type_adapter,
         inner_type_adapter=inner_type_adapter,
     )
 
