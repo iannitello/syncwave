@@ -73,6 +73,7 @@ class SyncCollection(Reactive):
 class SyncDictCtx(Context, Generic[KT, VT]):
     tp: type[SyncDict]
     inner_ctx: Context | ContextMap | None
+    key_type_adapter: TypeAdapter[KT] | TypeAdapter[str]
     inner_type_adapter: TypeAdapter[VT]
 
 
@@ -205,6 +206,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
     @mut_atomic
     def __setitem__(self, key: KT, value: VT) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
+        key = ingest(key, self.__syncwave_ctx__.key_type_adapter)
         new_item = ingest(value, self.__syncwave_ctx__.inner_type_adapter)
 
         # case 1: non-reactive content type
