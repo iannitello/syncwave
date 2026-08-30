@@ -4,7 +4,7 @@ from collections.abc import Container
 from dataclasses import is_dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from enum import Enum
+from enum import Enum, Flag
 from inspect import isclass
 from ipaddress import (
     IPv4Address,
@@ -22,6 +22,7 @@ from uuid import UUID
 
 import pydantic.dataclasses as py_dc
 from pydantic import ByteSize, RootModel, TypeAdapter
+from pydantic_core import PydanticSerializationError, from_json, to_json
 
 from .reactive import Context, ContextMap, Reactive, unreachable
 from .sync_collection import (
@@ -94,7 +95,7 @@ def collection_wrap(
             raise TypeError(f"`{tp_name}` does not support type arguments.")
         if origin is SyncDict and len_args > 1:
             raise TypeError("`SyncDict` supports only one type argument for the key.")
-        _validate_key_tp(args[0])
+        _validate_dict_key_tp(args[0])
         return GenericAlias(SyncDict, (args[0], sync_model))
 
     if origin is None:
@@ -145,13 +146,9 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None
 
         if issubclass(origin, dict):
             if args:
-                _validate_key_tp(args[0])
+                _validate_dict_key_tp(args[0])
             else:
-                raise TypeError(
-                    "A bare `dict` cannot be used in a store type because its key type "
-                    "is ambiguous. Use `dict[str, Any]` instead "
-                    "(JSON object keys are always strings)."
-                )
+                raise TypeError("Use `dict[str, Any]` instead of a bare `dict`.")
         if issubclass(origin, (set, frozenset)) and args:
             arg_name = getattr(args[0], "__qualname__", repr(args[0]))
             err = f"`{tp_name}` must hold hashable elements, got `{arg_name}`."
@@ -202,7 +199,7 @@ def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
     args = get_args(tp)
 
     if len(args) == 2:
-        _validate_key_tp(args[0])
+        _validate_dict_key_tp(args[0])
         inner_ctx = drill_tp(args[1])
         key_type_adapter = TypeAdapter(args[0])
         inner_type_adapter = TypeAdapter(args[1])
@@ -261,36 +258,43 @@ def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
     )
 
 
-def _validate_hashable(tp: Any, _err: str) -> None:
+def _validate_hashable(tp: type, err: str) -> None:
     origin = get_origin(tp) or tp
     args = get_args(tp)
 
     if (annotated_inner := _handle_annotated(origin, args)) is not None:
-        _validate_hashable(annotated_inner, _err)
+        _validate_hashable(annotated_inner, err)
         return
     if (union_members := _handle_union(origin, args)) is not None:
-        [_validate_hashable(member, _err) for member in union_members]
+        [_validate_hashable(member, err) for member in union_members]
         return
     if (literal_members := _handle_literal(origin, args)) is not None:
-        [_validate_hashable(type(member), _err) for member in literal_members]
+        [_validate_hashable(_get_tp(member), err) for member in literal_members]
         return
 
     if isclass(origin):
         if getattr(origin, "__hash__", None) is None:
-            raise TypeError(_err)
+            raise TypeError(err)
         # tuple and frozenset are hashable only if all elements are hashable
         if issubclass(origin, (tuple, frozenset)) and args:
-            [_validate_hashable(arg, _err) for arg in args]
+            [_validate_hashable(arg, err) for arg in args]
         # enums are hashable only if their members' values are hashable
         if issubclass(origin, Enum):
-            [_validate_hashable(type(member.value), _err) for member in origin]
+            [_validate_hashable(_get_tp(member.value), err) for member in origin]
         return
 
-    [_validate_hashable(arg, _err) for arg in args]
+    [_validate_hashable(arg, err) for arg in args]
 
 
-# Types that round-trip as dict keys through JSON (dump_json/validate_json).
-# See: docs.pydantic.dev/latest/concepts/conversion_table/
+def _get_tp(v: Any) -> type:
+    # Drills down to the innermost type of an enum member value.
+    if isinstance(v, Enum):
+        return _get_tp(v.value)
+    return type(v)
+
+
+# Whitelist: types that round-trip as dict keys through JSON (dump_json/validate_json).
+# See: https://pydantic.dev/docs/validation/latest/concepts/conversion_table/
 _VALID_DICT_KEY_TYPES: list[type] = [
     str,
     int,
@@ -329,36 +333,118 @@ _VALID_DICT_KEY_TYPES_STR = (
     )
 )
 
+# NOTE: Dict keys must serialize to valid JSON object keys and parse back unambiguously.
+# This can't be delegated to a TypeAdapter because Syncwave's requirements are stricter:
+# e.g. `dict[int | str, int]` is accepted by Pydantic, but 1 and "1" collide on load.
+#
+# Also, Pydantic accepts more key types than it can round-trip (even before Syncwave's
+# stricter requirements). E.g. `Literal[1, "a"]` can be dumped just fine as `{"1": 0}`,
+# but `validate_json` then fails because the JSON string `"1"` is not converted to an
+# integer and doesn't match the `Literal` members. A similar issue occurs with enums.
+#
+# Here are the overall requirements to use these types as dict keys: `Literal` members
+# must all be strings (members of str-subclassed enums are allowed). `Enum` values must
+# all be strings (members of str-subclassed enums are also allowed). Enums subclassing
+# `str`, `int`, or `float` (e.g. `IntEnum`) are allowed. `Flag` are always rejected
+# because composite members (`A | B`) pass write validation but can't be deserialized.
 
-def _validate_key_tp(tp: Any) -> None:
-    # JSON keys are strings, so the type must serialize to str and parseable back.
+
+def _validate_dict_key_tp(tp: Any) -> None:
     origin = get_origin(tp) or tp
     args = get_args(tp)
-    tp_name = getattr(origin, "__qualname__", repr(origin))
 
-    if (annotated_inner := _handle_annotated(origin, args)) is not None:
-        _validate_key_tp(annotated_inner)
-        return
-    if (union_members := _handle_union(origin, args)) is not None:
-        [_validate_key_tp(member) for member in union_members]
-        return
-    if (literal_members := _handle_literal(origin, args)) is not None:
-        [_validate_key_tp(type(member)) for member in literal_members]
-        return
-
-    if isclass(origin) and issubclass(origin, Enum):
-        [_validate_key_tp(type(member.value)) for member in origin]
-        return
     if origin in _VALID_DICT_KEY_TYPES:
         return
 
+    if (annotated_inner := _handle_annotated(origin, args)) is not None:
+        _validate_dict_key_tp(annotated_inner)
+        return
+
+    tp_name = tp.__qualname__ if isclass(tp) and not args else str(tp)
+    err = f"Invalid dict key type `{tp_name}`: "
+
+    if _handle_union(origin, args) is not None:
+        raise TypeError(
+            err + "unions are always rejected when used as dict keys because a JSON "
+            "object key (which is always a string) cannot be deserialized "
+            "unambiguously back to one specific member of the union."
+        )
+
+    if (literal_members := _handle_literal(origin, args)) is not None:
+        if all(isinstance(m, str) for m in literal_members):  # all-string members
+            _check_collisions(literal_members, err)
+            return
+        raise TypeError(
+            err + "`Literal` may only have string members when used as dict keys "
+            "(members of a `StrEnum`, or of an `Enum` subclassing `str`, are "
+            "allowed); other member types, or mixed types, are not supported (yet)."
+        )
+
+    if isclass(origin) and issubclass(origin, Enum):
+        if issubclass(origin, Flag):
+            raise TypeError(
+                err + "flag enums are always rejected when used as dict keys because "
+                "composite members (e.g. `A | B`) cannot be restored from a JSON "
+                "object key."
+            )
+        if (
+            issubclass(origin, (str, int, float))  # `class E(str, Enum):`, `IntEnum`
+            or all(isinstance(m.value, str) for m in origin)  # all-string members
+        ):
+            _check_collisions(tuple(origin), err)
+            return
+        raise TypeError(
+            err + "enums must subclass `str`, `int`, or `float` (like `IntEnum`) when "
+            "used as dict keys. Plain enums may only be used if all member values "
+            "are strings (values taken from a different `StrEnum`, or from an `Enum` "
+            "subclassing `str`, count as strings)."
+        )
+
+    _validate_hashable(tp, err + "not hashable.")
+
     raise TypeError(
-        f"`{tp_name}` is not a valid dict key type. This is either because:\n"
-        "  1. it cannot be serialized to `str` (JSON keys are always strings),\n"
-        "  2. it cannot be deserialized from JSON back to the same type,\n"
-        "  3. it is not hashable.\n\n"
+        err + "a valid key type must:\n"
+        "  1. serialize to a valid JSON object key (JSON keys are always strings),\n"
+        "  2. deserialize from JSON back to the same value,\n"
+        "  3. be hashable.\n\n"
         f"The key types currently supported are: {_VALID_DICT_KEY_TYPES_STR}."
     )
+
+
+def _check_collisions(keys: tuple[Any, ...], err: str) -> None:
+    original_keys = keys
+    keys = tuple(dict.fromkeys(keys))
+
+    # Python keys collisions: `(1, 1.0, True)` all hash to `1`.
+    if len(original_keys) > len(keys):
+        pairs = [
+            f"{original_key!r} and {key!r}"
+            for original_key in original_keys
+            for key in keys
+            if original_key is not key and original_key == key
+        ]
+        raise TypeError(err + f"{', '.join(pairs)} collide as Python dict keys.")
+
+    # JSON key collisions: `("a", <E.A: 'a'>)` both serialize to `"a"`.
+    groups: dict[str, list[Any]] = {}
+    for key in keys:
+        try:
+            json_key = next(iter(from_json(to_json({key: None}))))
+        except PydanticSerializationError:
+            err += f"{key!r} cannot be serialized as a JSON object key."
+            raise TypeError(err) from None
+        except ValueError:
+            err += f"{key!r} cannot be deserialized from JSON."
+            raise TypeError(err) from None
+        groups.setdefault(json_key, []).append(key)
+
+    collisions = {jk: ks for jk, ks in groups.items() if len(ks) > 1}
+    if collisions:
+        parts = [
+            f"{', '.join(repr(k) for k in ks)} all serialize to {jk!r}"
+            for jk, ks in collisions.items()
+        ]
+        raise TypeError(err + f"{'; '.join(parts)}.")
 
 
 def _handle_annotated(origin: Any, args: tuple[Any, ...]) -> Any | None:
@@ -370,7 +456,7 @@ def _handle_annotated(origin: Any, args: tuple[Any, ...]) -> Any | None:
 
 
 def _handle_union(origin: Any, args: tuple[Any, ...]) -> tuple[Any, ...] | None:
-    if origin is not UnionType and origin is not Union:
+    if origin is not Union and origin is not UnionType:
         return None
     if not args:
         raise TypeError("`Union` must have at least one type argument.")
