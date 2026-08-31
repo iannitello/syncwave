@@ -9,6 +9,7 @@ from threading import Lock, Timer
 from typing import Any, Final
 
 from pydantic import TypeAdapter, ValidationError
+from pydantic_core import PydanticSerializationError
 
 from .watcher import watcher
 
@@ -134,7 +135,13 @@ class _IO:
             if path not in self._pending_writes:
                 return  # defensive check, should never happen
             pending = self._pending_writes.pop(path)
-        self._atomic_write(path, self._serialize(pending.value, pending.ta))
+        # Only this `_serialize` call is guarded: it runs on a timer thread, where the
+        # error is uncatchable and the traceback has no user frames naming the store.
+        try:
+            text = self._serialize(pending.value, pending.ta)
+        except PydanticSerializationError as e:
+            raise ValueError(f"Failed to serialize JSON for '{path}'.") from e
+        self._atomic_write(path, text)
 
     def _atomic_write(self, path: Path, text: str) -> None:
         fd, tmp_path = mkstemp(prefix=watcher.TMP_FILE_PREFIX, dir=path.parent)
