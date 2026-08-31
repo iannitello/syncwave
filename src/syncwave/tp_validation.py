@@ -24,7 +24,7 @@ import pydantic.dataclasses as py_dc
 from pydantic import ByteSize, RootModel, TypeAdapter
 from pydantic_core import PydanticSerializationError, from_json, to_json
 
-from .reactive import Context, ContextMap, Reactive, unreachable
+from .reactive import Context, Reactive, UnionCtx, unreachable
 from .sync_collection import (
     KT,
     VT,
@@ -111,7 +111,7 @@ def collection_wrap(
     raise ValueError(err)
 
 
-def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None:
+def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
     origin = get_origin(tp) or tp
     args = get_args(tp)
     tp_name = getattr(origin, "__qualname__", repr(origin))
@@ -122,7 +122,7 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | ContextMap | None
     if (union_members := _handle_union(origin, args)) is not None:
         ctxs = [drill_tp(member, _err_if_reactive) for member in union_members]
         ctx_map = {ctx.tp: ctx for ctx in ctxs if isinstance(ctx, Context)}
-        return ContextMap(ctx_map) if ctx_map else None
+        return UnionCtx(ctx_map) if ctx_map else None
 
     _handle_literal(origin, args)  # nothing to do, just to check there are args
 
@@ -168,7 +168,7 @@ def _parse_model(cls: type[SMS], *, as_sync_model: bool = False) -> SyncModelCtx
     if treat_as_sync_model and config.get("frozen", False):
         raise TypeError(f"`{cls.__qualname__}` is frozen and cannot be made reactive.")
 
-    fields_ctx: dict[str, Context | ContextMap] = {}
+    fields_ctx: dict[str, Context | UnionCtx] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
 
     for field_name, field in cls.__pydantic_fields__.items():
@@ -202,11 +202,11 @@ def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
         _validate_dict_key_tp(args[0])
         inner_ctx = drill_tp(args[1])
         key_type_adapter = TypeAdapter(args[0])
-        inner_type_adapter = TypeAdapter(args[1])
+        value_type_adapter = TypeAdapter(args[1])
     elif len(args) == 0:
         inner_ctx = None
         key_type_adapter = TypeAdapter(str)
-        inner_type_adapter = TypeAdapter(Any)
+        value_type_adapter = TypeAdapter(Any)
     else:
         raise TypeError("`SyncDict` requires 0 or 2 type arguments.")
 
@@ -214,7 +214,7 @@ def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
         tp=SyncDict,
         inner_ctx=inner_ctx,
         key_type_adapter=key_type_adapter,
-        inner_type_adapter=inner_type_adapter,
+        value_type_adapter=value_type_adapter,
     )
 
 
@@ -223,17 +223,17 @@ def _get_sync_list_ctx(tp: type[SyncList[VT]]) -> SyncListCtx[VT]:
 
     if len(args) == 1:
         inner_ctx = drill_tp(args[0])
-        inner_type_adapter = TypeAdapter(args[0])
+        item_type_adapter = TypeAdapter(args[0])
     elif len(args) == 0:
         inner_ctx = None
-        inner_type_adapter = TypeAdapter(Any)
+        item_type_adapter = TypeAdapter(Any)
     else:
         raise TypeError("`SyncList` requires 0 or 1 type argument.")
 
     return SyncListCtx(
         tp=SyncList,
         inner_ctx=inner_ctx,
-        inner_type_adapter=inner_type_adapter,
+        item_type_adapter=item_type_adapter,
     )
 
 
@@ -245,16 +245,16 @@ def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
         err = f"`SyncSet` must hold hashable elements, got `{tp_name}`."
         _validate_hashable(args[0], err)
         drill_tp(args[0], _err_if_reactive="`SyncSet` cannot hold reactive items.")
-        inner_type_adapter = TypeAdapter(args[0])
+        item_type_adapter = TypeAdapter(args[0])
     elif len(args) == 0:
-        inner_type_adapter = TypeAdapter(Any)
+        item_type_adapter = TypeAdapter(Any)
     else:
         raise TypeError("`SyncSet` requires 0 or 1 type argument.")
 
     return SyncSetCtx(
         tp=SyncSet,
         inner_ctx=None,
-        inner_type_adapter=inner_type_adapter,
+        item_type_adapter=item_type_adapter,
     )
 
 
