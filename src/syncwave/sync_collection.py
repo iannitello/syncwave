@@ -18,9 +18,9 @@ from pydantic_core import core_schema as cs
 from .ownership import detach, ingest
 from .reactive import (
     Context,
-    ContextMap,
     Reactive,
     StoreRef,
+    UnionCtx,
     atomic,
     is_reactive,
     mut_atomic,
@@ -72,9 +72,9 @@ class SyncCollection(Reactive):
 @dataclass(frozen=True)
 class SyncDictCtx(Context, Generic[KT, VT]):
     tp: type[SyncDict]
-    inner_ctx: Context | ContextMap | None
+    inner_ctx: Context | UnionCtx | None
     key_type_adapter: TypeAdapter[KT] | TypeAdapter[str]
-    inner_type_adapter: TypeAdapter[VT]
+    value_type_adapter: TypeAdapter[VT]
 
 
 class SyncDict(MutableMapping[KT, VT], Reactive):
@@ -150,20 +150,20 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
             pass
         # case 2: fixed reactive content type
         elif isinstance(inner_ctx, Context):
-            for item in self.__data.values():
-                item.__syncwave_init__(sref, inner_ctx)
+            for value in self.__data.values():
+                value.__syncwave_init__(sref, inner_ctx)
         # case 3: union content type
-        elif isinstance(inner_ctx, ContextMap):
-            for item in self.__data.values():
-                if is_reactive(item):
-                    item.__syncwave_init__(sref, inner_ctx[type(item)])
+        elif isinstance(inner_ctx, UnionCtx):
+            for value in self.__data.values():
+                if is_reactive(value):
+                    value.__syncwave_init__(sref, inner_ctx[type(value)])
         else:
             unreachable()
 
     def __syncwave_kill__(self) -> None:
-        for item in self.__data.values():
-            if is_reactive(item):
-                item.__syncwave_kill__()
+        for value in self.__data.values():
+            if is_reactive(value):
+                value.__syncwave_kill__()
         self.__data = {}
         self.__syncwave_live__ = False
 
@@ -178,56 +178,56 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
             old_keys, new_keys = set(self.__data.keys()), set(new.__data.keys())
             # items to add and update
             for key in new_keys:
-                old_item, new_item = self.__data.get(key), new.__data[key]
-                self.__setitem_reactive(key, old_item, new_item, inner_ctx)
+                old_value, new_value = self.__data.get(key), new.__data[key]
+                self.__setitem_reactive(key, old_value, new_value, inner_ctx)
             # items to remove
             for key in old_keys - new_keys:
-                old_item = self.__data.pop(key)
-                old_item.__syncwave_kill__()
+                old_value = self.__data.pop(key)
+                old_value.__syncwave_kill__()
         # case 3: union content type
-        elif isinstance(inner_ctx, ContextMap):
+        elif isinstance(inner_ctx, UnionCtx):
             old_keys, new_keys = set(self.__data.keys()), set(new.__data.keys())
             # items to add and update
             for key in new_keys:
-                old_item, new_item = self.__data.get(key), new.__data[key]
-                self.__setitem_union(key, old_item, new_item, inner_ctx)
+                old_value, new_value = self.__data.get(key), new.__data[key]
+                self.__setitem_union(key, old_value, new_value, inner_ctx)
             # items to remove
             for key in old_keys - new_keys:
-                old_item = self.__data.pop(key)
-                if is_reactive(old_item):
-                    old_item.__syncwave_kill__()
+                old_value = self.__data.pop(key)
+                if is_reactive(old_value):
+                    old_value.__syncwave_kill__()
         else:
             unreachable()
 
     @atomic
     def __getitem__(self, key: KT) -> VT:
-        return detach(self.__data[key], self.__syncwave_ctx__.inner_type_adapter)
+        return detach(self.__data[key], self.__syncwave_ctx__.value_type_adapter)
 
     @mut_atomic
     def __setitem__(self, key: KT, value: VT) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         key = ingest(key, self.__syncwave_ctx__.key_type_adapter)
-        new_item = ingest(value, self.__syncwave_ctx__.inner_type_adapter)
+        new_value = ingest(value, self.__syncwave_ctx__.value_type_adapter)
 
         # case 1: non-reactive content type
         if inner_ctx is None:
-            self.__data[key] = new_item
+            self.__data[key] = new_value
         # case 2: fixed reactive content type
         elif isinstance(inner_ctx, Context):
-            old_item = self.__data.get(key)
-            self.__setitem_reactive(key, old_item, new_item, inner_ctx)
+            old_value = self.__data.get(key)
+            self.__setitem_reactive(key, old_value, new_value, inner_ctx)
         # case 3: union content type
-        elif isinstance(inner_ctx, ContextMap):
-            old_item = self.__data.get(key)
-            self.__setitem_union(key, old_item, new_item, inner_ctx)
+        elif isinstance(inner_ctx, UnionCtx):
+            old_value = self.__data.get(key)
+            self.__setitem_union(key, old_value, new_value, inner_ctx)
         else:
             unreachable()
 
     @mut_atomic
     def __delitem__(self, key: KT) -> None:
-        old_item = self.__data.pop(key)
-        if is_reactive(old_item):
-            old_item.__syncwave_kill__()
+        old_value = self.__data.pop(key)
+        if is_reactive(old_value):
+            old_value.__syncwave_kill__()
 
     @atomic
     def __iter__(self) -> Iterator[KT]:
@@ -246,33 +246,33 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         status = "live" if self.__syncwave_live__ else "dead"
         return f"<SyncDict {self.__data!r} ({status})>"
 
-    def __setitem_reactive(self, k: KT, o: VT | None, n: VT, ctx: Context) -> None:
-        if o is not None:
-            o.__syncwave_update__(n)
+    def __setitem_reactive(self, k: KT, old: VT | None, new: VT, ctx: Context) -> None:
+        if old is not None:
+            old.__syncwave_update__(new)
         else:
-            n.__syncwave_init__(self.__syncwave_sref__, ctx)
-            self.__data[k] = n
+            new.__syncwave_init__(self.__syncwave_sref__, ctx)
+            self.__data[k] = new
 
-    def __setitem_union(self, k: KT, o: VT | None, n: VT, u_ctx: ContextMap) -> None:
-        old_is_reactive = is_reactive(o)
-        new_is_reactive = is_reactive(n)
-        same_type = type(o) is (new_type := type(n))
+    def __setitem_union(self, k: KT, old: VT | None, new: VT, u_ctx: UnionCtx) -> None:
+        old_is_reactive = is_reactive(old)
+        new_is_reactive = is_reactive(new)
+        same_type = type(old) is (new_type := type(new))
 
         if old_is_reactive and new_is_reactive and same_type:
-            o.__syncwave_update__(n)
+            old.__syncwave_update__(new)
         else:
             if old_is_reactive:
-                o.__syncwave_kill__()
+                old.__syncwave_kill__()
             if new_is_reactive:
-                n.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
-            self.__data[k] = n
+                new.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
+            self.__data[k] = new
 
 
 @dataclass(frozen=True)
 class SyncListCtx(Context, Generic[VT]):
     tp: type[SyncList]
-    inner_ctx: Context | ContextMap | None
-    inner_type_adapter: TypeAdapter[VT]
+    inner_ctx: Context | UnionCtx | None
+    item_type_adapter: TypeAdapter[VT]
 
 
 class SyncList(MutableSequence[VT], Reactive):
@@ -348,7 +348,7 @@ class SyncList(MutableSequence[VT], Reactive):
             for item in self.__data:
                 item.__syncwave_init__(sref, inner_ctx)
         # case 3: union content type
-        elif isinstance(inner_ctx, ContextMap):
+        elif isinstance(inner_ctx, UnionCtx):
             for item in self.__data:
                 if is_reactive(item):
                     item.__syncwave_init__(sref, inner_ctx[type(item)])
@@ -387,7 +387,7 @@ class SyncList(MutableSequence[VT], Reactive):
                     old_item = self.__data.pop()
                     old_item.__syncwave_kill__()
         # case 3: union content type
-        elif isinstance(inner_ctx, ContextMap):
+        elif isinstance(inner_ctx, UnionCtx):
             old_len, new_len = len(self.__data), len(new.__data)
             # items to update
             for i in range(min(old_len, new_len)):
@@ -414,13 +414,13 @@ class SyncList(MutableSequence[VT], Reactive):
     @atomic
     def __getitem__(self, index: SupportsIndex) -> VT:
         i = _get_index(index)
-        return detach(self.__data[i], self.__syncwave_ctx__.inner_type_adapter)
+        return detach(self.__data[i], self.__syncwave_ctx__.item_type_adapter)
 
     @mut_atomic
     def __setitem__(self, index: SupportsIndex, value: VT) -> None:
         i = _get_index(index)
         inner_ctx = self.__syncwave_ctx__.inner_ctx
-        new_item = ingest(value, self.__syncwave_ctx__.inner_type_adapter)
+        new_item = ingest(value, self.__syncwave_ctx__.item_type_adapter)
 
         # case 1: non-reactive content type
         if inner_ctx is None:
@@ -429,7 +429,7 @@ class SyncList(MutableSequence[VT], Reactive):
         elif isinstance(inner_ctx, Context):
             self.__data[i].__syncwave_update__(new_item)
         # case 3: union content type
-        elif isinstance(inner_ctx, ContextMap):
+        elif isinstance(inner_ctx, UnionCtx):
             old_item = self.__data[i]
             self.__setitem_union(i, old_item, new_item, inner_ctx)
         else:
@@ -455,7 +455,7 @@ class SyncList(MutableSequence[VT], Reactive):
     def insert(self, index: SupportsIndex, value: VT) -> None:  # noqa: D102
         i = _get_index(index)
         inner_ctx = self.__syncwave_ctx__.inner_ctx
-        new_item = ingest(value, self.__syncwave_ctx__.inner_type_adapter)
+        new_item = ingest(value, self.__syncwave_ctx__.item_type_adapter)
 
         if inner_ctx is None:
             self.__data.insert(i, new_item)
@@ -474,22 +474,22 @@ class SyncList(MutableSequence[VT], Reactive):
         status = "live" if self.__syncwave_live__ else "dead"
         return f"<SyncList {self.__data!r} ({status})>"
 
-    def __setitem_union(self, i: int, o: VT, n: VT, u_ctx: ContextMap) -> None:
-        old_is_reactive = is_reactive(o)
-        new_is_reactive = is_reactive(n)
-        same_type = type(o) is (new_type := type(n))
+    def __setitem_union(self, i: int, old: VT, new: VT, u_ctx: UnionCtx) -> None:
+        old_is_reactive = is_reactive(old)
+        new_is_reactive = is_reactive(new)
+        same_type = type(old) is (new_type := type(new))
 
         if old_is_reactive and new_is_reactive and same_type:
-            o.__syncwave_update__(n)
+            old.__syncwave_update__(new)
         else:
             if old_is_reactive:
-                o.__syncwave_kill__()
+                old.__syncwave_kill__()
             if new_is_reactive:
-                n.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
-            self.__data[i] = n
+                new.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
+            self.__data[i] = new
 
     def __roundtrip_copy(self) -> list[VT]:
-        ta = self.__syncwave_ctx__.inner_type_adapter
+        ta = self.__syncwave_ctx__.item_type_adapter
         return [ta.validate_python(ta.dump_python(item)) for item in self.__data]
 
 
@@ -507,7 +507,7 @@ def _get_index(index: Any) -> int:
 class SyncSetCtx(Context, Generic[VT]):
     tp: type[SyncSet]
     inner_ctx: None  # never holds reactive items
-    inner_type_adapter: TypeAdapter[VT]
+    item_type_adapter: TypeAdapter[VT]
 
 
 class SyncSet(MutableSet[VT], Reactive):
@@ -598,7 +598,7 @@ class SyncSet(MutableSet[VT], Reactive):
 
     @mut_atomic
     def add(self, value: VT) -> None:  # noqa: D102
-        new_item = ingest(value, self.__syncwave_ctx__.inner_type_adapter)
+        new_item = ingest(value, self.__syncwave_ctx__.item_type_adapter)
         self.__data.add(new_item)
 
     @mut_atomic

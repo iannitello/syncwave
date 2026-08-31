@@ -13,7 +13,7 @@ from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
 from .io import EmptyFile, EmptyFileType, io
 from .ownership import detach, ingest
-from .reactive import Context, ContextMap, Reactive, StoreRef, is_reactive, unreachable
+from .reactive import Context, Reactive, StoreRef, UnionCtx, is_reactive, unreachable
 from .sync_collection import SyncDict, SyncList
 from .sync_model import SyncModel, create_sync_model
 from .tp_validation import collection_wrap, drill_tp, str_guard, sync_model_guard
@@ -33,7 +33,7 @@ class StoreInfo:
     path: Path
     type_adapter: TypeAdapter
     sref: StoreRef
-    ctx: Context | ContextMap | None
+    ctx: Context | UnionCtx | None
 
 
 # Has to be thread-safe, this is a temporary solution just to start the implementation.
@@ -360,7 +360,7 @@ class Syncwave(MutableMapping[str, Any]):
                 unreachable()
             elif isinstance(ctx, Context):
                 value.__syncwave_init__(sref, ctx)
-            elif isinstance(ctx, ContextMap):
+            elif isinstance(ctx, UnionCtx):
                 value.__syncwave_init__(sref, ctx[type(value)])
             else:
                 unreachable()
@@ -407,7 +407,7 @@ class Syncwave(MutableMapping[str, Any]):
                 new_value.__syncwave_init__(sref, ctx)
                 self.__stores[key] = (new_value, store_info)
         # case 3: union content type
-        elif isinstance(ctx, ContextMap):
+        elif isinstance(ctx, UnionCtx):
             old_is_reactive = is_reactive(old_value)
             new_is_reactive = is_reactive(new_value)
             same_type = type(old_value) is (new_type := type(new_value))

@@ -14,10 +14,10 @@ from pydantic_core import core_schema as cs
 from .ownership import detach, ingest
 from .reactive import (
     Context,
-    ContextMap,
     DeadReferenceError,
     Reactive,
     StoreRef,
+    UnionCtx,
     is_reactive,
     mut_atomic,
     unreachable,
@@ -97,7 +97,7 @@ def is_sync_model_supported(cls: Any) -> TypeGuard[type[SMS]]:
 @dataclass(frozen=True)
 class SyncModelCtx(Context):
     tp: type[SyncModel]
-    fields_ctx: dict[str, Context | ContextMap]
+    fields_ctx: dict[str, Context | UnionCtx]
     fields_type_adapter: dict[str, TypeAdapter[Any]]
 
 
@@ -180,7 +180,7 @@ class SyncModel(Reactive):
                 # if `field_ctx` is a Context, `value` can't be None
                 value.__syncwave_init__(sref, field_ctx)  # ty: ignore[unresolved-attribute]
             # case 3: union content type
-            elif isinstance(field_ctx, ContextMap):
+            elif isinstance(field_ctx, UnionCtx):
                 if is_reactive(value):
                     value.__syncwave_init__(sref, field_ctx[type(value)])
             else:
@@ -210,7 +210,7 @@ class SyncModel(Reactive):
                 old_value.__syncwave_update__(new_value)
                 o_setattr(self, name, old_value)  # in case there's a hook to trigger
             # case 3: union content type
-            elif isinstance(field_ctx, ContextMap):
+            elif isinstance(field_ctx, UnionCtx):
                 old_value = self.__dict__.get(name)
                 self.__setattr_union(name, old_value, new_value, field_ctx)
             else:
@@ -253,7 +253,7 @@ class SyncModel(Reactive):
             old_value.__syncwave_update__(new_value)
             o_setattr(self, name, old_value)
         # case 3: union content type
-        elif isinstance(field_ctx, ContextMap):
+        elif isinstance(field_ctx, UnionCtx):
             old_value = self.__dict__.get(name)
             self.__setattr_union(name, old_value, new_value, field_ctx)
         else:
@@ -280,22 +280,22 @@ class SyncModel(Reactive):
             return f"{type(self).__qualname__}()"
         return self.__syncwave_original_cls__.__repr__(self)  # ty: ignore[invalid-argument-type]
 
-    def __setattr_union(self, f: str, o: Any, n: Any, u_ctx: ContextMap) -> None:
+    def __setattr_union(self, field: str, old: Any, new: Any, u_ctx: UnionCtx) -> None:
         o_setattr = self.__syncwave_original_cls__.__setattr__
 
-        old_is_reactive = is_reactive(o)
-        new_is_reactive = is_reactive(n)
-        same_type = type(o) is (new_type := type(n))
+        old_is_reactive = is_reactive(old)
+        new_is_reactive = is_reactive(new)
+        same_type = type(old) is (new_type := type(new))
 
         if old_is_reactive and new_is_reactive and same_type:
-            o.__syncwave_update__(n)
-            o_setattr(self, f, o)  # in case there's a hook to trigger
+            old.__syncwave_update__(new)
+            o_setattr(self, field, old)  # in case there's a hook to trigger
         else:
             if old_is_reactive:
-                o.__syncwave_kill__()
+                old.__syncwave_kill__()
             if new_is_reactive:
-                n.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
-            o_setattr(self, f, n)
+                new.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
+            o_setattr(self, field, new)
 
 
 def create_sync_model(cls: type[SMS], *, rename: bool | str = True) -> type[SyncModel]:

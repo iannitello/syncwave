@@ -22,7 +22,7 @@ class Context:
     tp: type[Reactive]
 
 
-class ContextMap(dict[type["Reactive"], Context]): ...
+class UnionCtx(dict[type["Reactive"], Context]): ...
 
 
 CtxSubCls = TypeVar("CtxSubCls", bound=Context)
