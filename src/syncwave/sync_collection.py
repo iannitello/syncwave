@@ -452,7 +452,7 @@ class SyncList(MutableSequence[VT], Reactive):
         return len(self.__data)
 
     @mut_atomic
-    def insert(self, index: SupportsIndex, value: VT) -> None:  # noqa: D102
+    def insert(self, index: SupportsIndex, value: VT) -> None:  # ruff: ignore[undocumented-public-method]
         i = _get_index(index)
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         new_item = ingest(value, self.__syncwave_ctx__.item_type_adapter)
@@ -596,12 +596,12 @@ class SyncSet(MutableSet[VT], Reactive):
         return len(self.__data)
 
     @mut_atomic
-    def add(self, value: VT) -> None:  # noqa: D102
+    def add(self, value: VT) -> None:  # ruff: ignore[undocumented-public-method]
         new_item = ingest(value, self.__syncwave_ctx__.item_type_adapter)
         self.__data.add(new_item)
 
     @mut_atomic
-    def discard(self, value: VT) -> None:  # noqa: D102
+    def discard(self, value: VT) -> None:  # ruff: ignore[undocumented-public-method]
         if value in self.__data:
             self.__data.discard(value)
 

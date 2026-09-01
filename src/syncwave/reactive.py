@@ -69,7 +69,7 @@ class Reactive(metaclass=ABCMeta):
     __syncwave_sref__: StoreRef
     __syncwave_ctx__: Context
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:  # noqa: D102
+    def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:  # ruff: ignore[undocumented-public-method]
         raise TypeError(
             f"`{cls.__qualname__}` cannot be instantiated directly. "
             "Reactive instances are created automatically when a value enters a store."
@@ -220,7 +220,7 @@ class DeadReferenceError(RuntimeError):
 
     """
 
-    def __init__(self, *, reference: Reactive) -> None:  # noqa: D107
+    def __init__(self, *, reference: Reactive) -> None:  # ruff: ignore[undocumented-public-init]
         message = f"Operation attempted on a dead reference: {reference!r}"
         super().__init__(message)
 

@@ -54,20 +54,30 @@ select = [
     "RUF",  # ruff
     "UP",   # pyupgrade
 ]
-extend-select = ["D401","D404","D413"]
+preview = true
+extend-select = [
+    "non-imperative-mood",  # D401
+    "docstring-starts-with-this",  # D404
+    "missing-blank-line-after-last-section",  # D413
+]
 ignore = [
-    "D105",    # missing docstring in magic method
-    "ANN401",  # typing.Any disallowed
+    "undocumented-magic-method",  # D105
+    "any-type",  # ANN401
 ]
 unfixable = [
-    "F401"  # disable fix for unused imports
+    "unused-import",  # F401
 ]
 pydocstyle = { convention = "google" }
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["I002", "D415"]
+"__init__.py" = [
+    "missing-required-import",  # I002
+    "missing-terminal-punctuation",  # D415
+]
 "!src/**.py" = ["D"]
-"!src/__init__.py" = ["D100"]
+"!src/__init__.py" = [
+    "undocumented-public-module",  # D100
+]
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
