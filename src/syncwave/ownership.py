@@ -10,7 +10,7 @@ from typing import Any, Final
 
 from pydantic import TypeAdapter
 
-from .reactive import DeadReferenceError, is_reactive
+from .reactive import DeadReferenceError, State, is_reactive
 
 __all__ = []
 
@@ -28,9 +28,6 @@ def ingest(value: Any, ta: TypeAdapter) -> Any:
     validated = ta.validate_python(value)
     if type(validated) in _IMMUTABLE_TYPES:
         return validated
-    if is_reactive(validated):
-        # uninitialized reactive objects are treated as live
-        live = validated.__dict__.get("__syncwave_live__", True)
-        if not live:
-            raise DeadReferenceError(reference=validated)
+    if is_reactive(validated) and validated.__syncwave_state__ is State.DEAD:
+        raise DeadReferenceError(reference=validated)
     return ta.validate_json(ta.dump_json(validated))

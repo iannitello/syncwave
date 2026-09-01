@@ -16,6 +16,7 @@ from .reactive import (
     Context,
     DeadReferenceError,
     Reactive,
+    State,
     StoreRef,
     UnionCtx,
     is_reactive,
@@ -167,9 +168,9 @@ class SyncModel(Reactive):
         )
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncModelCtx) -> None:
+        object.__setattr__(self, "__syncwave_state__", State.LIVE)
         object.__setattr__(self, "__syncwave_sref__", sref)
         object.__setattr__(self, "__syncwave_ctx__", ctx)
-        object.__setattr__(self, "__syncwave_live__", True)
 
         for name, field_ctx in ctx.fields_ctx.items():
             value = self.__dict__.get(name)
@@ -191,7 +192,7 @@ class SyncModel(Reactive):
             value = self.__dict__.get(name)
             if is_reactive(value):
                 value.__syncwave_kill__()
-        object.__setattr__(self, "__syncwave_live__", False)
+        object.__setattr__(self, "__syncwave_state__", State.DEAD)
 
     def __syncwave_update__(self, new: Self) -> None:
         ctx = self.__syncwave_ctx__
@@ -222,7 +223,7 @@ class SyncModel(Reactive):
         if ctx is not None:
             field_ta = ctx.fields_type_adapter.get(name)
             if field_ta is not None:
-                if not __dict__["__syncwave_live__"]:
+                if __dict__["__syncwave_state__"] is State.DEAD:
                     raise DeadReferenceError(reference=self)
                 value = __dict__.get(name, _MISSING)
                 if value is not _MISSING:
