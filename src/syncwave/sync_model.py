@@ -272,14 +272,11 @@ class SyncModel(Reactive):
         o_delattr(self, name)
 
     def __str__(self) -> str:
-        if not self.__syncwave_live__:
-            return f"{type(self).__qualname__}()"
         return self.__syncwave_original_cls__.__str__(self)  # ty: ignore[invalid-argument-type]
 
     def __repr__(self) -> str:
-        if not self.__syncwave_live__:
-            return f"{type(self).__qualname__}()"
-        return self.__syncwave_original_cls__.__repr__(self)  # ty: ignore[invalid-argument-type]
+        state = self.__syncwave_state__.value
+        return f"<{self.__syncwave_original_cls__.__repr__(self)} ({state})>"  # ty: ignore[invalid-argument-type]
 
     def __setattr_union(self, field: str, old: Any, new: Any, u_ctx: UnionCtx) -> None:
         o_setattr = self.__syncwave_original_cls__.__setattr__

@@ -239,8 +239,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         return len(self.__data)
 
     def __str__(self) -> str:
-        items = ", ".join(f"{k!r}: {v}" for k, v in self.__data.items())
-        return "{" + items + "}"
+        return str(self.__data)
 
     def __repr__(self) -> str:
         return f"<SyncDict {self.__data!r} ({self.__syncwave_state__.value})>"
@@ -465,8 +464,7 @@ class SyncList(MutableSequence[VT], Reactive):
         self.__syncwave_update__(self_copy)
 
     def __str__(self) -> str:
-        items = ", ".join(str(item) for item in self.__data)
-        return "[" + items + "]"
+        return str(self.__data)
 
     def __repr__(self) -> str:
         return f"<SyncList {self.__data!r} ({self.__syncwave_state__.value})>"
@@ -603,10 +601,7 @@ class SyncSet(MutableSet[VT], Reactive):
             self.__data.discard(value)
 
     def __str__(self) -> str:
-        if not self.__data:
-            return "SyncSet()"
-        items = ", ".join(str(item) for item in self.__data)
-        return "{" + items + "}"
+        return str(self.__data)
 
     def __repr__(self) -> str:
         return f"<SyncSet {self.__data!r} ({self.__syncwave_state__.value})>"
