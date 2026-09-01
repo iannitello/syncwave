@@ -19,6 +19,7 @@ from .ownership import detach, ingest
 from .reactive import (
     Context,
     Reactive,
+    State,
     StoreRef,
     UnionCtx,
     atomic,
@@ -140,9 +141,9 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         )
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncDictCtx[KT, VT]) -> None:
+        self.__syncwave_state__ = State.LIVE
         self.__syncwave_sref__ = sref
         self.__syncwave_ctx__ = ctx
-        self.__syncwave_live__ = True
 
         inner_ctx = ctx.inner_ctx
         # case 1: non-reactive content type
@@ -165,7 +166,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
             if is_reactive(value):
                 value.__syncwave_kill__()
         self.__data = {}
-        self.__syncwave_live__ = False
+        self.__syncwave_state__ = State.DEAD
 
     def __syncwave_update__(self, new: Self) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
@@ -243,8 +244,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         return "{" + items + "}"
 
     def __repr__(self) -> str:
-        status = "live" if self.__syncwave_live__ else "dead"
-        return f"<SyncDict {self.__data!r} ({status})>"
+        return f"<SyncDict {self.__data!r} ({self.__syncwave_state__.value})>"
 
     def __setitem_reactive(self, k: KT, old: VT | None, new: VT, ctx: Context) -> None:
         if old is not None:
@@ -335,9 +335,9 @@ class SyncList(MutableSequence[VT], Reactive):
         )
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncListCtx[VT]) -> None:
+        self.__syncwave_state__ = State.LIVE
         self.__syncwave_sref__ = sref
         self.__syncwave_ctx__ = ctx
-        self.__syncwave_live__ = True
 
         inner_ctx = ctx.inner_ctx
         # case 1: non-reactive content type
@@ -360,7 +360,7 @@ class SyncList(MutableSequence[VT], Reactive):
             if is_reactive(item):
                 item.__syncwave_kill__()
         self.__data = []
-        self.__syncwave_live__ = False
+        self.__syncwave_state__ = State.DEAD
 
     def __syncwave_update__(self, new: Self) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
@@ -471,8 +471,7 @@ class SyncList(MutableSequence[VT], Reactive):
         return "[" + items + "]"
 
     def __repr__(self) -> str:
-        status = "live" if self.__syncwave_live__ else "dead"
-        return f"<SyncList {self.__data!r} ({status})>"
+        return f"<SyncList {self.__data!r} ({self.__syncwave_state__.value})>"
 
     def __setitem_union(self, i: int, old: VT, new: VT, u_ctx: UnionCtx) -> None:
         old_is_reactive = is_reactive(old)
@@ -570,15 +569,15 @@ class SyncSet(MutableSet[VT], Reactive):
         )
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncSetCtx[VT]) -> None:
+        self.__syncwave_state__ = State.LIVE
         self.__syncwave_sref__ = sref
         self.__syncwave_ctx__ = ctx
-        self.__syncwave_live__ = True
         # no need to loop through items since set can't hold reactive items
 
     def __syncwave_kill__(self) -> None:
         # no need to loop through items since set can't hold reactive items
         self.__data = set()
-        self.__syncwave_live__ = False
+        self.__syncwave_state__ = State.DEAD
 
     def __syncwave_update__(self, new: Self) -> None:
         self.__data = new.__data
@@ -613,8 +612,7 @@ class SyncSet(MutableSet[VT], Reactive):
         return "{" + items + "}"
 
     def __repr__(self) -> str:
-        status = "live" if self.__syncwave_live__ else "dead"
-        return f"<SyncSet {self.__data!r} ({status})>"
+        return f"<SyncSet {self.__data!r} ({self.__syncwave_state__.value})>"
 
 
 SyncCollection.register(SyncDict)

@@ -3,12 +3,19 @@ from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from functools import wraps
 from threading import RLock
 from typing import Any, NoReturn, ParamSpec, TypeVar, final
 from typing_extensions import TypeIs
 
 __all__ = ["DeadReferenceError", "Reactive"]
+
+
+class State(str, Enum):
+    INERT = "inert"
+    LIVE = "live"
+    DEAD = "dead"
 
 
 @dataclass(frozen=True)
@@ -58,9 +65,9 @@ class Reactive(metaclass=ABCMeta):
     """
 
     __syncwave_reactive__ = True
+    __syncwave_state__: State = State.INERT
     __syncwave_sref__: StoreRef
     __syncwave_ctx__: Context
-    __syncwave_live__: bool
 
     def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:  # noqa: D102
         raise TypeError(
@@ -71,11 +78,13 @@ class Reactive(metaclass=ABCMeta):
     @final
     @property
     def sync_live(self) -> bool:
-        """Whether this reactive object is still connected to its store.
+        """Whether this reactive object is connected to a store and syncing.
 
-        Returns `False` once the object has been removed or replaced in its parent
-        store, for example because a key was deleted from a `SyncDict`. After that, any
-        operation on the object raises `DeadReferenceError`.
+        Returns `False` in two cases. The object is dead: it has been removed or
+        replaced in its parent store, for example because a key was deleted from a
+        `SyncDict`, and any further operation on it raises `DeadReferenceError`. Or
+        the object is inert: it never entered a store, and it behaves like its plain
+        counterpart until a store ingests a copy of it.
 
         Example:
         ```python
@@ -105,7 +114,7 @@ class Reactive(metaclass=ABCMeta):
             [Reactive](https://syncwave.dev/usage/syncwave/)
 
         """
-        return self.__syncwave_live__  # atomic, no need to lock
+        return self.__syncwave_state__ is State.LIVE  # atomic, no need to lock
 
     @abstractmethod
     def __syncwave_init__(self, sref: StoreRef, ctx: CtxSubCls) -> None:
@@ -134,10 +143,19 @@ R = TypeVar("R")
 def atomic(fn: Callable[P, R]) -> Callable[P, R]:
     @wraps(fn)
     def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> R:
-        with self.__syncwave_sref__.lock:
-            if not self.__syncwave_live__:
+        try:
+            sref = self.__syncwave_sref__
+        except AttributeError:
+            if self.__syncwave_state__ is State.INERT:
+                return fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+            unreachable()  # if can't get sref while not inert
+
+        with sref.lock:
+            if self.__syncwave_state__ is State.DEAD:
                 raise DeadReferenceError(reference=self)
-            return fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+            if self.__syncwave_state__ is State.LIVE:
+                return fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+            unreachable()  # if can get sref while inert
 
     return wrapper  # ty: ignore[invalid-return-type]
 
@@ -145,13 +163,24 @@ def atomic(fn: Callable[P, R]) -> Callable[P, R]:
 def mut_atomic(fn: Callable[P, R]) -> Callable[P, None]:
     @wraps(fn)
     def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> None:
-        with self.__syncwave_sref__.lock:
-            if not self.__syncwave_live__:
+        try:
+            sref = self.__syncwave_sref__
+        except AttributeError:
+            if self.__syncwave_state__ is State.INERT:
+                result = fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+                if result is None:
+                    return
+            unreachable()  # if can't get sref while not inert, or if there's a result
+
+        with sref.lock:
+            if self.__syncwave_state__ is State.DEAD:
                 raise DeadReferenceError(reference=self)
-            result = fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
-            if result is not None:
-                unreachable()
-            self.__syncwave_sref__.on_change()
+            if self.__syncwave_state__ is State.LIVE:
+                result = fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+                if result is None:
+                    sref.on_change()
+                    return
+            unreachable()  # if can get sref while inert, or if there's a result
 
     return wrapper  # ty: ignore[invalid-return-type]
 
