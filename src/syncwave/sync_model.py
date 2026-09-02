@@ -20,7 +20,7 @@ from .reactive import (
     StoreRef,
     UnionCtx,
     is_reactive,
-    mut_atomic,
+    mut_reactive_op,
     unreachable,
 )
 
@@ -93,6 +93,14 @@ def is_sync_model_supported(cls: Any) -> TypeGuard[type[SMS]]:
         return False
     # RootModel is a subclass of BaseModel
     return issubclass(cls, BaseModel) or is_pydantic_dataclass(cls)
+
+
+def _og_setattr(self: SyncModel, name: str, value: Any) -> None:
+    self.__syncwave_original_cls__.__setattr__(self, name, value)
+
+
+def _og_delattr(self: SyncModel, name: str) -> None:
+    self.__syncwave_original_cls__.__delattr__(self, name)
 
 
 @dataclass(frozen=True)
@@ -196,7 +204,6 @@ class SyncModel(Reactive):
 
     def __syncwave_update__(self, new: Self) -> None:
         ctx = self.__syncwave_ctx__
-        o_setattr = self.__syncwave_original_cls__.__setattr__
 
         for name in ctx.fields_type_adapter:
             field_ctx = ctx.fields_ctx.get(name)
@@ -204,12 +211,12 @@ class SyncModel(Reactive):
 
             # case 1: non-reactive content type
             if field_ctx is None:
-                o_setattr(self, name, new_value)
+                _og_setattr(self, name, new_value)
             # case 2: fixed reactive content type
             elif isinstance(field_ctx, Context):
                 old_value = self.__dict__[name]  # can't be None
                 old_value.__syncwave_update__(new_value)
-                o_setattr(self, name, old_value)  # in case there's a hook to trigger
+                _og_setattr(self, name, old_value)  # in case there's a hook to trigger
             # case 3: union content type
             elif isinstance(field_ctx, UnionCtx):
                 old_value = self.__dict__.get(name)
@@ -230,16 +237,15 @@ class SyncModel(Reactive):
                     return detach(value, field_ta)
         return object.__getattribute__(self, name)
 
-    @mut_atomic
+    @mut_reactive_op(inert_fn=_og_setattr)
     def __setattr__(self, name: str, new_value: Any) -> None:
         ctx = self.__syncwave_ctx__
-        o_setattr = self.__syncwave_original_cls__.__setattr__
 
         field_ta = ctx.fields_type_adapter.get(name)
         # case for a non-model field
         if field_ta is None:
             # will still trigger `on_change` even though the field is not tracked
-            o_setattr(self, name, new_value)
+            _og_setattr(self, name, new_value)
             return
 
         field_ctx = ctx.fields_ctx.get(name)
@@ -247,12 +253,12 @@ class SyncModel(Reactive):
 
         # case 1: non-reactive content type
         if field_ctx is None:
-            o_setattr(self, name, new_value)
+            _og_setattr(self, name, new_value)
         # case 2: fixed reactive content type
         elif isinstance(field_ctx, Context):
             old_value = self.__dict__[name]  # can't be None
             old_value.__syncwave_update__(new_value)
-            o_setattr(self, name, old_value)
+            _og_setattr(self, name, old_value)
         # case 3: union content type
         elif isinstance(field_ctx, UnionCtx):
             old_value = self.__dict__.get(name)
@@ -260,7 +266,7 @@ class SyncModel(Reactive):
         else:
             unreachable()
 
-    @mut_atomic
+    @mut_reactive_op(inert_fn=_og_delattr)
     def __delattr__(self, name: str) -> None:
         ctx = self.__syncwave_ctx__
         if name in ctx.fields_type_adapter:
@@ -268,8 +274,7 @@ class SyncModel(Reactive):
                 f"Cannot delete tracked field `{name}` to keep the model in sync. "
                 "Set it to `None` instead (if the field type allows it)."
             )
-        o_delattr = self.__syncwave_original_cls__.__delattr__
-        o_delattr(self, name)
+        _og_delattr(self, name)
 
     def __str__(self) -> str:
         return self.__syncwave_original_cls__.__str__(self)  # ty: ignore[invalid-argument-type]
@@ -279,21 +284,19 @@ class SyncModel(Reactive):
         return f"<{self.__syncwave_original_cls__.__repr__(self)} ({state})>"  # ty: ignore[invalid-argument-type]
 
     def __setattr_union(self, field: str, old: Any, new: Any, u_ctx: UnionCtx) -> None:
-        o_setattr = self.__syncwave_original_cls__.__setattr__
-
         old_is_reactive = is_reactive(old)
         new_is_reactive = is_reactive(new)
         same_type = type(old) is (new_type := type(new))
 
         if old_is_reactive and new_is_reactive and same_type:
             old.__syncwave_update__(new)
-            o_setattr(self, field, old)  # in case there's a hook to trigger
+            _og_setattr(self, field, old)  # in case there's a hook to trigger
         else:
             if old_is_reactive:
                 old.__syncwave_kill__()
             if new_is_reactive:
                 new.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
-            o_setattr(self, field, new)
+            _og_setattr(self, field, new)
 
 
 def create_sync_model(cls: type[SMS], *, rename: bool | str = True) -> type[SyncModel]:

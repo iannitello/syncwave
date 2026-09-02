@@ -22,9 +22,9 @@ from .reactive import (
     State,
     StoreRef,
     UnionCtx,
-    atomic,
     is_reactive,
-    mut_atomic,
+    mut_reactive_op,
+    reactive_op,
     unreachable,
 )
 
@@ -114,6 +114,9 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
     __syncwave_ctx__: SyncDictCtx[KT, VT]
     __data: dict[KT, VT]
 
+    def __data_unwrap(self) -> dict[KT, VT]:
+        return self.__data
+
     @classmethod
     def __new(cls, data: dict[KT, VT]) -> Self:
         self = object.__new__(cls)
@@ -199,11 +202,11 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         else:
             unreachable()
 
-    @atomic
+    @reactive_op(inert_fn=dict.__getitem__, unwrap=__data_unwrap)
     def __getitem__(self, key: KT) -> VT:
         return detach(self.__data[key], self.__syncwave_ctx__.value_type_adapter)
 
-    @mut_atomic
+    @mut_reactive_op(inert_fn=dict.__setitem__, unwrap=__data_unwrap)
     def __setitem__(self, key: KT, value: VT) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         key = ingest(key, self.__syncwave_ctx__.key_type_adapter)
@@ -223,18 +226,18 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         else:
             unreachable()
 
-    @mut_atomic
+    @mut_reactive_op(inert_fn=dict.__delitem__, unwrap=__data_unwrap)
     def __delitem__(self, key: KT) -> None:
         old_value = self.__data.pop(key)
         if is_reactive(old_value):
             old_value.__syncwave_kill__()
 
-    @atomic
+    @reactive_op(inert_fn=dict.__iter__, unwrap=__data_unwrap)
     def __iter__(self) -> Iterator[KT]:
         # first convert to a list so the iterator is over a frozen object
         return iter(list(self.__data))
 
-    @atomic
+    @reactive_op(inert_fn=dict.__len__, unwrap=__data_unwrap)
     def __len__(self) -> int:
         return len(self.__data)
 
@@ -306,6 +309,9 @@ class SyncList(MutableSequence[VT], Reactive):
 
     __syncwave_ctx__: SyncListCtx[VT]
     __data: list[VT]
+
+    def __data_unwrap(self) -> list[VT]:
+        return self.__data
 
     @classmethod
     def __new(cls, data: list[VT]) -> Self:
@@ -408,12 +414,12 @@ class SyncList(MutableSequence[VT], Reactive):
         else:
             unreachable()
 
-    @atomic
+    @reactive_op(inert_fn=list.__getitem__, unwrap=__data_unwrap)
     def __getitem__(self, index: SupportsIndex) -> VT:
         i = _get_index(index)
         return detach(self.__data[i], self.__syncwave_ctx__.item_type_adapter)
 
-    @mut_atomic
+    @mut_reactive_op(inert_fn=list.__setitem__, unwrap=__data_unwrap)
     def __setitem__(self, index: SupportsIndex, value: VT) -> None:
         i = _get_index(index)
         inner_ctx = self.__syncwave_ctx__.inner_ctx
@@ -432,7 +438,7 @@ class SyncList(MutableSequence[VT], Reactive):
         else:
             unreachable()
 
-    @mut_atomic
+    @mut_reactive_op(inert_fn=list.__delitem__, unwrap=__data_unwrap)
     def __delitem__(self, index: SupportsIndex) -> None:
         i = _get_index(index)
         if self.__syncwave_ctx__.inner_ctx is None:
@@ -444,11 +450,11 @@ class SyncList(MutableSequence[VT], Reactive):
         self_copy = self.__new(data_copy)
         self.__syncwave_update__(self_copy)
 
-    @atomic
+    @reactive_op(inert_fn=list.__len__, unwrap=__data_unwrap)
     def __len__(self) -> int:
         return len(self.__data)
 
-    @mut_atomic
+    @mut_reactive_op(inert_fn=list.insert, unwrap=__data_unwrap)
     def insert(self, index: SupportsIndex, value: VT) -> None:  # ruff: ignore[undocumented-public-method]
         i = _get_index(index)
         inner_ctx = self.__syncwave_ctx__.inner_ctx
@@ -539,6 +545,9 @@ class SyncSet(MutableSet[VT], Reactive):
     __syncwave_ctx__: SyncSetCtx[VT]
     __data: set[VT]
 
+    def __data_unwrap(self) -> set[VT]:
+        return self.__data
+
     @classmethod
     def __new(cls, data: set[VT]) -> Self:
         self = object.__new__(cls)
@@ -577,25 +586,25 @@ class SyncSet(MutableSet[VT], Reactive):
     def __syncwave_update__(self, new: Self) -> None:
         self.__data = new.__data
 
-    @atomic
+    @reactive_op(inert_fn=set.__contains__, unwrap=__data_unwrap)
     def __contains__(self, value: object) -> bool:
         return value in self.__data
 
-    @atomic
+    @reactive_op(inert_fn=set.__iter__, unwrap=__data_unwrap)
     def __iter__(self) -> Iterator[VT]:
         # first convert to a list so the iterator is over a frozen object
         return iter(list(self.__data))
 
-    @atomic
+    @reactive_op(inert_fn=set.__len__, unwrap=__data_unwrap)
     def __len__(self) -> int:
         return len(self.__data)
 
-    @mut_atomic
+    @mut_reactive_op(inert_fn=set.add, unwrap=__data_unwrap)
     def add(self, value: VT) -> None:  # ruff: ignore[undocumented-public-method]
         new_item = ingest(value, self.__syncwave_ctx__.item_type_adapter)
         self.__data.add(new_item)
 
-    @mut_atomic
+    @mut_reactive_op(inert_fn=set.discard, unwrap=__data_unwrap)
     def discard(self, value: VT) -> None:  # ruff: ignore[undocumented-public-method]
         if value in self.__data:
             self.__data.discard(value)
