@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable as F
 from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
@@ -9,7 +9,13 @@ from threading import RLock
 from typing import Any, NoReturn, ParamSpec, TypeVar, final
 from typing_extensions import TypeIs
 
+from pydantic import SerializerFunctionWrapHandler as Handler
+
 __all__ = ["DeadReferenceError", "Reactive"]
+
+
+C = TypeVar("C", bound="Context")
+R = TypeVar("R", bound="Reactive")
 
 
 class State(str, Enum):
@@ -21,7 +27,7 @@ class State(str, Enum):
 @dataclass(frozen=True)
 class StoreRef:
     lock: RLock
-    on_change: Callable[[], None]
+    on_change: F[[], None]
 
 
 @dataclass(frozen=True)
@@ -30,10 +36,6 @@ class Context:
 
 
 class UnionCtx(dict[type["Reactive"], Context]): ...
-
-
-CtxSubCls = TypeVar("CtxSubCls", bound=Context)
-ReactiveSubCls = TypeVar("ReactiveSubCls", bound="Reactive")
 
 
 class Reactive(metaclass=ABCMeta):
@@ -117,7 +119,7 @@ class Reactive(metaclass=ABCMeta):
         return self.__syncwave_state__ is State.LIVE  # atomic, no need to lock
 
     @abstractmethod
-    def __syncwave_init__(self, sref: StoreRef, ctx: CtxSubCls) -> None:
+    def __syncwave_init__(self, sref: StoreRef, ctx: C) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -125,7 +127,7 @@ class Reactive(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    def __syncwave_update__(self, new: ReactiveSubCls) -> None:
+    def __syncwave_update__(self, new: R) -> None:
         raise NotImplementedError
 
 
@@ -136,15 +138,18 @@ def is_reactive(value: Any) -> TypeIs[Reactive]:
     return getattr(type(value), "__syncwave_reactive__", False)
 
 
-C = Callable
-P = ParamSpec("P")
-R = TypeVar("R")
+X = ParamSpec("X")
+Y = TypeVar("Y")
 
 
-def reactive_op(inert_fn: C, unwrap: C = lambda _: _) -> C[[C[P, R]], C[P, R]]:
-    def decorator(fn: C[P, R]) -> C[P, R]:
+def nop(value: Any) -> Any:
+    return value
+
+
+def reactive_op(inert_fn: F, unwrap: F[[R], Any] = nop) -> F[[F[X, Y]], F[X, Y]]:
+    def decorator(fn: F[X, Y]) -> F[X, Y]:
         @wraps(fn)
-        def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> R:
+        def wrapper(self: R, *args: X.args, **kwargs: X.kwargs) -> Y:
             try:
                 sref = self.__syncwave_sref__
             except AttributeError:
@@ -164,10 +169,10 @@ def reactive_op(inert_fn: C, unwrap: C = lambda _: _) -> C[[C[P, R]], C[P, R]]:
     return decorator
 
 
-def mut_reactive_op(inert_fn: C, unwrap: C = lambda _: _) -> C[[C[P, R]], C[P, None]]:
-    def decorator(fn: C[P, R]) -> C[P, None]:
+def mut_reactive_op(inert_fn: F, unwrap: F[[R], Any] = nop) -> F[[F[X, Y]], F[X, None]]:
+    def decorator(fn: F[X, Y]) -> F[X, None]:
         @wraps(fn)
-        def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> None:
+        def wrapper(self: R, *args: X.args, **kwargs: X.kwargs) -> None:
             try:
                 sref = self.__syncwave_sref__
             except AttributeError:
@@ -189,6 +194,17 @@ def mut_reactive_op(inert_fn: C, unwrap: C = lambda _: _) -> C[[C[P, R]], C[P, N
         return wrapper  # ty: ignore[invalid-return-type]
 
     return decorator
+
+
+def ser_factory(unwrap: F[[R], Any] = nop) -> F[[Any, Handler], Any]:
+    def serialize(value: Any, handler: Handler) -> Any:
+        if is_reactive(value):
+            if value.__syncwave_state__ is State.DEAD:
+                raise DeadReferenceError(reference=value)
+            return handler(unwrap(value))
+        return handler(value)
+
+    return serialize
 
 
 class DeadReferenceError(RuntimeError):
