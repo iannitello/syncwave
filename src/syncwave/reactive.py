@@ -136,53 +136,59 @@ def is_reactive(value: Any) -> TypeIs[Reactive]:
     return getattr(type(value), "__syncwave_reactive__", False)
 
 
+C = Callable
 P = ParamSpec("P")
 R = TypeVar("R")
 
 
-def atomic(fn: Callable[P, R]) -> Callable[P, R]:
-    @wraps(fn)
-    def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> R:
-        try:
-            sref = self.__syncwave_sref__
-        except AttributeError:
-            if self.__syncwave_state__ is State.INERT:
-                return fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
-            unreachable()  # if can't get sref while not inert
+def reactive_op(inert_fn: C, unwrap: C = lambda _: _) -> C[[C[P, R]], C[P, R]]:
+    def decorator(fn: C[P, R]) -> C[P, R]:
+        @wraps(fn)
+        def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> R:
+            try:
+                sref = self.__syncwave_sref__
+            except AttributeError:
+                if self.__syncwave_state__ is State.INERT:
+                    return inert_fn(unwrap(self), *args, **kwargs)
+                unreachable()  # if can't get sref while not inert
 
-        with sref.lock:
-            if self.__syncwave_state__ is State.DEAD:
-                raise DeadReferenceError(reference=self)
-            if self.__syncwave_state__ is State.LIVE:
-                return fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
-            unreachable()  # if can get sref while inert
+            with sref.lock:
+                if self.__syncwave_state__ is State.DEAD:
+                    raise DeadReferenceError(reference=self)
+                if self.__syncwave_state__ is State.LIVE:
+                    return fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+                unreachable()  # if can get sref while inert
 
-    return wrapper  # ty: ignore[invalid-return-type]
+        return wrapper  # ty: ignore[invalid-return-type]
+
+    return decorator
 
 
-def mut_atomic(fn: Callable[P, R]) -> Callable[P, None]:
-    @wraps(fn)
-    def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> None:
-        try:
-            sref = self.__syncwave_sref__
-        except AttributeError:
-            if self.__syncwave_state__ is State.INERT:
-                result = fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
-                if result is None:
+def mut_reactive_op(inert_fn: C, unwrap: C = lambda _: _) -> C[[C[P, R]], C[P, None]]:
+    def decorator(fn: C[P, R]) -> C[P, None]:
+        @wraps(fn)
+        def wrapper(self: Reactive, *args: P.args, **kwargs: P.kwargs) -> None:
+            try:
+                sref = self.__syncwave_sref__
+            except AttributeError:
+                if self.__syncwave_state__ is State.INERT:
+                    inert_fn(unwrap(self), *args, **kwargs)
                     return
-            unreachable()  # if can't get sref while not inert, or if there's a result
+                unreachable()  # if can't get sref while not inert
 
-        with sref.lock:
-            if self.__syncwave_state__ is State.DEAD:
-                raise DeadReferenceError(reference=self)
-            if self.__syncwave_state__ is State.LIVE:
-                result = fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
-                if result is None:
-                    sref.on_change()
-                    return
-            unreachable()  # if can get sref while inert, or if there's a result
+            with sref.lock:
+                if self.__syncwave_state__ is State.DEAD:
+                    raise DeadReferenceError(reference=self)
+                if self.__syncwave_state__ is State.LIVE:
+                    result = fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+                    if result is None:
+                        sref.on_change()
+                        return
+                unreachable()  # if can get sref while inert, or if there's a result
 
-    return wrapper  # ty: ignore[invalid-return-type]
+        return wrapper  # ty: ignore[invalid-return-type]
+
+    return decorator
 
 
 class DeadReferenceError(RuntimeError):
