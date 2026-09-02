@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, MutableMapping
+from collections.abc import Callable as F
+from collections.abc import Iterator, MutableMapping
 from dataclasses import dataclass
 from functools import partial
 from keyword import iskeyword
@@ -265,7 +266,7 @@ class Syncwave(MutableMapping[str, Any]):
         *,
         name: str,
         collection: type[SyncDict | SyncList] | Literal["auto"] | None = "auto",
-    ) -> Callable[[type[SMS]], type[SMS]]:
+    ) -> F[[type[SMS]], type[SMS]]:
         """Register a model as a store with a class decorator.
 
         This is a convenience method that can be thought of as combining [Syncwave.make_reactive](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.make_reactive)

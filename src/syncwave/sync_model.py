@@ -21,6 +21,7 @@ from .reactive import (
     UnionCtx,
     is_reactive,
     mut_reactive_op,
+    ser_factory,
     unreachable,
 )
 
@@ -170,7 +171,7 @@ class SyncModel(Reactive):
         return cs.union_schema(
             [inst_schema, non_inst_schema],
             serialization=cs.wrap_serializer_function_ser_schema(
-                lambda v, nxt: nxt(v),
+                ser_factory(),
                 schema=cls_schema,
             ),
         )

@@ -25,6 +25,7 @@ from .reactive import (
     is_reactive,
     mut_reactive_op,
     reactive_op,
+    ser_factory,
     unreachable,
 )
 
@@ -125,23 +126,21 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
 
     @classmethod
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
-        args = get_args(src)
-        if args:
-            dict_schema = handler.generate_schema(GenericAlias(dict, args))
-        else:
+        dict_schema = (
+            handler.generate_schema(GenericAlias(dict, args))
+            if (args := get_args(src))
             # a bare SyncDict is treated as SyncDict[str, Any]
-            dict_schema = handler.generate_schema(GenericAlias(dict, (str, Any)))
-
-        inst_schema = cs.is_instance_schema(cls)
-        non_inst_schema = cs.no_info_after_validator_function(cls.__new, dict_schema)
-
-        return cs.union_schema(
-            [inst_schema, non_inst_schema],
-            serialization=cs.wrap_serializer_function_ser_schema(
-                lambda v, nxt: nxt(v.__data),
-                schema=dict_schema,
-            ),
+            else handler.generate_schema(GenericAlias(dict, (str, Any)))
         )
+        schemas = [
+            cs.is_instance_schema(cls),
+            cs.no_info_after_validator_function(cls.__new, dict_schema),
+        ]
+        ser_schema = cs.wrap_serializer_function_ser_schema(
+            ser_factory(cls.__data_unwrap), schema=dict_schema
+        )
+
+        return cs.union_schema(schemas, mode="left_to_right", serialization=ser_schema)
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncDictCtx[KT, VT]) -> None:
         self.__syncwave_state__ = State.LIVE
@@ -321,22 +320,20 @@ class SyncList(MutableSequence[VT], Reactive):
 
     @classmethod
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
-        args = get_args(src)
-        if args:
-            list_schema = handler.generate_schema(GenericAlias(list, args))
-        else:
-            list_schema = handler.generate_schema(list)
-
-        inst_schema = cs.is_instance_schema(cls)
-        non_inst_schema = cs.no_info_after_validator_function(cls.__new, list_schema)
-
-        return cs.union_schema(
-            [inst_schema, non_inst_schema],
-            serialization=cs.wrap_serializer_function_ser_schema(
-                lambda v, nxt: nxt(v.__data),
-                schema=list_schema,
-            ),
+        list_schema = (
+            handler.generate_schema(GenericAlias(list, args))
+            if (args := get_args(src))
+            else handler.generate_schema(list)
         )
+        schemas = [
+            cs.is_instance_schema(cls),
+            cs.no_info_after_validator_function(cls.__new, list_schema),
+        ]
+        ser_schema = cs.wrap_serializer_function_ser_schema(
+            ser_factory(cls.__data_unwrap), schema=list_schema
+        )
+
+        return cs.union_schema(schemas, mode="left_to_right", serialization=ser_schema)
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncListCtx[VT]) -> None:
         self.__syncwave_state__ = State.LIVE
@@ -556,22 +553,20 @@ class SyncSet(MutableSet[VT], Reactive):
 
     @classmethod
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
-        args = get_args(src)
-        if args:
-            set_schema = handler.generate_schema(GenericAlias(set, args))
-        else:
-            set_schema = handler.generate_schema(set)
-
-        inst_schema = cs.is_instance_schema(cls)
-        non_inst_schema = cs.no_info_after_validator_function(cls.__new, set_schema)
-
-        return cs.union_schema(
-            [inst_schema, non_inst_schema],
-            serialization=cs.wrap_serializer_function_ser_schema(
-                lambda v, nxt: nxt(v.__data),
-                schema=set_schema,
-            ),
+        set_schema = (
+            handler.generate_schema(GenericAlias(set, args))
+            if (args := get_args(src))
+            else handler.generate_schema(set)
         )
+        schemas = [
+            cs.is_instance_schema(cls),
+            cs.no_info_after_validator_function(cls.__new, set_schema),
+        ]
+        ser_schema = cs.wrap_serializer_function_ser_schema(
+            ser_factory(cls.__data_unwrap), schema=set_schema
+        )
+
+        return cs.union_schema(schemas, mode="left_to_right", serialization=ser_schema)
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncSetCtx[VT]) -> None:
         self.__syncwave_state__ = State.LIVE

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable as F
 from functools import partial
 from pathlib import Path
 from threading import Lock, Timer
@@ -21,7 +21,7 @@ __all__ = []
 
 DirPath = Path
 FilePath = Path
-Callback = Callable[..., None]
+Callback = F[..., None]
 
 
 class _Watcher:
