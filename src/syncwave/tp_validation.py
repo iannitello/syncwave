@@ -24,7 +24,8 @@ import pydantic.dataclasses as py_dc
 from pydantic import ByteSize, RootModel, TypeAdapter
 from pydantic_core import PydanticSerializationError, from_json, to_json
 
-from .reactive import Context, Reactive, UnionCtx, unreachable
+from .errors import unreachable
+from .reactive import Context, Reactive, UnionCtx
 from .sync_collection import (
     KT,
     VT,

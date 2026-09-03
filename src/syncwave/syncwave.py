@@ -12,9 +12,10 @@ from weakref import WeakSet
 
 from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
+from .errors import unreachable
 from .io import EmptyFile, EmptyFileType, io
 from .ownership import detach, ingest
-from .reactive import Context, Reactive, StoreRef, UnionCtx, is_reactive, unreachable
+from .reactive import Context, Reactive, StoreRef, UnionCtx, is_reactive
 from .sync_collection import SyncDict, SyncList
 from .sync_model import SyncModel, create_sync_model
 from .tp_validation import collection_wrap, drill_tp, str_guard, sync_model_guard

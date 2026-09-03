@@ -134,5 +134,6 @@ nav:
       - SyncCollection: api/sync_collections.md
       - SyncModel: api/sync_model.md
       - Reactive: api/reactive.md
+      - Errors: api/errors.md
   - Examples:
       - First Example: examples/first.md

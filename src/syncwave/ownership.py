@@ -10,7 +10,8 @@ from typing import Any, Final
 
 from pydantic import TypeAdapter
 
-from .reactive import DeadReferenceError, State, is_reactive
+from .errors import DeadReferenceError
+from .reactive import State, is_reactive
 
 __all__ = []
 

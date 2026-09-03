@@ -11,7 +11,9 @@ from typing_extensions import TypeIs
 
 from pydantic import SerializerFunctionWrapHandler as Handler
 
-__all__ = ["DeadReferenceError", "Reactive"]
+from .errors import DeadReferenceError, unreachable
+
+__all__ = ["Reactive"]
 
 
 C = TypeVar("C", bound="Context")
@@ -205,47 +207,3 @@ def ser_factory(unwrap: F[[R], Any] = nop) -> F[[Any, Handler], Any]:
         return handler(value)
 
     return serialize
-
-
-class DeadReferenceError(RuntimeError):
-    """Raised when an operation is attempted on a dead reactive object.
-
-    A reactive object becomes dead when it is removed from the store, for example
-    by deleting a key from a `SyncDict` or by deleting the store entirely. Catching
-    this error is one way to check whether a reference is still valid, though
-    checking `sync_live` first is usually cleaner.
-
-    Example:
-    ```python
-    from pydantic import BaseModel
-    from syncwave import DeadReferenceError, Syncwave
-
-    syncwave = Syncwave()
-
-
-    @syncwave.register(name="customers")
-    class Customer(BaseModel):
-        name: str
-        age: int
-
-
-    customers = syncwave["customers"]
-    customers.append({"name": "Alice", "age": 30})
-    alice = customers[0]
-    del customers[0]
-
-    try:
-        alice.age = 31
-    except DeadReferenceError as e:
-        print(e)
-    ```
-
-    """
-
-    def __init__(self, *, reference: Reactive) -> None:  # ruff: ignore[undocumented-public-init]
-        message = f"Operation attempted on a dead reference: {reference!r}"
-        super().__init__(message)
-
-
-def unreachable() -> NoReturn:
-    raise RuntimeError("Internal Error")
