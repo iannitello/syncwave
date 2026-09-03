@@ -1,3 +1,1 @@
 ::: syncwave.Reactive
-
-::: syncwave.DeadReferenceError

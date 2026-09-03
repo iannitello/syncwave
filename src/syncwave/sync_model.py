@@ -11,10 +11,10 @@ from pydantic import GetCoreSchemaHandler as Handler
 from pydantic.dataclasses import is_pydantic_dataclass
 from pydantic_core import core_schema as cs
 
+from .errors import DeadReferenceError, unreachable
 from .ownership import detach, ingest
 from .reactive import (
     Context,
-    DeadReferenceError,
     Reactive,
     State,
     StoreRef,
@@ -22,7 +22,6 @@ from .reactive import (
     is_reactive,
     mut_reactive_op,
     ser_factory,
-    unreachable,
 )
 
 if TYPE_CHECKING:

@@ -15,6 +15,7 @@ from pydantic import GetCoreSchemaHandler as Handler
 from pydantic import TypeAdapter
 from pydantic_core import core_schema as cs
 
+from .errors import unreachable
 from .ownership import detach, ingest
 from .reactive import (
     Context,
@@ -26,7 +27,6 @@ from .reactive import (
     mut_reactive_op,
     reactive_op,
     ser_factory,
-    unreachable,
 )
 
 __all__ = ["SyncCollection", "SyncDict", "SyncList", "SyncSet"]

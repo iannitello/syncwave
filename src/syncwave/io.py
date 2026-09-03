@@ -11,6 +11,7 @@ from typing import Any, Final
 from pydantic import TypeAdapter, ValidationError
 from pydantic_core import PydanticSerializationError
 
+from .errors import unreachable
 from .watcher import watcher
 
 __all__ = []
@@ -132,15 +133,20 @@ class _IO:
 
     def _scheduled_write(self, path: Path) -> None:
         with self._lock:
-            if path not in self._pending_writes:
-                return  # defensive check, should never happen
-            pending = self._pending_writes.pop(path)
-        # Only this `_serialize` call is guarded: it runs on a timer thread, where the
-        # error is uncatchable and the traceback has no user frames naming the store.
+            # `cancel()` is best effort: this could run with a missing pending write.
+            try:
+                pending = self._pending_writes.pop(path)
+            except KeyError:
+                return  # A newer `dump` or `write_json` has taken over, nothing to do.
+
+        # Only guarded `_serialize`: runs on a timer thread (the traceback is useless).
         try:
             text = self._serialize(pending.value, pending.ta)
         except PydanticSerializationError as e:
-            raise ValueError(f"Failed to serialize JSON for '{path}'.") from e
+            # Failing here is a bug. The value comes from a store, it should serialize.
+            msg = f"The value at '{path}' passed validation but failed to serialize."
+            unreachable(msg, from_=e)
+
         self._atomic_write(path, text)
 
     def _atomic_write(self, path: Path, text: str) -> None:
