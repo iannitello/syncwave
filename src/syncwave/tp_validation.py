@@ -259,41 +259,6 @@ def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
     )
 
 
-def _validate_hashable(tp: type, err: str) -> None:
-    origin = get_origin(tp) or tp
-    args = get_args(tp)
-
-    if (annotated_inner := _handle_annotated(origin, args)) is not None:
-        _validate_hashable(annotated_inner, err)
-        return
-    if (union_members := _handle_union(origin, args)) is not None:
-        [_validate_hashable(member, err) for member in union_members]
-        return
-    if (literal_members := _handle_literal(origin, args)) is not None:
-        [_validate_hashable(_get_tp(member), err) for member in literal_members]
-        return
-
-    if isclass(origin):
-        if getattr(origin, "__hash__", None) is None:
-            raise TypeError(err)
-        # tuple and frozenset are hashable only if all elements are hashable
-        if issubclass(origin, (tuple, frozenset)) and args:
-            [_validate_hashable(arg, err) for arg in args]
-        # enums are hashable only if their members' values are hashable
-        if issubclass(origin, Enum):
-            [_validate_hashable(_get_tp(member.value), err) for member in origin]
-        return
-
-    [_validate_hashable(arg, err) for arg in args]
-
-
-def _get_tp(v: Any) -> type:
-    # Drills down to the innermost type of an enum member value.
-    if isinstance(v, Enum):
-        return _get_tp(v.value)
-    return type(v)
-
-
 # Whitelist: types that round-trip as dict keys through JSON (dump_json/validate_json).
 # See: https://pydantic.dev/docs/validation/latest/concepts/conversion_table/
 _VALID_DICT_KEY_TYPES: list[type] = [
@@ -446,6 +411,41 @@ def _check_collisions(keys: tuple[Any, ...], err: str) -> None:
             for jk, ks in collisions.items()
         ]
         raise TypeError(err + f"{'; '.join(parts)}.")
+
+
+def _validate_hashable(tp: type, err: str) -> None:
+    origin = get_origin(tp) or tp
+    args = get_args(tp)
+
+    if (annotated_inner := _handle_annotated(origin, args)) is not None:
+        _validate_hashable(annotated_inner, err)
+        return
+    if (union_members := _handle_union(origin, args)) is not None:
+        [_validate_hashable(member, err) for member in union_members]
+        return
+    if (literal_members := _handle_literal(origin, args)) is not None:
+        [_validate_hashable(_get_tp(member), err) for member in literal_members]
+        return
+
+    if isclass(origin):
+        if getattr(origin, "__hash__", None) is None:
+            raise TypeError(err)
+        # tuple and frozenset are hashable only if all elements are hashable
+        if issubclass(origin, (tuple, frozenset)) and args:
+            [_validate_hashable(arg, err) for arg in args]
+        # enums are hashable only if their members' values are hashable
+        if issubclass(origin, Enum):
+            [_validate_hashable(_get_tp(member.value), err) for member in origin]
+        return
+
+    [_validate_hashable(arg, err) for arg in args]
+
+
+def _get_tp(v: Any) -> type:
+    # Drills down to the innermost type of an enum member value.
+    if isinstance(v, Enum):
+        return _get_tp(v.value)
+    return type(v)
 
 
 def _handle_annotated(origin: Any, args: tuple[Any, ...]) -> Any | None:

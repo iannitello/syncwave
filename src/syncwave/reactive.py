@@ -79,6 +79,18 @@ class Reactive(metaclass=ABCMeta):
             "Reactive instances are created automatically when a value enters a store."
         )
 
+    @abstractmethod
+    def __syncwave_init__(self, sref: StoreRef, ctx: C) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def __syncwave_kill__(self) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def __syncwave_update__(self, new: R) -> None:
+        raise NotImplementedError
+
     @final
     @property
     def sync_live(self) -> bool:
@@ -120,18 +132,6 @@ class Reactive(metaclass=ABCMeta):
         """
         return self.__syncwave_state__ is State.LIVE  # atomic, no need to lock
 
-    @abstractmethod
-    def __syncwave_init__(self, sref: StoreRef, ctx: C) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def __syncwave_kill__(self) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def __syncwave_update__(self, new: R) -> None:
-        raise NotImplementedError
-
 
 def is_reactive(value: Any) -> TypeIs[Reactive]:
     # Internal faster replacement for `isinstance(value, Reactive)`.
@@ -144,13 +144,13 @@ X = ParamSpec("X")
 Y = TypeVar("Y")
 
 
-def _id(value: Any) -> Any:  # identity function
-    return value
-
-
 # A reactive object has a store reference iff it is not inert.
 _NO_SREF = "A {} reactive object has no store reference."
 _INERT_WITH_SREF = "An inert reactive object has a store reference."
+
+
+def _id(value: Any) -> Any:  # identity function
+    return value
 
 
 def reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X, Y]]:
