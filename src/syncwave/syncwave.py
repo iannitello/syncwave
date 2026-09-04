@@ -144,65 +144,6 @@ class Syncwave(MutableMapping[str, Any]):
         items = {k: v[0] for k, v in self.__stores.items()}
         return f"<Syncwave {items!r}>"
 
-    def make_reactive(
-        self,
-        cls: type[SMS],
-        /,
-        *,
-        cls_name: str | None = None,
-    ) -> type[SyncModel]:
-        """Make a new reactive model from a regular model.
-
-        The returned class can be used when defining a store and its instances will be
-        reactive. This method offers more flexibility than [Syncwave.register](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.register),
-        which is the higher-level alternative.
-
-        The returned class inherits from both SyncModel and the original class `cls`.
-        The original class is not mutated by this method.
-
-        Example:
-        ```python
-        from pydantic import BaseModel
-        from syncwave import SyncList, Syncwave
-
-        syncwave = Syncwave()
-
-
-        class Customer(BaseModel):
-            name: str
-            age: int
-
-
-        SyncCustomer = syncwave.make_reactive(Customer)
-        customers = syncwave.create_store(SyncList[SyncCustomer], name="customers")
-        customers.append(Customer(name="Alice", age=30))
-        ```
-
-        ---
-
-        Abstract: Usage Documentation
-            [Syncwave](https://syncwave.dev/usage/syncwave/)
-
-        Args:
-            cls: Base class for the new reactive model.
-            cls_name: Custom name for the new class. Defaults to `"Sync" + cls.__name__`
-                if `None` is given.
-
-        Returns:
-            The new reactive model class.
-
-        """
-        sync_model_guard(cls, self.__models)
-
-        if cls_name is not None:
-            str_guard("cls_name", cls_name)
-            if not cls_name.isidentifier() or iskeyword(cls_name):
-                raise ValueError(f"'{cls_name}' is not a valid class name.")
-
-        sync_model = create_sync_model(cls, rename=cls_name or True)
-        self.__models.add(cls)
-        return sync_model
-
     def create_store(self, tp: type, /, *, name: str, default: Any = EmptyFile) -> Any:
         """Create a store persisted to a JSON file and two-way synced with it.
 
@@ -261,6 +202,65 @@ class Syncwave(MutableMapping[str, Any]):
                 del self.__stores[name]
                 raise ValueError(f"Unable to create store '{name}' without a default.")
             return detach(value, store_info.type_adapter)
+
+    def make_reactive(
+        self,
+        cls: type[SMS],
+        /,
+        *,
+        cls_name: str | None = None,
+    ) -> type[SyncModel]:
+        """Make a new reactive model from a regular model.
+
+        The returned class can be used when defining a store and its instances will be
+        reactive. This method offers more flexibility than [Syncwave.register](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.register),
+        which is the higher-level alternative.
+
+        The returned class inherits from both SyncModel and the original class `cls`.
+        The original class is not mutated by this method.
+
+        Example:
+        ```python
+        from pydantic import BaseModel
+        from syncwave import SyncList, Syncwave
+
+        syncwave = Syncwave()
+
+
+        class Customer(BaseModel):
+            name: str
+            age: int
+
+
+        SyncCustomer = syncwave.make_reactive(Customer)
+        customers = syncwave.create_store(SyncList[SyncCustomer], name="customers")
+        customers.append(Customer(name="Alice", age=30))
+        ```
+
+        ---
+
+        Abstract: Usage Documentation
+            [Syncwave](https://syncwave.dev/usage/syncwave/)
+
+        Args:
+            cls: Base class for the new reactive model.
+            cls_name: Custom name for the new class. Defaults to `"Sync" + cls.__name__`
+                if `None` is given.
+
+        Returns:
+            The new reactive model class.
+
+        """
+        sync_model_guard(cls, self.__models)
+
+        if cls_name is not None:
+            str_guard("cls_name", cls_name)
+            if not cls_name.isidentifier() or iskeyword(cls_name):
+                raise ValueError(f"'{cls_name}' is not a valid class name.")
+
+        sync_model = create_sync_model(cls, rename=cls_name or True)
+        self.__models.add(cls)
+        return sync_model
 
     def register(
         self,
@@ -344,88 +344,6 @@ class Syncwave(MutableMapping[str, Any]):
             return cls
 
         return decorator
-
-    def __create_store(self, tp: type | GenericAlias, name: str) -> None:
-        try:
-            type_adapter = TypeAdapter(tp)
-        except PydanticSchemaGenerationError as e:
-            raise TypeError(f"Type `{tp}` is not supported by Pydantic.") from e
-
-        path = self.__root_path / f"{name}.json"
-        sref = StoreRef(lock=RLock(), on_change=partial(self.__on_store_change, name))
-        ctx = drill_tp(tp)
-        store_info = StoreInfo(name, path, type_adapter, sref, ctx)
-
-        value = io.init_json(path, type_adapter)
-        if is_reactive(value):
-            if ctx is None:
-                unreachable()
-            elif isinstance(ctx, Context):
-                value.__syncwave_init__(sref, ctx)
-            elif isinstance(ctx, UnionCtx):
-                value.__syncwave_init__(sref, ctx[type(value)])
-            else:
-                unreachable()
-        self.__stores[name] = (value, store_info)
-        watcher.watch(path, self.__on_file_change, store_info)
-
-    def __on_store_change(self, name: str) -> None:
-        # always called from within the store lock context
-        value, store_info = self.__stores[name]
-        io.dump(store_info.path, value, store_info.type_adapter)
-
-    def __on_file_change(self, store_info: StoreInfo) -> None:
-        try:
-            new_value = io.load(store_info.path, store_info.type_adapter)
-        except (FileNotFoundError, ValueError):
-            with store_info.sref.lock:
-                old_value = self.__stores[store_info.name][0]
-                io.dump(store_info.path, old_value, store_info.type_adapter)
-                return
-
-        if store_info.name not in self.__stores:
-            return  # store was deleted, ignore this event
-        with store_info.sref.lock:
-            self.__set_store(store_info.name, new_value, from_json=True)
-
-    def __set_store(self, key: str, value: Any, *, from_json: bool = False) -> None:
-        # always called from within the store lock context
-        old_value, store_info = self.__stores[key]
-        if from_json:
-            # only difference is we know we own the value, so we can skip `ingest`
-            new_value = store_info.type_adapter.validate_python(value)
-        else:
-            new_value = ingest(value, store_info.type_adapter)
-        ctx, sref = store_info.ctx, store_info.sref
-
-        # case 1: non-reactive content type
-        if ctx is None:
-            self.__stores[key] = (new_value, store_info)
-        # case 2: fixed reactive content type
-        elif isinstance(ctx, Context):
-            if not isinstance(old_value, EmptyFileType):
-                old_value.__syncwave_update__(new_value)
-            else:
-                new_value.__syncwave_init__(sref, ctx)
-                self.__stores[key] = (new_value, store_info)
-        # case 3: union content type
-        elif isinstance(ctx, UnionCtx):
-            old_is_reactive = is_reactive(old_value)
-            new_is_reactive = is_reactive(new_value)
-            same_type = type(old_value) is (new_type := type(new_value))
-
-            if old_is_reactive and new_is_reactive and same_type:
-                old_value.__syncwave_update__(new_value)
-            else:
-                if old_is_reactive:
-                    old_value.__syncwave_kill__()
-                if new_is_reactive:
-                    new_value.__syncwave_init__(sref, ctx[new_type])
-                self.__stores[key] = (new_value, store_info)
-        else:
-            unreachable()
-
-        sref.on_change()
 
     def read_store_json(self, name: str) -> str:
         """Safely read the content of the JSON file associated with a store.
@@ -518,6 +436,88 @@ class Syncwave(MutableMapping[str, Any]):
         store_info = self.__stores[name][1]
         io.write_json(store_info.path, text)
         self.__on_file_change(store_info)
+
+    def __create_store(self, tp: type | GenericAlias, name: str) -> None:
+        try:
+            type_adapter = TypeAdapter(tp)
+        except PydanticSchemaGenerationError as e:
+            raise TypeError(f"Type `{tp}` is not supported by Pydantic.") from e
+
+        path = self.__root_path / f"{name}.json"
+        sref = StoreRef(lock=RLock(), on_change=partial(self.__on_store_change, name))
+        ctx = drill_tp(tp)
+        store_info = StoreInfo(name, path, type_adapter, sref, ctx)
+
+        value = io.init_json(path, type_adapter)
+        if is_reactive(value):
+            if ctx is None:
+                unreachable()
+            elif isinstance(ctx, Context):
+                value.__syncwave_init__(sref, ctx)
+            elif isinstance(ctx, UnionCtx):
+                value.__syncwave_init__(sref, ctx[type(value)])
+            else:
+                unreachable()
+        self.__stores[name] = (value, store_info)
+        watcher.watch(path, self.__on_file_change, store_info)
+
+    def __on_store_change(self, name: str) -> None:
+        # always called from within the store lock context
+        value, store_info = self.__stores[name]
+        io.dump(store_info.path, value, store_info.type_adapter)
+
+    def __on_file_change(self, store_info: StoreInfo) -> None:
+        try:
+            new_value = io.load(store_info.path, store_info.type_adapter)
+        except (FileNotFoundError, ValueError):
+            with store_info.sref.lock:
+                old_value = self.__stores[store_info.name][0]
+                io.dump(store_info.path, old_value, store_info.type_adapter)
+                return
+
+        if store_info.name not in self.__stores:
+            return  # store was deleted, ignore this event
+        with store_info.sref.lock:
+            self.__set_store(store_info.name, new_value, from_json=True)
+
+    def __set_store(self, key: str, value: Any, *, from_json: bool = False) -> None:
+        # always called from within the store lock context
+        old_value, store_info = self.__stores[key]
+        if from_json:
+            # only difference is we know we own the value, so we can skip `ingest`
+            new_value = store_info.type_adapter.validate_python(value)
+        else:
+            new_value = ingest(value, store_info.type_adapter)
+        ctx, sref = store_info.ctx, store_info.sref
+
+        # case 1: non-reactive content type
+        if ctx is None:
+            self.__stores[key] = (new_value, store_info)
+        # case 2: fixed reactive content type
+        elif isinstance(ctx, Context):
+            if not isinstance(old_value, EmptyFileType):
+                old_value.__syncwave_update__(new_value)
+            else:
+                new_value.__syncwave_init__(sref, ctx)
+                self.__stores[key] = (new_value, store_info)
+        # case 3: union content type
+        elif isinstance(ctx, UnionCtx):
+            old_is_reactive = is_reactive(old_value)
+            new_is_reactive = is_reactive(new_value)
+            same_type = type(old_value) is (new_type := type(new_value))
+
+            if old_is_reactive and new_is_reactive and same_type:
+                old_value.__syncwave_update__(new_value)
+            else:
+                if old_is_reactive:
+                    old_value.__syncwave_kill__()
+                if new_is_reactive:
+                    new_value.__syncwave_init__(sref, ctx[new_type])
+                self.__stores[key] = (new_value, store_info)
+        else:
+            unreachable()
+
+        sref.on_change()
 
 
 # From the user's POV a Syncwave instance is reactive (in-place changes sync to disk),

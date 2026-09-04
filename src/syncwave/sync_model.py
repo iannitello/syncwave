@@ -25,6 +25,8 @@ from .reactive import (
     ser_factory,
 )
 
+__all__ = ["SyncModel", "is_sync_model_supported"]
+
 if TYPE_CHECKING:
     from typing import ClassVar, Protocol
 
@@ -42,11 +44,6 @@ if TYPE_CHECKING:
     #   2. subclasses of `pydantic.RootModel`,
     #   3. classes decorated with `@pydantic.dataclasses.dataclass`.
     SMS = BaseModel | RootModel | PydanticDataclass
-
-__all__ = ["SyncModel", "is_sync_model_supported"]
-
-
-_MISSING: Final = object()
 
 
 def is_sync_model_supported(cls: Any) -> TypeGuard[type[SMS]]:
@@ -102,6 +99,9 @@ def _og_setattr(self: SyncModel, name: str, value: Any) -> None:
 
 def _og_delattr(self: SyncModel, name: str) -> None:
     self.__syncwave_original_cls__.__delattr__(self, name)
+
+
+_MISSING: Final = object()
 
 
 @dataclass(frozen=True)

@@ -414,12 +414,12 @@ class SyncList(MutableSequence[VT], Reactive):
 
     @reactive_op(inert_fn=list.__getitem__, unwrap=__data_unwrap)
     def __getitem__(self, index: SupportsIndex) -> VT:
-        i = _get_index(index)
+        i = self.__get_index(index)
         return detach(self.__data[i], self.__syncwave_ctx__.item_type_adapter)
 
     @mut_reactive_op(inert_fn=list.__setitem__, unwrap=__data_unwrap)
     def __setitem__(self, index: SupportsIndex, value: VT) -> None:
-        i = _get_index(index)
+        i = self.__get_index(index)
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         new_item = ingest(value, self.__syncwave_ctx__.item_type_adapter)
 
@@ -438,7 +438,7 @@ class SyncList(MutableSequence[VT], Reactive):
 
     @mut_reactive_op(inert_fn=list.__delitem__, unwrap=__data_unwrap)
     def __delitem__(self, index: SupportsIndex) -> None:
-        i = _get_index(index)
+        i = self.__get_index(index)
         if self.__syncwave_ctx__.inner_ctx is None:
             del self.__data[i]
             return
@@ -454,7 +454,7 @@ class SyncList(MutableSequence[VT], Reactive):
 
     @mut_reactive_op(inert_fn=list.insert, unwrap=__data_unwrap)
     def insert(self, index: SupportsIndex, value: VT) -> None:  # ruff: ignore[undocumented-public-method]
-        i = _get_index(index)
+        i = self.__get_index(index)
         inner_ctx = self.__syncwave_ctx__.inner_ctx
         new_item = ingest(value, self.__syncwave_ctx__.item_type_adapter)
 
@@ -491,15 +491,16 @@ class SyncList(MutableSequence[VT], Reactive):
         ta = self.__syncwave_ctx__.item_type_adapter
         return [ta.validate_python(ta.dump_python(item)) for item in self.__data]
 
-
-def _get_index(index: Any) -> int:
-    if isinstance(index, int):
-        return index
-    if isinstance(index, SupportsIndex):
-        return index.__index__()
-    if isinstance(index, slice):
-        raise TypeError("Slice indices are not supported (yet).")
-    raise TypeError(f"SyncList indices must be integers, not {type(index).__name__}.")
+    @staticmethod
+    def __get_index(index: Any) -> int:
+        if isinstance(index, int):
+            return index
+        if isinstance(index, SupportsIndex):
+            return index.__index__()
+        if isinstance(index, slice):
+            raise TypeError("Slice indices are not supported (yet).")
+        tp_name = type(index).__qualname__
+        raise TypeError(f"SyncList indices must be integers, not {tp_name}.")
 
 
 @dataclass(frozen=True)
@@ -617,9 +618,9 @@ SyncCollection.register(SyncList)
 SyncCollection.register(SyncSet)
 
 
-def register(*args: Any, **kwargs: Any) -> NoReturn:
+def _register_forbidden(*args: Any, **kwargs: Any) -> NoReturn:
     """SyncCollection does not support class registration."""
     raise TypeError("SyncCollection does not support class registration.")
 
 
-SyncCollection.register = register  # ty: ignore[invalid-assignment]
+SyncCollection.register = _register_forbidden  # ty: ignore[invalid-assignment]
