@@ -23,6 +23,7 @@ from .reactive import (
     State,
     StoreRef,
     UnionCtx,
+    dead_guard,
     is_reactive,
     mut_reactive_op,
     reactive_op,
@@ -133,7 +134,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
             else handler.generate_schema(GenericAlias(dict, (str, Any)))
         )
         schemas = [
-            cs.is_instance_schema(cls),
+            cs.no_info_after_validator_function(dead_guard, cs.is_instance_schema(cls)),
             cs.no_info_after_validator_function(cls.__new, dict_schema),
         ]
         ser_schema = cs.wrap_serializer_function_ser_schema(
@@ -326,7 +327,7 @@ class SyncList(MutableSequence[VT], Reactive):
             else handler.generate_schema(list)
         )
         schemas = [
-            cs.is_instance_schema(cls),
+            cs.no_info_after_validator_function(dead_guard, cs.is_instance_schema(cls)),
             cs.no_info_after_validator_function(cls.__new, list_schema),
         ]
         ser_schema = cs.wrap_serializer_function_ser_schema(
@@ -559,7 +560,7 @@ class SyncSet(MutableSet[VT], Reactive):
             else handler.generate_schema(set)
         )
         schemas = [
-            cs.is_instance_schema(cls),
+            cs.no_info_after_validator_function(dead_guard, cs.is_instance_schema(cls)),
             cs.no_info_after_validator_function(cls.__new, set_schema),
         ]
         ser_schema = cs.wrap_serializer_function_ser_schema(

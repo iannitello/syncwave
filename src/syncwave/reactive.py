@@ -144,66 +144,77 @@ X = ParamSpec("X")
 Y = TypeVar("Y")
 
 
-def nop(value: Any) -> Any:
+def _id(value: Any) -> Any:  # identity function
     return value
 
 
-def reactive_op(inert_fn: F, unwrap: F[[R], Any] = nop) -> F[[F[X, Y]], F[X, Y]]:
+# A reactive object has a store reference iff it is not inert.
+_NO_SREF = "A {} reactive object has no store reference."
+_INERT_WITH_SREF = "An inert reactive object has a store reference."
+
+
+def reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X, Y]]:
     def decorator(fn: F[X, Y]) -> F[X, Y]:
         @wraps(fn)
         def wrapper(self: R, *args: X.args, **kwargs: X.kwargs) -> Y:
             try:
                 sref = self.__syncwave_sref__
-            except AttributeError:
+            except AttributeError as e:
                 if self.__syncwave_state__ is State.INERT:
                     return inert_fn(unwrap(self), *args, **kwargs)
-                unreachable()  # if can't get sref while not inert
+                unreachable(_NO_SREF.format(self.__syncwave_state__.value), from_=e)
 
             with sref.lock:
                 if self.__syncwave_state__ is State.DEAD:
                     raise DeadReferenceError(reference=self)
                 if self.__syncwave_state__ is State.LIVE:
                     return fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
-                unreachable()  # if can get sref while inert
+                unreachable(_INERT_WITH_SREF)
 
         return wrapper  # ty: ignore[invalid-return-type]
 
     return decorator
 
 
-def mut_reactive_op(inert_fn: F, unwrap: F[[R], Any] = nop) -> F[[F[X, Y]], F[X, None]]:
+def mut_reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X, None]]:
     def decorator(fn: F[X, Y]) -> F[X, None]:
         @wraps(fn)
         def wrapper(self: R, *args: X.args, **kwargs: X.kwargs) -> None:
             try:
                 sref = self.__syncwave_sref__
-            except AttributeError:
+            except AttributeError as e:
                 if self.__syncwave_state__ is State.INERT:
                     inert_fn(unwrap(self), *args, **kwargs)
                     return
-                unreachable()  # if can't get sref while not inert
+                unreachable(_NO_SREF.format(self.__syncwave_state__.value), from_=e)
 
             with sref.lock:
                 if self.__syncwave_state__ is State.DEAD:
                     raise DeadReferenceError(reference=self)
                 if self.__syncwave_state__ is State.LIVE:
                     result = fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
-                    if result is None:
-                        sref.on_change()
-                        return
-                unreachable()  # if can get sref while inert, or if there's a result
+                    if result is not None:
+                        fn_name = getattr(fn, "__qualname__", repr(fn))
+                        unreachable(f"Mutating operation `{fn_name}` returned a value.")
+                    sref.on_change()
+                    return
+                unreachable(_INERT_WITH_SREF)
 
         return wrapper  # ty: ignore[invalid-return-type]
 
     return decorator
 
 
-def ser_factory(unwrap: F[[R], Any] = nop) -> F[[Any, Handler], Any]:
+def dead_guard(value: R) -> R:
+    if value.__syncwave_state__ is State.DEAD:
+        raise DeadReferenceError(reference=value)
+    return value
+
+
+def ser_factory(unwrap: F[[R], Any] = _id) -> F[[Any, Handler], Any]:
     def serialize(value: Any, handler: Handler) -> Any:
         if is_reactive(value):
-            if value.__syncwave_state__ is State.DEAD:
-                raise DeadReferenceError(reference=value)
             return handler(unwrap(value))
-        return handler(value)
+        return handler(value)  # plain-value fallback, e.g. an un-validated default
 
     return serialize
