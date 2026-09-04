@@ -19,6 +19,7 @@ from .reactive import (
     State,
     StoreRef,
     UnionCtx,
+    dead_guard,
     is_reactive,
     mut_reactive_op,
     ser_factory,
@@ -163,17 +164,15 @@ class SyncModel(Reactive):
     @classmethod
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
         cls_schema = handler.generate_schema(cls.__syncwave_original_cls__)
-
-        inst_schema = cs.is_instance_schema(cls)
-        non_inst_schema = cs.no_info_after_validator_function(cls.__new, cls_schema)
-
-        return cs.union_schema(
-            [inst_schema, non_inst_schema],
-            serialization=cs.wrap_serializer_function_ser_schema(
-                ser_factory(),
-                schema=cls_schema,
-            ),
+        schemas = [
+            cs.no_info_after_validator_function(dead_guard, cs.is_instance_schema(cls)),
+            cs.no_info_after_validator_function(cls.__new, cls_schema),
+        ]
+        ser_schema = cs.wrap_serializer_function_ser_schema(
+            ser_factory(), schema=cls_schema
         )
+
+        return cs.union_schema(schemas, mode="left_to_right", serialization=ser_schema)
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncModelCtx) -> None:
         object.__setattr__(self, "__syncwave_state__", State.LIVE)
