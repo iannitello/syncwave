@@ -86,17 +86,23 @@ class _IO:
             raise OSError(f"Path '{path}' exists but is not a regular file.")
         path.unlink(missing_ok=True)
 
-    def init_json(self, path: Path, ta: TypeAdapter = _any_ta) -> Any | EmptyFileType:
+    def init_json(
+        self,
+        path: Path,
+        ta: TypeAdapter = _any_ta,
+        default: Any | EmptyFileType = EmptyFile,
+    ) -> Any | EmptyFileType:
+
         self.create_file(path)
         content = path.read_text(encoding=self.ENCODING).strip()
-        if content == "":
-            default = self._get_default(ta)
-            if default is not EmptyFile:
-                self._atomic_write(path, self._serialize(default, ta))
-            return default
-        init_value = self._deserialize(content, ta, path)
-        self._atomic_write(path, self._serialize(init_value, ta))
-        return init_value
+        if content:
+            value = self._deserialize(content, ta, path)
+        else:
+            value = default if default is not EmptyFile else self._get_default(ta)
+            if value is EmptyFile:
+                return EmptyFile
+        self._atomic_write(path, self._serialize(value, ta))
+        return value
 
     def load(self, path: Path, ta: TypeAdapter = _any_ta) -> Any:
         # never returns EmptyFile, it throws an error if the file is empty

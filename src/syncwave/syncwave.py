@@ -7,13 +7,14 @@ from functools import partial
 from keyword import iskeyword
 from pathlib import Path
 from threading import RLock
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 from weakref import WeakSet
 
-from pydantic import PydanticSchemaGenerationError, TypeAdapter
+from pydantic import PydanticSchemaGenerationError, TypeAdapter, ValidationError
+from pydantic_core import PydanticSerializationError
 
 from .errors import unreachable
-from .io import EmptyFile, EmptyFileType, io
+from .io import EmptyFile, io
 from .ownership import detach, ingest
 from .reactive import Context, Reactive, StoreRef, UnionCtx, is_reactive
 from .sync_collection import SyncDict, SyncList
@@ -72,7 +73,7 @@ class Syncwave(MutableMapping[str, Any]):
         root = io.sanitize_path(root_path)
         io.create_dir(root)
         self.__root_path = root
-        self.__stores: dict[str, tuple[Any | EmptyFileType, StoreInfo]] = {}
+        self.__stores: dict[str, tuple[Any, StoreInfo]] = {}
         self.__models: WeakSet[type[SMS]] = WeakSet()
 
     @property
@@ -175,10 +176,9 @@ class Syncwave(MutableMapping[str, Any]):
             name: Name of the store. This is also the key used to access the store
                 (`syncwave[name]`), and the name of the corresponding JSON file
                 (`<root_path>/<name>.json`).
-            default: Default fallback value if no reasonable default can be inferred for
-                the type (and if the file doesn't exist already or is empty). Usually
-                only needed if the store is a single value (i.e. not a collection). This
-                parameter is ignored if a default can be inferred.
+            default: Default initial value for the store. Ignored if the file already
+                exists and is not empty. Only mandatory if no empty value (`{}`, `[]`,
+                `""`, or `None`) fits the type.
 
         Returns:
             The current store value, loaded from disk or the initial value.
@@ -186,22 +186,12 @@ class Syncwave(MutableMapping[str, Any]):
         """
         if name in self.__stores:
             raise ValueError(f"Store '{name}' already exists.")
-
         str_guard("name", name)
         io.file_name_guard(name)
-        self.__create_store(tp, name)
 
+        self.__create_store(tp, name, default)
         value, store_info = self.__stores[name]
-        with store_info.sref.lock:
-            if value is EmptyFile:
-                if default is not EmptyFile:
-                    self.__set_store(name, default)
-                    return detach(self.__stores[name][0], store_info.type_adapter)
-                # cleanup before raising
-                watcher.unwatch(store_info.path)
-                del self.__stores[name]
-                raise ValueError(f"Unable to create store '{name}' without a default.")
-            return detach(value, store_info.type_adapter)
+        return detach(value, store_info.type_adapter)
 
     def make_reactive(
         self,
@@ -267,6 +257,7 @@ class Syncwave(MutableMapping[str, Any]):
         *,
         name: str,
         collection: type[SyncDict | SyncList] | Literal["auto"] | None = "auto",
+        default: dict[str, Any] = EmptyFile,  # ty: ignore[invalid-parameter-default]
     ) -> F[[type[SMS]], type[SMS]]:
         """Register a model as a store with a class decorator.
 
@@ -323,6 +314,11 @@ class Syncwave(MutableMapping[str, Any]):
             collection: Controls how the model is wrapped in a collection. See
                 [usage](https://syncwave.dev/usage/syncwave/) for more details on the
                 available options.
+            default: Default initial value for the store. Ignored if the file already
+                exists and is not empty. Only mandatory when there's no collection
+                wrapping the model (`collection=None` or "auto" with a RootModel) and
+                the model has fields without defaults. Pass a plain `dict` of field
+                values since the class is not defined yet when the decorator runs.
 
         Returns:
             A decorator that accepts a class as an argument to create a new reactive
@@ -339,7 +335,7 @@ class Syncwave(MutableMapping[str, Any]):
             sync_model_guard(cls, self.__models)
             sync_model = create_sync_model(cls)
             store_tp = collection_wrap(cls, sync_model, collection)
-            self.__create_store(store_tp, name=name)
+            self.__create_store(store_tp, name, default)
             self.__models.add(cls)
             return cls
 
@@ -437,18 +433,37 @@ class Syncwave(MutableMapping[str, Any]):
         io.write_json(store_info.path, text)
         self.__on_file_change(store_info)
 
-    def __create_store(self, tp: type | GenericAlias, name: str) -> None:
+    def __create_store(self, tp: type | GenericAlias, name: str, default: Any) -> None:
         try:
             type_adapter = TypeAdapter(tp)
         except PydanticSchemaGenerationError as e:
             raise TypeError(f"Type `{tp}` is not supported by Pydantic.") from e
 
-        path = self.__root_path / f"{name}.json"
-        sref = StoreRef(lock=RLock(), on_change=partial(self.__on_store_change, name))
         ctx = drill_tp(tp)
+
+        # default is checked whether it will be used or not
+        if default is not EmptyFile:
+            if is_reactive(default):
+                raise ValueError("Reactive values cannot be used as default.")
+            try:
+                default = ingest(default, type_adapter)
+            except ValidationError as e:
+                msg = f"Default value `{default}` is not valid for type `{tp}`."
+                raise ValueError(msg) from e
+            except PydanticSerializationError as e:
+                msg = f"Default value `{default}` is not serializable for type `{tp}`."
+                raise ValueError(msg) from e
+
+        path = self.__root_path / f"{name}.json"
+        value = io.init_json(path, type_adapter, default)
+
+        if value is EmptyFile:
+            raise ValueError(f"Unable to create store '{name}' without a default.")
+        value = cast(Any, value)  # removes the EmptyFileType for type checking
+
+        sref = StoreRef(lock=RLock(), on_change=partial(self.__on_store_change, name))
         store_info = StoreInfo(name, path, type_adapter, sref, ctx)
 
-        value = io.init_json(path, type_adapter)
         if is_reactive(value):
             if ctx is None:
                 unreachable()
@@ -495,11 +510,7 @@ class Syncwave(MutableMapping[str, Any]):
             self.__stores[key] = (new_value, store_info)
         # case 2: fixed reactive content type
         elif isinstance(ctx, Context):
-            if not isinstance(old_value, EmptyFileType):
-                old_value.__syncwave_update__(new_value)
-            else:
-                new_value.__syncwave_init__(sref, ctx)
-                self.__stores[key] = (new_value, store_info)
+            old_value.__syncwave_update__(new_value)
         # case 3: union content type
         elif isinstance(ctx, UnionCtx):
             old_is_reactive = is_reactive(old_value)
