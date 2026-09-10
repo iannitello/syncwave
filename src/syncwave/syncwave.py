@@ -498,11 +498,8 @@ class Syncwave(MutableMapping[str, Any]):
     def __set_store(self, key: str, value: Any, *, from_json: bool = False) -> None:
         # always called from within the store lock context
         old_value, store_info = self.__stores[key]
-        if from_json:
-            # only difference is we know we own the value, so we can skip `ingest`
-            new_value = store_info.type_adapter.validate_python(value)
-        else:
-            new_value = ingest(value, store_info.type_adapter)
+        # `io.load` already validated the JSON value with this adapter, and we own it.
+        new_value = value if from_json else ingest(value, store_info.type_adapter)
         ctx, sref = store_info.ctx, store_info.sref
 
         # case 1: non-reactive content type

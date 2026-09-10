@@ -21,10 +21,16 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_
 from uuid import UUID
 
 import pydantic.dataclasses as py_dc
-from pydantic import ByteSize, RootModel, TypeAdapter
-from pydantic_core import PydanticSerializationError, from_json, to_json
+from pydantic import ByteSize, Discriminator, RootModel, TypeAdapter
+from pydantic_core import (
+    PydanticSerializationError,
+    PydanticUndefined,
+    from_json,
+    to_json,
+)
 
 from .errors import unreachable
+from .ownership import ingest
 from .reactive import Context, Reactive, UnionCtx
 from .sync_collection import (
     KT,
@@ -39,6 +45,8 @@ from .sync_collection import (
 from .sync_model import SyncModel, SyncModelCtx, is_sync_model_supported
 
 if TYPE_CHECKING:
+    from pydantic.fields import FieldInfo
+
     from .sync_model import SMS
 
 __all__ = []
@@ -172,19 +180,31 @@ def _parse_model(cls: type[SMS], *, as_sync_model: bool = False) -> SyncModelCtx
     fields_ctx: dict[str, Context | UnionCtx] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
 
-    for field_name, field in cls.__pydantic_fields__.items():
+    for field_name, field_info in cls.__pydantic_fields__.items():
         err = f"Field `{field_name}` in `{cls.__qualname__}` cannot be reactive because"
         if not treat_as_sync_model:
             err += " it is not contained in a `SyncModel` (breaks the reactive chain)."
-        elif field.frozen:
+        elif field_info.frozen:
             err += " it is frozen."
         else:
             err = ""
 
-        field_ctx = drill_tp(field.annotation, _err_if_reactive=err)
+        annotation = _field_annotation(field_info)
+        field_ctx = drill_tp(annotation, _err_if_reactive=err)
         if field_ctx is not None:
             fields_ctx[field_name] = field_ctx
-        fields_type_adapter[field_name] = TypeAdapter(field.annotation)
+        ta = fields_type_adapter[field_name] = TypeAdapter(annotation)
+
+        # validates defaults, excluding factories
+        if field_info.default is not PydanticUndefined:
+            try:
+                ingest(field_info.default, ta)
+            # ValidationError and PydanticSerializationError inherit from ValueError
+            except ValueError as e:
+                raise ValueError(
+                    f"Field `{field_name}` in `{cls.__qualname__}` "
+                    "has an invalid default value."
+                ) from e
 
     if is_sync_model:
         return SyncModelCtx(
@@ -194,6 +214,17 @@ def _parse_model(cls: type[SMS], *, as_sync_model: bool = False) -> SyncModelCtx
         )
 
     return None
+
+
+def _field_annotation(field_info: FieldInfo) -> Any:
+    metadata = list(field_info.metadata)
+    if (discriminator := field_info.discriminator) is not None:
+        if not isinstance(discriminator, Discriminator):
+            discriminator = Discriminator(discriminator)
+        metadata.append(discriminator)
+    if not metadata:
+        return field_info.annotation
+    return Annotated[(field_info.annotation, *metadata)]  # ty: ignore[invalid-type-form]
 
 
 def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
