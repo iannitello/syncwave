@@ -150,8 +150,8 @@ class _IO:
             text = self._serialize(pending.value, pending.ta)
         except PydanticSerializationError as e:
             # Failing here is a bug. The value comes from a store, it should serialize.
-            msg = f"The value at '{path}' passed validation but failed to serialize."
-            unreachable(msg, from_=e)
+            err = f"An invalid value reached the store associated with file '{path}'."
+            unreachable(err, from_=e)
 
         self._atomic_write(path, text)
 
@@ -182,13 +182,21 @@ class _IO:
 
     def _deserialize(self, text: str, ta: TypeAdapter, path: Path) -> Any:
         try:
-            return ta.validate_json(text)
+            value = ta.validate_json(text)
         except ValidationError as e:
             try:
                 self._any_ta.validate_json(text)
             except ValidationError:
                 raise ValueError(f"File '{path}' contains malformed JSON.") from None
             raise ValueError(f"File '{path}' contains unexpected data type.") from e
+        # Validate_json can succeed while dump_json fails, e.g. in case of an invalid
+        # default_factory or a validator/serializer mismatch.
+        try:
+            ta.dump_json(value, warnings="error")
+        except PydanticSerializationError as e:
+            err = f"The store associated with file '{path}' cannot be serialized."
+            raise ValueError(err) from e
+        return value
 
     def _get_default(self, ta: TypeAdapter) -> Any | EmptyFileType:
         defaults = [{}, [], "", None]

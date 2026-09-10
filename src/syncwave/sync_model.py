@@ -183,12 +183,17 @@ class SyncModel(Reactive):
 
         for name, field_ctx in ctx.fields_ctx.items():
             value = self.__dict__.get(name)
+
+            # can be the case for a default value e.g. `SyncList[str] = []`
+            if not is_reactive(value):
+                ta = ctx.fields_type_adapter[name]
+                value = self.__dict__[name] = ta.validate_python(value)
+
             # case 1: non-reactive content type
             # skipped since fields_ctx only contains reactive fields
             # case 2: fixed reactive content type
             if isinstance(field_ctx, Context):
-                # if `field_ctx` is a Context, `value` can't be None
-                value.__syncwave_init__(sref, field_ctx)  # ty: ignore[unresolved-attribute]
+                value.__syncwave_init__(sref, field_ctx)
             # case 3: union content type
             elif isinstance(field_ctx, UnionCtx):
                 if is_reactive(value):
@@ -209,6 +214,11 @@ class SyncModel(Reactive):
         for name in ctx.fields_type_adapter:
             field_ctx = ctx.fields_ctx.get(name)
             new_value = new.__dict__.get(name)
+
+            # can be the case for a default value e.g. `SyncList[str] = []`
+            if field_ctx is not None and not is_reactive(new_value):
+                ta = ctx.fields_type_adapter[name]
+                new_value = ta.validate_python(new_value)
 
             # case 1: non-reactive content type
             if field_ctx is None:
