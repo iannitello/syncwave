@@ -10,8 +10,7 @@ from threading import RLock
 from typing import TYPE_CHECKING, Any, Literal, cast
 from weakref import WeakSet
 
-from pydantic import PydanticSchemaGenerationError, TypeAdapter, ValidationError
-from pydantic_core import PydanticSerializationError
+from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
 from .errors import unreachable
 from .io import EmptyFile, io
@@ -19,7 +18,13 @@ from .ownership import detach, ingest
 from .reactive import Context, Reactive, StoreRef, UnionCtx, is_reactive
 from .sync_collection import SyncDict, SyncList
 from .sync_model import SyncModel, create_sync_model
-from .tp_validation import collection_wrap, drill_tp, str_guard, sync_model_guard
+from .tp_validation import (
+    collection_wrap,
+    drill_tp,
+    str_guard,
+    sync_model_guard,
+    validate_default,
+)
 from .watcher import watcher
 
 if TYPE_CHECKING:
@@ -443,16 +448,7 @@ class Syncwave(MutableMapping[str, Any]):
 
         # default is checked whether it will be used or not
         if default is not EmptyFile:
-            if is_reactive(default):
-                raise ValueError("Reactive values cannot be used as default.")
-            try:
-                default = ingest(default, type_adapter)
-            except ValidationError as e:
-                msg = f"Default value `{default}` is not valid for type `{tp}`."
-                raise ValueError(msg) from e
-            except PydanticSerializationError as e:
-                msg = f"Default value `{default}` is not serializable for type `{tp}`."
-                raise ValueError(msg) from e
+            default = validate_default(default, type_adapter, tp)
 
         path = self.__root_path / f"{name}.json"
         value = io.init_json(path, type_adapter, default)
