@@ -94,11 +94,13 @@ def is_sync_model_supported(cls: Any) -> TypeGuard[type[SMS]]:
 
 
 def _og_setattr(self: SyncModel, name: str, value: Any) -> None:
-    self.__syncwave_original_cls__.__setattr__(self, name, value)
+    og_cls = object.__getattribute__(self, "__syncwave_original_cls__")
+    og_cls.__setattr__(self, name, value)
 
 
 def _og_delattr(self: SyncModel, name: str) -> None:
-    self.__syncwave_original_cls__.__delattr__(self, name)
+    og_cls = object.__getattribute__(self, "__syncwave_original_cls__")
+    og_cls.__delattr__(self, name)
 
 
 _MISSING: Final = object()
