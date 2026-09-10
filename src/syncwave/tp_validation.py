@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_
 from uuid import UUID
 
 import pydantic.dataclasses as py_dc
-from pydantic import ByteSize, Discriminator, RootModel, TypeAdapter
+from pydantic import ByteSize, Discriminator, RootModel, TypeAdapter, ValidationError
 from pydantic_core import (
     PydanticSerializationError,
     PydanticUndefined,
@@ -31,7 +31,7 @@ from pydantic_core import (
 
 from .errors import unreachable
 from .ownership import ingest
-from .reactive import Context, Reactive, UnionCtx
+from .reactive import Context, Reactive, UnionCtx, is_reactive
 from .sync_collection import (
     KT,
     VT,
@@ -169,6 +169,19 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
     return None
 
 
+def validate_default(value: Any, ta: TypeAdapter, tp: Any) -> Any:
+    tp_name = tp.__qualname__ if isclass(tp) and not get_args(tp) else str(tp)
+    err = f"Default value `{value!r}` is not valid: "
+    if is_reactive(value):
+        raise ValueError(err + "reactive values cannot be used as default.")
+    try:
+        return ingest(value, ta)
+    except ValidationError as e:
+        raise ValueError(err + f"cannot be validated against type `{tp_name}`.") from e
+    except PydanticSerializationError as e:
+        raise ValueError(err + f"cannot be serialized as type `{tp_name}`.") from e
+
+
 def _parse_model(cls: type[SMS], *, as_sync_model: bool = False) -> SyncModelCtx | None:
     is_sync_model = issubclass(cls, SyncModel)
     treat_as_sync_model = is_sync_model or as_sync_model
@@ -189,22 +202,14 @@ def _parse_model(cls: type[SMS], *, as_sync_model: bool = False) -> SyncModelCtx
         else:
             err = ""
 
-        annotation = _field_annotation(field_info)
-        field_ctx = drill_tp(annotation, _err_if_reactive=err)
+        tp = _field_annotation(field_info)
+        field_ctx = drill_tp(tp, _err_if_reactive=err)
         if field_ctx is not None:
             fields_ctx[field_name] = field_ctx
-        ta = fields_type_adapter[field_name] = TypeAdapter(annotation)
+        fields_type_adapter[field_name] = TypeAdapter(tp)
 
-        # validates defaults, excluding factories
         if field_info.default is not PydanticUndefined:
-            try:
-                ingest(field_info.default, ta)
-            # ValidationError and PydanticSerializationError inherit from ValueError
-            except ValueError as e:
-                raise ValueError(
-                    f"Field `{field_name}` in `{cls.__qualname__}` "
-                    "has an invalid default value."
-                ) from e
+            validate_default(field_info.default, fields_type_adapter[field_name], tp)
 
     if is_sync_model:
         return SyncModelCtx(
