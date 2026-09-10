@@ -27,9 +27,12 @@ def detach(value: Any, ta: TypeAdapter) -> Any:
 def ingest(value: Any, ta: TypeAdapter) -> Any:
     # Implicitly guards against dead references: all reactive values run `dead_guard`.
     validated = ta.validate_python(value)
+
     # As strict as the file writer (`warnings="error"`), so a store value never fails to
-    # serialize. Must run before the immutable fast path (there's an obscure edge case).
+    # serialize. Must run before the immutable fast path: a type inconsistent with its
+    # validator, e.g. `Annotated[int, AfterValidator(str)]`, yields an immutable `str`.
     json = ta.dump_json(validated, warnings="error")
+
     if type(validated) in _IMMUTABLE_TYPES:
         return validated
     return ta.validate_json(json)
