@@ -13,14 +13,21 @@ from pydantic import SerializerFunctionWrapHandler as Handler
 
 from .errors import DeadReferenceError, unreachable
 
-__all__ = ["Reactive"]
+__all__ = ["Reactive", "SyncState"]
 
 
 C = TypeVar("C", bound="Context")
 R = TypeVar("R", bound="Reactive")
 
 
-class State(str, Enum):
+class SyncState(str, Enum):
+    """Lifecycle of a reactive object.
+
+    `INERT`: never entered a store, behaves like the plain counterpart.
+    `LIVE`: connected to a store.
+    `DEAD`: removed from its store, every operation raises `DeadReferenceError`.
+    """
+
     INERT = "inert"
     LIVE = "live"
     DEAD = "dead"
@@ -69,7 +76,7 @@ class Reactive(metaclass=ABCMeta):
     """
 
     __syncwave_reactive__ = True
-    __syncwave_state__: State = State.INERT
+    __syncwave_state__: SyncState = SyncState.INERT
     __syncwave_sref__: StoreRef
     __syncwave_ctx__: Context
 
@@ -100,7 +107,8 @@ class Reactive(metaclass=ABCMeta):
         replaced in its parent store, for example because a key was deleted from a
         `SyncDict`, and any further operation on it raises `DeadReferenceError`. Or
         the object is inert: it never entered a store, and it behaves like its plain
-        counterpart until a store ingests a copy of it.
+        counterpart until a store ingests a copy of it. Use `sync_state` to distinguish
+        inert from dead.
 
         Example:
         ```python
@@ -130,7 +138,13 @@ class Reactive(metaclass=ABCMeta):
             [Reactive](https://syncwave.dev/usage/syncwave/)
 
         """
-        return self.__syncwave_state__ is State.LIVE  # atomic, no need to lock
+        return self.__syncwave_state__ is SyncState.LIVE  # atomic, no need to lock
+
+    @final
+    @property
+    def sync_state(self) -> SyncState:
+        """The current state of this reactive object. See `SyncState`."""
+        return self.__syncwave_state__  # atomic, no need to lock
 
 
 def is_reactive(value: Any) -> TypeIs[Reactive]:
@@ -160,14 +174,14 @@ def reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X, Y]]
             try:
                 sref = self.__syncwave_sref__
             except AttributeError as e:
-                if self.__syncwave_state__ is State.INERT:
+                if self.__syncwave_state__ is SyncState.INERT:
                     return inert_fn(unwrap(self), *args, **kwargs)
                 unreachable(_NO_SREF.format(self.__syncwave_state__.value), from_=e)
 
             with sref.lock:
-                if self.__syncwave_state__ is State.DEAD:
+                if self.__syncwave_state__ is SyncState.DEAD:
                     raise DeadReferenceError(reference=self)
-                if self.__syncwave_state__ is State.LIVE:
+                if self.__syncwave_state__ is SyncState.LIVE:
                     return fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
                 unreachable(_INERT_WITH_SREF)
 
@@ -183,15 +197,15 @@ def mut_reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X,
             try:
                 sref = self.__syncwave_sref__
             except AttributeError as e:
-                if self.__syncwave_state__ is State.INERT:
+                if self.__syncwave_state__ is SyncState.INERT:
                     inert_fn(unwrap(self), *args, **kwargs)
                     return
                 unreachable(_NO_SREF.format(self.__syncwave_state__.value), from_=e)
 
             with sref.lock:
-                if self.__syncwave_state__ is State.DEAD:
+                if self.__syncwave_state__ is SyncState.DEAD:
                     raise DeadReferenceError(reference=self)
-                if self.__syncwave_state__ is State.LIVE:
+                if self.__syncwave_state__ is SyncState.LIVE:
                     result = fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
                     if result is not None:
                         fn_name = getattr(fn, "__qualname__", repr(fn))
@@ -206,7 +220,7 @@ def mut_reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X,
 
 
 def dead_guard(value: R) -> R:
-    if value.__syncwave_state__ is State.DEAD:
+    if value.__syncwave_state__ is SyncState.DEAD:
         raise DeadReferenceError(reference=value)
     return value
 

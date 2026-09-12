@@ -12,6 +12,7 @@ Imports available from this module:
 - [SyncModel](https://syncwave.dev/api/sync_model/#syncwave.SyncModel)
 - [is_sync_model_supported](https://syncwave.dev/api/sync_model/#syncwave.is_sync_model_supported)
 - [Reactive](https://syncwave.dev/api/reactive/#syncwave.Reactive)
+- [SyncState](https://syncwave.dev/api/reactive/#syncwave.SyncState)
 - [DeadReferenceError](https://syncwave.dev/api/errors/#syncwave.DeadReferenceError)
 """
 
@@ -19,7 +20,7 @@ __version__ = "0.2.1"
 
 
 from .errors import DeadReferenceError
-from .reactive import Reactive
+from .reactive import Reactive, SyncState
 from .sync_collection import SyncCollection, SyncDict, SyncList, SyncSet
 from .sync_model import SyncModel, is_sync_model_supported
 from .syncwave import Syncwave
@@ -32,6 +33,7 @@ __all__ = [
     "SyncList",
     "SyncModel",
     "SyncSet",
+    "SyncState",
     "Syncwave",
     "is_sync_model_supported",
 ]

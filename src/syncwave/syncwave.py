@@ -15,7 +15,7 @@ from pydantic import PydanticSchemaGenerationError, TypeAdapter
 from .errors import unreachable
 from .io import EmptyFile, io
 from .ownership import detach, ingest
-from .reactive import Context, Reactive, StoreRef, UnionCtx, is_reactive
+from .reactive import Context, Reactive, StoreRef, SyncState, UnionCtx, is_reactive
 from .sync_collection import SyncDict, SyncList
 from .sync_model import SyncModel, create_sync_model
 from .tp_validation import (
@@ -87,7 +87,7 @@ class Syncwave(MutableMapping[str, Any]):
         return self.__root_path
 
     @property
-    def sync_live(self) -> bool:
+    def sync_live(self) -> Literal[True]:
         """Whether this instance is still connected to its stores.
 
         A `Syncwave` instance is a reactive object, but unlike other reactive objects,
@@ -100,6 +100,21 @@ class Syncwave(MutableMapping[str, Any]):
 
         """
         return True
+
+    @property
+    def sync_state(self) -> Literal[SyncState.LIVE]:
+        """The current state of this instance.
+
+        A `Syncwave` instance is a reactive object, but unlike other reactive objects,
+        it can never be killed, so `sync_state` always returns `SyncState.LIVE`.
+
+        ---
+
+        Abstract: Usage Documentation
+            [Reactive](https://syncwave.dev/usage/syncwave/)
+
+        """
+        return SyncState.LIVE
 
     def __getitem__(self, key: str) -> Any:
         if key not in self.__stores:

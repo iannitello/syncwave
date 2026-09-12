@@ -16,8 +16,8 @@ from .ownership import detach, ingest
 from .reactive import (
     Context,
     Reactive,
-    State,
     StoreRef,
+    SyncState,
     UnionCtx,
     dead_guard,
     is_reactive,
@@ -177,7 +177,7 @@ class SyncModel(Reactive):
         return cs.union_schema(schemas, mode="left_to_right", serialization=ser_schema)
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncModelCtx) -> None:
-        object.__setattr__(self, "__syncwave_state__", State.LIVE)
+        object.__setattr__(self, "__syncwave_state__", SyncState.LIVE)
         object.__setattr__(self, "__syncwave_sref__", sref)
         object.__setattr__(self, "__syncwave_ctx__", ctx)
 
@@ -206,7 +206,7 @@ class SyncModel(Reactive):
             value = self.__dict__.get(name)
             if is_reactive(value):
                 value.__syncwave_kill__()
-        object.__setattr__(self, "__syncwave_state__", State.DEAD)
+        object.__setattr__(self, "__syncwave_state__", SyncState.DEAD)
 
     def __syncwave_update__(self, new: Self) -> None:
         ctx = self.__syncwave_ctx__
@@ -241,7 +241,7 @@ class SyncModel(Reactive):
         if ctx is not None:
             field_ta = ctx.fields_type_adapter.get(name)
             if field_ta is not None:
-                if __dict__["__syncwave_state__"] is State.DEAD:
+                if __dict__["__syncwave_state__"] is SyncState.DEAD:
                     raise DeadReferenceError(reference=self)
                 value = __dict__.get(name, _MISSING)
                 if value is not _MISSING:
