@@ -51,9 +51,9 @@ syncwave["anything"] = {"mixed": [1, "two", None]}
 
 ## Initial Values
 
-When a store is created and its file is missing or empty, Syncwave needs an initial value. It first tries to infer a natural "empty" one by validating, in order: `{}`, `[]`, `""`, and `None`. The first that satisfies the store's type wins: an empty dict for mappings, an empty list for sequences and sets, and so on.
+When a store is created and its file is missing or empty, Syncwave needs an initial value. If you pass one through the `default` parameter, it is validated, used, and written to the file. Otherwise, Syncwave infers a natural "empty" one by validating, in order: `{}`, `[]`, `""`, and `None`. The first that satisfies the store's type wins: an empty dict for mappings, an empty list for sequences and sets, and so on.
 
-When none of them fits, you must provide the value yourself through the `default` parameter:
+When none of them fits, `default` becomes mandatory:
 
 ```python
 syncwave.create_store(int, name="counter")
@@ -69,18 +69,27 @@ syncwave.create_store(int, name="counter", default=0)  # works
 
 Two details to keep in mind:
 
-- The `default` parameter is **ignored when an empty value can be inferred**. For a union like `Union[SyncList[int], SyncDict[str, int]]`, the inference tries `{}` first and succeeds, so the store starts as an empty dict regardless of any `default` you pass.
-- The file always wins. Inference and `default` only apply when the file is missing or empty; existing content is validated and loaded instead.
+- The file always wins. `default` and inference only apply when the file is missing or empty; existing content is validated and loaded instead.
+- Inference picks the first candidate that fits, which matters for unions. A `Union[SyncList[int], SyncDict[str, int]]` store starts as an empty dict, since `{}` is tried before `[]`. Pass `default=[]` to start with the list instead.
 
 ## Where Validation Happens
 
 Every path into a store goes through validation against its type:
 
-- **At creation**, when existing file content is loaded.
+- **At creation**, when existing file content is loaded. The store's type is checked too: Pydantic never validates a field's default, so Syncwave does it for every model in the type, and also checks that the validated default can be stored. `brightness: int = "hello"` raises a `ValueError` before any store exists, and so does `Annotated[int, AfterValidator(str)] = 1`, whose validator turns the default into a value the field cannot serialize. Default factories are left alone, since calling one could have side effects; a factory that produces an invalid value is caught later, when its value would reach a file.
 - **On every Python-side change**: assigning to the store, setting an item in a reactive collection, assigning to a model field. Invalid data raises a `pydantic.ValidationError` and nothing is written.
-- **On every file-side change**: if the file's new content is malformed JSON or doesn't match the type, the change is rejected and the file is reverted to the last valid state.
+- **On every file-side change**: if the file's new content is malformed JSON, doesn't match the type, or lacks a field whose default is invalid, the change is rejected and the file is reverted to the last valid state.
 
 Validation runs in Pydantic's default lax mode, so the usual coercions apply: assigning `["1", 2]` to a `list[int]` store gives you `[1, 2]`. If you want stricter behavior, use Pydantic's standard tools (`Field(strict=True)`, `Strict*` types) in the store's type; Syncwave passes them through untouched.
+
+## Validators and Serializers Must Be Pure
+
+Syncwave validates and serializes values far more often than Pydantic alone would. A value is validated when it enters a store and again when it comes back from JSON, every write serializes it, every file change re-validates it, and reading a plain container out of a store round-trips it too. Some of this runs on background threads. Two rules follow for the models you put in a store:
+
+- **Validators and serializers must be pure and idempotent.** A validated value must validate to itself, because it will be validated again. `Annotated[int, AfterValidator(lambda v: v * 2)]` doesn't raise, it silently compounds: every validation pass doubles the value again, and there are several on the way into a store, plus one on every file load. Likewise, a side effect in a validator runs an unpredictable number of times, from several threads, on reads as well as writes.
+- **Fields with `exclude=True` cannot be used.** An excluded field is absent from every serialization, so it is reset to its default on every write, or fails validation if it has none.
+
+Default factories are the exception to the first rule. Pydantic calls a factory only when its field is missing from the input, and Syncwave always serializes complete values, so a factory runs when a store is created, when a file lacks the field, and when you build the model yourself, never on the ordinary write path. That is also why Syncwave doesn't call factories upfront to check them: it would run your code at a moment you don't expect.
 
 ## Dictionary Keys
 
