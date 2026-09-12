@@ -17,9 +17,9 @@ syncwave = Syncwave()
 
 numbers = syncwave.create_store(list[int], name="numbers")
 
-numbers.append(1)              # changes a copy, not the store
+numbers.append(1)  # changes a copy, not the store
 syncwave["numbers"].append(2)  # also a copy
-print(syncwave["numbers"])     # still []
+print(syncwave["numbers"])  # still []
 ```
 
 Reads hand out copies, and in-place changes never reach the store. With plain types, the only way to change the store is to assign a whole new value, and you see the current data by reading fresh through the instance.
@@ -37,7 +37,7 @@ numbers.append(1)
 syncwave["numbers"].append(2)
 
 print(syncwave["numbers"])  # [1, 2]
-print(numbers)              # [1, 2]
+print(numbers)  # [1, 2]
 ```
 
 Both `append` calls reached the store and its JSON file, and `numbers` is a live object that follows every change, including edits made to the file while the program runs.
@@ -55,7 +55,7 @@ They behave like the originals, except that every change is validated against th
 The three of them share a common (virtual) base class, `SyncCollection`, which is mostly intended for static typing and for runtime checks, such as:
 
 ```python
-isinstance(numbers, SyncCollection)   # True
+isinstance(numbers, SyncCollection)  # True
 issubclass(SyncList, SyncCollection)  # True
 issubclass(SyncCollection, Reactive)  # True
 ```
@@ -89,9 +89,9 @@ numbers = syncwave.create_store(SyncList[int], name="numbers")
 print(type(numbers))  # <class 'syncwave.sync_collection.SyncList'>
 ```
 
-When you call `create_store`, an initial value (from the file or a default) is loaded, and when that value enters the store it becomes a `SyncList`.
+When you call `create_store`, an initial value (coming from the file or `default`) is loaded, and when that value enters the store it becomes a `SyncList`.
 
-If you want to change the whole store, just assign a regular `list` where a reactive collection is expected, and Syncwave knows what to do with it:
+If you want to change the whole store, just assign a regular `list` where a reactive list is expected, and Syncwave knows what to do with it:
 
 ```python title="main.py" hl_lines="6"
 from syncwave import SyncList, Syncwave
@@ -106,7 +106,7 @@ Here `syncwave["numbers"]` was already a `SyncList`, so the assignment didn't cr
 
 ??? note "Why instantiation is blocked"
 
-    A reactive object only makes sense when it's tied to a store: mutating it must update a file somewhere. A free-floating `SyncList()` would have no store behind it, so what should a mutation do? It could start out inert and connect when inserted into a store, but then what if you insert the same instance into two stores? Every answer creates complications, and allowing it would buy you nothing: to prepare data before it enters a store, a plain `list` already does the job, and Syncwave converts it on the way in.
+    A reactive object only makes sense when it's tied to a store: mutating it must update a file somewhere. A free-floating `SyncList()` would have no store behind it, so what should a mutation do? Allowing direct instantiation wouldn't add anything: to prepare data before it enters a store, a plain `list` already does the job, and Syncwave converts it on the way in.
 
 This example uses a `SyncList`, but the same is true for the other reactive collections: you never instantiate any of them, and you use their regular counterpart when inserting (`dict` for `SyncDict` and `set` for `SyncSet`).
 
@@ -148,6 +148,8 @@ TypeError: `SyncList` cannot be used here: `list` is not a reactive container.
 ```
 
 The reverse is fine: a plain type inside a reactive collection (like `SyncList[list[int]]`) is valid; the chain simply ends there. The inner lists are ordinary Python objects with the usual restriction: change them by assignment, not in place.
+
+That restriction should look familiar. The copy behavior described in [Syncwave](./syncwave/) was never specific to the `syncwave` instance. Every reactive container treats the non-reactive values it holds the same way: a read hands you a copy, a write keeps one. In a `SyncList[list[int]]` store, reading `store[0]` gives you a copy of the inner list, and assigning a list to `store[0]` keeps one. The `syncwave` instance was simply the first reactive container you met. Wherever the reactive chain ends, the same pattern holds: change plain values by assigning through their closest reactive parent, and read them fresh when you need the current data.
 
 ### Deep Instance Creation
 
@@ -194,7 +196,7 @@ There would be more to say about references, most notably what happens to `road_
 
 ## SyncDict
 
-`SyncDict` is the reactive counterpart of `dict`. It can be parameterized with a key type and a value type, e.g. `SyncDict[str, int]`, or it can be used bare. Here's how we can use it to hold the settings for a small app:
+`SyncDict` is the reactive counterpart of `dict`. It can be parameterized with a key type and a value type, e.g. `SyncDict[str, int]`, or it can be used bare. Here's how we can use it to hold some simple settings:
 
 ```python title="main.py"
 from syncwave import SyncDict, Syncwave
@@ -221,9 +223,9 @@ The usual `dict` operations (`get`, `items`, `update`, deletions, iteration, and
 
 ### Key Types
 
-A `SyncDict` maps to a JSON object, and the keys of a JSON object are always strings. That puts three requirements on the key type:
+A `SyncDict` maps to a JSON object, and the keys of a JSON object are always strings. That puts three requirements on the **key type**:
 
-1. It must serialize to a string.
+1. It must produce a valid JSON object key when serializing to a string.
 2. It must deserialize back to an equal value (it must round-trip through a string).
 3. It must be hashable, like any Python `dict` key.
 
@@ -249,9 +251,17 @@ The round-trip requirement is also what rules out some types. Take a union:
 syncwave.create_store(SyncDict[int | str, int], name="ambiguous")
 ```
 
-`int` and `str` are both valid key types on their own, but together they make every key ambiguous: when Syncwave reads `"1"` from the file, should it become `store[1]` or `store["1"]`? There's no way to tell, so the type is rejected when the store is created. `typing.Any` is excluded for the same reason.
+`int` and `str` are both valid key types on their own, but together they make every key ambiguous: when Syncwave reads `"1"` from the file, should it become `store[1]` or `store["1"]`? There's no way to tell, so the type is rejected when the store is created.
 
-One last detail: a bare `SyncDict`, without type parameters, is interpreted as `SyncDict[str, Any]`. The values can be anything, but the keys stay strings, since `Any` can't be a key type.
+`typing.Any` is excluded as a key type for the same reason. This means that a bare `SyncDict` (without type parameters) is interpreted as `SyncDict[str, Any]`. The values can be anything, but the keys stay strings. For example:
+
+```python
+any_dict = syncwave.create_store(SyncDict, name="any_dict")
+
+any_dict["str_key"] = "str_value"  # good
+any_dict["1"] = 123  # also good
+any_dict[1] = 2  # will raise an error: the store is implicitly `SyncDict[str, Any]`
+```
 
 ## SyncList
 
@@ -308,7 +318,9 @@ print(sweet_virginia)  # wrong song! {'title': Bones, 'artist': The Killers}
 
 As soon as another song took the first spot, Syncwave updated the reference based on the position, ignoring the content. There's nothing mechanically wrong with this example, except a poor choice of variable name.
 
-A `SyncList` (especially one holding reactive items) is the appropriate data structure when the items are truly defined by their position. The same example, with a slightly different mental model, makes much more sense:
+If you end up in a situation like this and are surprised to see your items get metamorphosed, that's a good hint that a `SyncList` isn't the right data structure. Instead use a `SyncDict` so you have a key to identify your items and keep their identities stable.
+
+A `SyncList` (especially one holding reactive items) is the appropriate data structure when the items are truly defined by their position. The same example with a slightly different mental model makes much more sense:
 
 ```python title="main.py"
 from syncwave import SyncDict, SyncList, Syncwave
@@ -364,13 +376,25 @@ syncwave.create_store(SyncSet[list[int]], name="bad")
 TypeError: `SyncSet` must hold hashable elements, got `list`.
 ```
 
-Notably, this excludes reactive types: hashable values are immutable, while a reactive object must be mutable so it can be updated in place; no type can be both. This makes `SyncSet` the exception to nesting: it can hold `int`, `str`, `UUID`, and other hashable values, but never another reactive type, so it always ends the reactive chain.
+Notably, this means **reactive types are excluded as items of a `SyncSet`**: hashable values are immutable, while a reactive object must be mutable so it can be updated in place; no type can be both. This makes `SyncSet` the exception to nesting: it can hold `int`, `str`, `UUID`, and other hashable values, but never another reactive type, so it always ends the reactive chain.
 
 ## What's Next
 
-The songs from earlier have a weakness. `SyncDict[str, str]` works while every field is a string, but songs rarely stay that uniform. Say each song should also carry its release year: now an `int` needs to fit alongside the strings, and no dict type fits anymore. The best you can do is loosen the items to `SyncDict[str, Any]`, which accepts the year along with everything else, including a typo like `song["titel"]`.
+Let's bring back the settings example from above:
 
-What a song really needs is a fixed set of named fields, each with its own type. That's what a **model** is, and Syncwave can make your Pydantic models reactive just like the collections on this page: assigning a field is validated and written to the file, and fields can themselves hold reactive collections, so the whole structure stays reactive all the way down. [Models](./models/) covers it.
+```python
+from syncwave import SyncDict, Syncwave
+
+syncwave = Syncwave()
+
+settings = syncwave.create_store(SyncDict[str, int], name="settings")
+settings["volume"] = 8
+settings["brightness"] = 5
+```
+
+This has an obvious weakness: `SyncDict[str, int]` works while every setting is an `int`, but settings rarely stay that uniform. Say you add a `theme` that must be one of `"light"`, `"dark"`, or `"system"`: no dict type fits anymore. The best you can do is loosen the store to `SyncDict[str, Any]`, which accepts your theme along with everything else, e.g. `settings["volume"] = "loud!"`. Even worse, typos like `settings["brigthness"]` are accepted. It would also be nice to have more features, like having a default value for some settings, adding constraints (e.g. volume between `0` and `10`), etc.
+
+What that store really needs is a fixed set of named fields, each with its own type. That's exactly what a [Pydantic model](https://pydantic.dev/docs/validation/latest/concepts/models/) is. Once you define a model, Syncwave can make it reactive, turning it into a `SyncModel`. Just like the collections on this page, that means assigning a field is validated and written to the file, and fields can themselves hold reactive collections, so the whole structure stays reactive all the way down. The [Models](./models/) page covers it.
 
 One last thing before you move on: much of what this page introduced is not specific to collections; it applies to all reactive types, `SyncModel` included. You never create the instances yourself, nesting follows the same rules, and references behave the same way. The next page revisits all of it in more detail as it applies to models.
 

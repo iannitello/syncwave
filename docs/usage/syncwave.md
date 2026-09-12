@@ -22,7 +22,7 @@ from syncwave import Syncwave
 syncwave = Syncwave()
 ```
 
-The instance behaves like a Python `dict`, where each key maps to a **store**. A store is simply a value that is persisted to its own JSON file and kept in sync with it.
+The `syncwave` instance behaves like a Python `dict`, where each key maps to a **store**. A store is simply a value that is persisted to its own JSON file and kept in sync with it.
 
 By default, the JSON files live in a directory named `syncstores/` next to where you run your program. The directory is created automatically if it doesn't exist. You can choose another location with `Syncwave(root_path="path/to/dir")`.
 
@@ -46,11 +46,11 @@ This raises an error:
 KeyError: "Store 'numbers' does not exist. Use `syncwave.create_store(...)`, or `@syncwave.register(...)` first."
 ```
 
-You cannot insert a value under a key that doesn't exist because Syncwave needs additional information, most importantly a **type** the data must conform to. The correct way to create a store is to use [`syncwave.create_store(...)`](../api/syncwave/#syncwave.Syncwave.create_store): that's where you pass that type, along with other parameters to configure the store[^1].
+You cannot insert a value under a key that doesn't exist because Syncwave needs additional information, most importantly a **type** the data must conform to. The correct way to create a store is to use [`syncwave.create_store(...)`](../api/syncwave/#syncwave.Syncwave.create_store): that's where you pass that type, along with other optional parameters to configure the store[^1].
 
 [^1]: Configuration parameters are not implemented yet. They will be introduced in subsequent versions of the library.
 
-The only `dict` operations rejected are those that would insert a key that doesn't exist yet, whether explicitly, like the assignment above, or implicitly, like calling `syncwave.update(...)` with a new key. Everything else from the `dict` interface works as expected.
+The only `dict` operations rejected are those that would insert a key that doesn't exist yet, whether explicitly, like the assignment above, or implicitly, like calling `syncwave.update(...)` with new keys. Everything else from the `dict` interface works as expected.
 
 So let's create your first store the right way:
 
@@ -99,7 +99,46 @@ $ python main.py
 
 Content successfully loaded!
 
-### Reading a Store Returns a Copy
+### The `default` Parameter
+
+If you prefer, you can provide a default value yourself with the `default` parameter:
+
+```python
+syncwave.create_store(list[int], name="numbers", default=[1, 2, 3])
+```
+
+However, if the file `syncstores/numbers.json` already contains data, `default` is ignored; the file always wins.
+
+For some store types, passing a `default` value is mandatory. That's the case when no "empty" value (`{}`, `[]`, `""`, or `None`) fits the type. For example, if the store is a simple `int`, you must specify the initial value:
+
+```python
+syncwave.create_store(int, name="counter", default=0)
+```
+
+[Types and Validation](./types_and_validation/) covers default values in more detail.
+
+??? note "Why a store can never be empty"
+
+    A key aspect of Syncwave is creating a mapping between Python and JSON. A value in Python must have a corresponding JSON value, and vice-versa. For instance:
+
+    | Python | JSON   |
+    | ------ | ------ |
+    | `dict` | `{}`   |
+    | `list` | `[]`   |
+    | `str`  | `""`   |
+    | `None` | `null` |
+
+    However, what about an empty JSON file? Python doesn't have something like `undefined` that could represent the absence of a value.
+
+    | Python                 | JSON |
+    | ---------------------- | ---- |
+    | :lucide-x: `undefined` | ` `  |
+
+    What value should then be in `syncwave["empty_file"]`? `None` already represents a file containing `null`, and besides, `None` wouldn't even be a valid value for a store declared as `list[int]`.
+
+    For that reason, as soon as you create a store it must be filled with something, and that thing must be a valid value with respect to the store's type.
+
+### Reading Returns a Copy
 
 In the previous example, the variable `numbers` holds the store's initial value, whether that's the default or the content loaded from the file. However, nothing ties that variable to the store; it's just a plain Python list:
 
@@ -135,30 +174,6 @@ syncwave.create_store(list[int], name="numbers")  # return value is discarded
 print(syncwave["numbers"])
 ```
 
-### The `default` Parameter
-
-While some types have obvious defaults, that's not always the case. An empty JSON array is a valid `list[int]`, but nothing obvious exists for a simple `int`. For those stores, provide the initial value yourself:
-
-```python
-syncwave.create_store(int, name="counter", default=0)
-```
-
-The way `default` works might not be what you expect, so here are the exact rules. When a store is created, Syncwave picks the initial value in this order:
-
-1. If the file already contains data, that data is validated and loaded. `default` is ignored.
-2. Otherwise, Syncwave tries to infer an empty value that satisfies the type (it tries `{}`, `[]`, `""`, and `None`, in that order). If one fits, it is used and `default` is ignored, even a valid one. A `list[int]` store always starts as `[]`, and passing `default=[1, 2, 3]` changes nothing.
-3. Only when nothing can be inferred does `default` come into play. If you didn't provide one, the creation fails with a `ValueError`.
-
-In short, `default` only matters for types with no obvious empty value, like the `int` above. [Types and Validation](./types_and_validation/) covers initial values in more detail.
-
-??? note "Why a store can never be empty"
-
-    A key aspect of Syncwave is creating a mapping between Python and JSON. For instance, a `list` naturally maps to a JSON array `[]`, a `dict` to a JSON object `{}`, and `None` to a JSON `null`. However, what about an empty JSON file? Python doesn't have something like `undefined` that could represent the absence of a value.
-
-    What value should then be in `syncwave["empty_file"]`? `None` already represents a file containing `null`, and besides, `None` wouldn't even be a valid value for a store declared as `list[int]`.
-
-    For that reason, as soon as you create a store it must be filled with something, and that thing must be a valid value with respect to the store's type.
-
 ## Change the Data from Python
 
 A store is changed by assigning a new value to it, exactly like setting a key in a `dict`:
@@ -191,7 +206,7 @@ The `[1, 2, 3]` you wrote earlier is gone, and the file now holds the new data. 
 
     Syncwave batches rapid successive changes and writes them to disk a fraction of a second later. If you programmatically want to read the file content at an exact moment, use [read_store_json](../api/syncwave/#syncwave.Syncwave.read_store_json), which always returns the up-to-date content. Everything about how Syncwave interacts with the disk is covered in [JSON Files](./json_files/).
 
-### Writing to a Store Keeps a Copy
+### Writing Keeps a Copy
 
 Consider this example:
 
@@ -211,7 +226,7 @@ Here we _first_ create the list `my_numbers`, and after it's assigned we `append
 
 ```python
 print(syncwave["numbers"])  # [7, 8, 9]
-print(my_numbers)           # [7, 8, 9, 10]
+print(my_numbers)  # [7, 8, 9, 10]
 ```
 
 That's because Syncwave copies values on their way in as well: the store received a copy of `my_numbers`, and the original stayed yours. Earlier, _reading_ the store handed out a copy; this time, _writing_ to it kept one. Either way, your variable and the store hold two separate objects.
@@ -280,7 +295,7 @@ Finally, if the file contains invalid data while the program is not running, you
 
 The store never holds data that doesn't match its type, no matter where the change comes from.
 
-### Union Types and More
+### Richer Types
 
 Store types go well beyond simple containers. Any type Pydantic can validate and serialize is accepted, for example:
 
@@ -324,14 +339,16 @@ You lose the guarantees that come with a real type, but the two-way sync works e
 As mentioned earlier, the standard `dict` interface works on the `syncwave` instance:
 
 ```python
-len(syncwave)           # number of stores
-list(syncwave)          # store names
-"numbers" in syncwave   # membership test
+len(syncwave)  # number of stores
+list(syncwave)  # store names
+"numbers" in syncwave  # membership test
 
-del syncwave["numbers"] # delete a store
+del syncwave["numbers"]  # delete a store
 ```
 
-Be careful with that last one: deleting a store also deletes its JSON file from disk and **all data will be lost!**
+Be careful with that last one: deleting a store also deletes its JSON file from disk and **all data will be lost!**[^2]
+
+[^2]: Whether the file gets deleted or not when deleting a store will become configurable in future versions of the library.
 
 ## Why Reactivity
 
