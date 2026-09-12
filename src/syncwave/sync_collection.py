@@ -20,8 +20,8 @@ from .ownership import detach, ingest
 from .reactive import (
     Context,
     Reactive,
-    State,
     StoreRef,
+    SyncState,
     UnionCtx,
     dead_guard,
     is_reactive,
@@ -144,7 +144,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         return cs.union_schema(schemas, mode="left_to_right", serialization=ser_schema)
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncDictCtx[KT, VT]) -> None:
-        self.__syncwave_state__ = State.LIVE
+        self.__syncwave_state__ = SyncState.LIVE
         self.__syncwave_sref__ = sref
         self.__syncwave_ctx__ = ctx
 
@@ -168,7 +168,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
         for value in self.__data.values():
             if is_reactive(value):
                 value.__syncwave_kill__()
-        self.__syncwave_state__ = State.DEAD
+        self.__syncwave_state__ = SyncState.DEAD
 
     def __syncwave_update__(self, new: Self) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
@@ -337,7 +337,7 @@ class SyncList(MutableSequence[VT], Reactive):
         return cs.union_schema(schemas, mode="left_to_right", serialization=ser_schema)
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncListCtx[VT]) -> None:
-        self.__syncwave_state__ = State.LIVE
+        self.__syncwave_state__ = SyncState.LIVE
         self.__syncwave_sref__ = sref
         self.__syncwave_ctx__ = ctx
 
@@ -361,7 +361,7 @@ class SyncList(MutableSequence[VT], Reactive):
         for item in self.__data:
             if is_reactive(item):
                 item.__syncwave_kill__()
-        self.__syncwave_state__ = State.DEAD
+        self.__syncwave_state__ = SyncState.DEAD
 
     def __syncwave_update__(self, new: Self) -> None:
         inner_ctx = self.__syncwave_ctx__.inner_ctx
@@ -571,14 +571,14 @@ class SyncSet(MutableSet[VT], Reactive):
         return cs.union_schema(schemas, mode="left_to_right", serialization=ser_schema)
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncSetCtx[VT]) -> None:
-        self.__syncwave_state__ = State.LIVE
+        self.__syncwave_state__ = SyncState.LIVE
         self.__syncwave_sref__ = sref
         self.__syncwave_ctx__ = ctx
         # no need to loop through items since set can't hold reactive items
 
     def __syncwave_kill__(self) -> None:
         # no need to loop through items since set can't hold reactive items
-        self.__syncwave_state__ = State.DEAD
+        self.__syncwave_state__ = SyncState.DEAD
 
     def __syncwave_update__(self, new: Self) -> None:
         self.__data = new.__data
