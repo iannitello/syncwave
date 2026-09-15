@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable as F
 from collections.abc import Iterator, MutableMapping, MutableSequence, MutableSet
 from dataclasses import dataclass
 from types import GenericAlias
@@ -13,6 +14,7 @@ from typing_extensions import Self
 
 from pydantic import GetCoreSchemaHandler as Handler
 from pydantic import TypeAdapter
+from pydantic_core import SchemaSerializer
 from pydantic_core import core_schema as cs
 
 from .errors import unreachable
@@ -27,7 +29,6 @@ from .reactive import (
     is_reactive,
     mut_reactive_op,
     reactive_op,
-    ser_factory,
 )
 
 __all__ = ["SyncCollection", "SyncDict", "SyncList", "SyncSet"]
@@ -113,8 +114,9 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
 
     """
 
-    __syncwave_ctx__: SyncDictCtx[KT, VT]
     __data: dict[KT, VT]
+    __syncwave_ctx__: SyncDictCtx[KT, VT]
+    __pydantic_serializer__: SchemaSerializer
 
     def __data_unwrap(self) -> dict[KT, VT]:
         return self.__data
@@ -133,15 +135,14 @@ class SyncDict(MutableMapping[KT, VT], Reactive):
             # a bare SyncDict is treated as SyncDict[str, Any]
             else handler.generate_schema(GenericAlias(dict, (str, Any)))
         )
-        schemas = [
-            cs.no_info_after_validator_function(dead_guard, cs.is_instance_schema(cls)),
-            cs.no_info_after_validator_function(cls.__new, dict_schema),
-        ]
         ser_schema = cs.wrap_serializer_function_ser_schema(
-            ser_factory(cls.__data_unwrap), schema=dict_schema
+            _serializer_factory(cls, unwrap=cls.__data_unwrap), schema=dict_schema
         )
-
-        return cs.union_schema(schemas, mode="left_to_right", serialization=ser_schema)
+        return cs.no_info_wrap_validator_function(
+            _validator_factory(cls, new=cls.__new, unwrap=cls.__data_unwrap),
+            dict_schema,
+            serialization=ser_schema,
+        )
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncDictCtx[KT, VT]) -> None:
         self.__syncwave_state__ = SyncState.LIVE
@@ -307,8 +308,9 @@ class SyncList(MutableSequence[VT], Reactive):
 
     """
 
-    __syncwave_ctx__: SyncListCtx[VT]
     __data: list[VT]
+    __syncwave_ctx__: SyncListCtx[VT]
+    __pydantic_serializer__: SchemaSerializer
 
     def __data_unwrap(self) -> list[VT]:
         return self.__data
@@ -326,15 +328,14 @@ class SyncList(MutableSequence[VT], Reactive):
             if (args := get_args(src))
             else handler.generate_schema(list)
         )
-        schemas = [
-            cs.no_info_after_validator_function(dead_guard, cs.is_instance_schema(cls)),
-            cs.no_info_after_validator_function(cls.__new, list_schema),
-        ]
         ser_schema = cs.wrap_serializer_function_ser_schema(
-            ser_factory(cls.__data_unwrap), schema=list_schema
+            _serializer_factory(cls, unwrap=cls.__data_unwrap), schema=list_schema
         )
-
-        return cs.union_schema(schemas, mode="left_to_right", serialization=ser_schema)
+        return cs.no_info_wrap_validator_function(
+            _validator_factory(cls, new=cls.__new, unwrap=cls.__data_unwrap),
+            list_schema,
+            serialization=ser_schema,
+        )
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncListCtx[VT]) -> None:
         self.__syncwave_state__ = SyncState.LIVE
@@ -541,8 +542,9 @@ class SyncSet(MutableSet[VT], Reactive):
     """
 
     # SyncSet cannot hold reactive items because a reactive item is mutable
-    __syncwave_ctx__: SyncSetCtx[VT]
     __data: set[VT]
+    __syncwave_ctx__: SyncSetCtx[VT]
+    __pydantic_serializer__: SchemaSerializer
 
     def __data_unwrap(self) -> set[VT]:
         return self.__data
@@ -560,15 +562,14 @@ class SyncSet(MutableSet[VT], Reactive):
             if (args := get_args(src))
             else handler.generate_schema(set)
         )
-        schemas = [
-            cs.no_info_after_validator_function(dead_guard, cs.is_instance_schema(cls)),
-            cs.no_info_after_validator_function(cls.__new, set_schema),
-        ]
         ser_schema = cs.wrap_serializer_function_ser_schema(
-            ser_factory(cls.__data_unwrap), schema=set_schema
+            _serializer_factory(cls, unwrap=cls.__data_unwrap), schema=set_schema
         )
-
-        return cs.union_schema(schemas, mode="left_to_right", serialization=ser_schema)
+        return cs.no_info_wrap_validator_function(
+            _validator_factory(cls, new=cls.__new, unwrap=cls.__data_unwrap),
+            set_schema,
+            serialization=ser_schema,
+        )
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncSetCtx[VT]) -> None:
         self.__syncwave_state__ = SyncState.LIVE
@@ -612,6 +613,36 @@ class SyncSet(MutableSet[VT], Reactive):
     def __repr__(self) -> str:
         return f"<SyncSet {self.__data!r} ({self.__syncwave_state__.value})>"
 
+
+C = TypeVar("C", bound=SyncDict | SyncList | SyncSet)
+
+ValFct, SerFct = cs.NoInfoWrapValidatorFunction, cs.WrapSerializerFunction
+
+
+def _validator_factory(cls: type[C], new: F[[Any], C], unwrap: F[[C], Any]) -> ValFct:
+    def validate(value: Any, handler: cs.ValidatorFunctionWrapHandler) -> C:
+        if isinstance(value, Reactive):
+            dead_guard(value)
+            if isinstance(value, cls):
+                value = unwrap(value)
+        return new(handler(value))
+
+    return validate
+
+
+def _serializer_factory(cls: type[C], unwrap: F[[C], Any]) -> SerFct:
+    def serialize(value: Any, handler: cs.SerializerFunctionWrapHandler) -> Any:
+        if isinstance(value, cls):
+            return handler(unwrap(value))
+        return handler(value)  # plain-value fallback, e.g. an un-validated default
+
+    return serialize
+
+
+# Serialization "as Any" uses __pydantic_serializer__; schema hook is not called.
+SyncDict.__pydantic_serializer__ = TypeAdapter(SyncDict[Any, Any]).serializer
+SyncList.__pydantic_serializer__ = TypeAdapter(SyncList[Any]).serializer
+SyncSet.__pydantic_serializer__ = TypeAdapter(SyncSet[Any]).serializer
 
 SyncCollection.register(SyncDict)
 SyncCollection.register(SyncList)

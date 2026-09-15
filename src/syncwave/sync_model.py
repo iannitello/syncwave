@@ -22,8 +22,8 @@ from .reactive import (
     dead_guard,
     is_reactive,
     mut_reactive_op,
-    ser_factory,
 )
+from .sync_collection import _serializer_factory
 
 __all__ = ["SyncModel", "is_sync_model_supported"]
 
@@ -171,7 +171,8 @@ class SyncModel(Reactive):
             cs.no_info_after_validator_function(cls.__new, cls_schema),
         ]
         ser_schema = cs.wrap_serializer_function_ser_schema(
-            ser_factory(), schema=cls_schema
+            _serializer_factory(cls, unwrap=lambda v: v),  # ty: ignore[invalid-argument-type]
+            schema=cls_schema,
         )
 
         return cs.union_schema(schemas, mode="left_to_right", serialization=ser_schema)
