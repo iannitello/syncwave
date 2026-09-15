@@ -20,7 +20,6 @@ from .reactive import (
     SyncState,
     UnionCtx,
     dead_guard,
-    is_reactive,
     mut_reactive_op,
 )
 from .sync_collection import _serializer_factory
@@ -186,7 +185,7 @@ class SyncModel(Reactive):
             value = self.__dict__.get(name)
 
             # can be the case for a default value e.g. `SyncList[str] = []`
-            if not is_reactive(value):
+            if not isinstance(value, Reactive):
                 ta = ctx.fields_type_adapter[name]
                 value = self.__dict__[name] = ta.validate_python(value)
 
@@ -197,7 +196,7 @@ class SyncModel(Reactive):
                 value.__syncwave_init__(sref, field_ctx)
             # case 3: union content type
             elif isinstance(field_ctx, UnionCtx):
-                if is_reactive(value):
+                if isinstance(value, Reactive):
                     value.__syncwave_init__(sref, field_ctx[type(value)])
             else:
                 unreachable()
@@ -205,7 +204,7 @@ class SyncModel(Reactive):
     def __syncwave_kill__(self) -> None:
         for name in self.__syncwave_ctx__.fields_ctx:
             value = self.__dict__.get(name)
-            if is_reactive(value):
+            if isinstance(value, Reactive):
                 value.__syncwave_kill__()
         object.__setattr__(self, "__syncwave_state__", SyncState.DEAD)
 
@@ -217,7 +216,7 @@ class SyncModel(Reactive):
             new_value = new.__dict__.get(name)
 
             # can be the case for a default value e.g. `SyncList[str] = []`
-            if field_ctx is not None and not is_reactive(new_value):
+            if field_ctx is not None and not isinstance(new_value, Reactive):
                 ta = ctx.fields_type_adapter[name]
                 new_value = ta.validate_python(new_value)
 
@@ -296,8 +295,8 @@ class SyncModel(Reactive):
         return f"<{self.__syncwave_original_cls__.__repr__(self)} ({state})>"  # ty: ignore[invalid-argument-type]
 
     def __setattr_union(self, field: str, old: Any, new: Any, u_ctx: UnionCtx) -> None:
-        old_is_reactive = is_reactive(old)
-        new_is_reactive = is_reactive(new)
+        old_is_reactive = isinstance(old, Reactive)
+        new_is_reactive = isinstance(new, Reactive)
         same_type = type(old) is (new_type := type(new))
 
         if old_is_reactive and new_is_reactive and same_type:
