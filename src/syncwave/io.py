@@ -84,7 +84,10 @@ class _IO:
     def remove_file(self, path: Path) -> None:
         if path.exists() and not path.is_file():
             raise OSError(f"Path '{path}' exists but is not a regular file.")
-        path.unlink(missing_ok=True)
+        with self._lock:
+            if path in self._pending_writes:
+                self._pending_writes.pop(path).timer.cancel()
+            path.unlink(missing_ok=True)
 
     def init_json(
         self,

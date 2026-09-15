@@ -9,8 +9,6 @@ from threading import RLock
 from typing import Any, NoReturn, ParamSpec, TypeVar, final
 from typing_extensions import TypeIs
 
-from pydantic import SerializerFunctionWrapHandler as Handler
-
 from .errors import DeadReferenceError, unreachable
 
 __all__ = ["Reactive", "SyncState"]
@@ -223,12 +221,3 @@ def dead_guard(value: R) -> R:
     if value.__syncwave_state__ is SyncState.DEAD:
         raise DeadReferenceError(reference=value)
     return value
-
-
-def ser_factory(unwrap: F[[R], Any] = _id) -> F[[Any, Handler], Any]:
-    def serialize(value: Any, handler: Handler) -> Any:
-        if is_reactive(value):
-            return handler(unwrap(value))
-        return handler(value)  # plain-value fallback, e.g. an un-validated default
-
-    return serialize
