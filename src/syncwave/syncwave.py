@@ -15,7 +15,7 @@ from pydantic import PydanticSchemaGenerationError, TypeAdapter
 from .errors import unreachable
 from .io import EmptyFile, io
 from .ownership import detach, ingest
-from .reactive import Context, Reactive, StoreRef, SyncState, UnionCtx, is_reactive
+from .reactive import Context, Reactive, StoreRef, SyncState, UnionCtx
 from .sync_collection import SyncDict, SyncList
 from .sync_model import SyncModel, create_sync_model
 from .tp_validation import (
@@ -45,7 +45,7 @@ class StoreInfo:
 
 
 # Has to be thread-safe, this is a temporary solution just to start the implementation.
-class Syncwave(MutableMapping[str, Any]):
+class Syncwave(MutableMapping[str, Any], Reactive):
     """The main entry point to Syncwave.
 
     Start by creating an instance to interact with the stores.
@@ -63,6 +63,8 @@ class Syncwave(MutableMapping[str, Any]):
         [Syncwave](https://syncwave.dev/usage/syncwave/)
 
     """
+
+    __syncwave_state__ = SyncState.LIVE
 
     def __init__(self, root_path: str | Path = "syncstores") -> None:
         """Initialize a new `Syncwave` instance.
@@ -85,36 +87,6 @@ class Syncwave(MutableMapping[str, Any]):
     def root_path(self) -> Path:
         """The normalized path to the directory holding the stores' JSON files."""
         return self.__root_path
-
-    @property
-    def sync_live(self) -> Literal[True]:
-        """Whether this instance is still connected to its stores.
-
-        A `Syncwave` instance is a reactive object, but unlike other reactive objects,
-        it can never be killed, so `sync_live` always returns `True`.
-
-        ---
-
-        Abstract: Usage Documentation
-            [Reactive](https://syncwave.dev/usage/syncwave/)
-
-        """
-        return True
-
-    @property
-    def sync_state(self) -> Literal[SyncState.LIVE]:
-        """The current state of this instance.
-
-        A `Syncwave` instance is a reactive object, but unlike other reactive objects,
-        it can never be killed, so `sync_state` always returns `SyncState.LIVE`.
-
-        ---
-
-        Abstract: Usage Documentation
-            [Reactive](https://syncwave.dev/usage/syncwave/)
-
-        """
-        return SyncState.LIVE
 
     def __getitem__(self, key: str) -> Any:
         if key not in self.__stores:
@@ -145,7 +117,7 @@ class Syncwave(MutableMapping[str, Any]):
         value, store_info = self.__stores[key]
         watcher.unwatch(store_info.path)
         with store_info.sref.lock:
-            if is_reactive(value):
+            if isinstance(value, Reactive):
                 value.__syncwave_kill__()
         del self.__stores[key]
         io.remove_file(store_info.path)
@@ -475,7 +447,7 @@ class Syncwave(MutableMapping[str, Any]):
         sref = StoreRef(lock=RLock(), on_change=partial(self.__on_store_change, name))
         store_info = StoreInfo(name, path, type_adapter, sref, ctx)
 
-        if is_reactive(value):
+        if isinstance(value, Reactive):
             if ctx is None:
                 unreachable()
             elif isinstance(ctx, Context):
@@ -521,8 +493,8 @@ class Syncwave(MutableMapping[str, Any]):
             old_value.__syncwave_update__(new_value)
         # case 3: union content type
         elif isinstance(ctx, UnionCtx):
-            old_is_reactive = is_reactive(old_value)
-            new_is_reactive = is_reactive(new_value)
+            old_is_reactive = isinstance(old_value, Reactive)
+            new_is_reactive = isinstance(new_value, Reactive)
             same_type = type(old_value) is (new_type := type(new_value))
 
             if old_is_reactive and new_is_reactive and same_type:
@@ -537,10 +509,3 @@ class Syncwave(MutableMapping[str, Any]):
             unreachable()
 
         sref.on_change()
-
-
-# From the user's POV a Syncwave instance is reactive (in-place changes sync to disk),
-# so `isinstance(syncwave, Reactive)` should be True. It is only a virtual subclass:
-# it does not implement the internal Reactive protocol and `is_reactive` (intentionally)
-# returns False for it.
-Reactive.register(Syncwave)

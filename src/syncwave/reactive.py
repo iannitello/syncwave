@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from abc import ABCMeta, abstractmethod
 from collections.abc import Callable as F
 from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
 from threading import RLock
 from typing import Any, NoReturn, ParamSpec, TypeVar, final
-from typing_extensions import TypeIs
 
 from .errors import DeadReferenceError, unreachable
 
@@ -45,7 +43,7 @@ class Context:
 class UnionCtx(dict[type["Reactive"], Context]): ...
 
 
-class Reactive(metaclass=ABCMeta):
+class Reactive:
     """Base class shared by all reactive values in Syncwave.
 
     All reactive types (`SyncDict`, `SyncList`, `SyncSet` and `SyncModel`) are
@@ -73,7 +71,6 @@ class Reactive(metaclass=ABCMeta):
 
     """
 
-    __syncwave_reactive__ = True
     __syncwave_state__: SyncState = SyncState.INERT
     __syncwave_sref__: StoreRef
     __syncwave_ctx__: Context
@@ -84,15 +81,12 @@ class Reactive(metaclass=ABCMeta):
             "Reactive instances are created automatically when a value enters a store."
         )
 
-    @abstractmethod
     def __syncwave_init__(self, sref: StoreRef, ctx: C) -> None:
         raise NotImplementedError
 
-    @abstractmethod
     def __syncwave_kill__(self) -> None:
         raise NotImplementedError
 
-    @abstractmethod
     def __syncwave_update__(self, new: R) -> None:
         raise NotImplementedError
 
@@ -143,13 +137,6 @@ class Reactive(metaclass=ABCMeta):
     def sync_state(self) -> SyncState:
         """The current state of this reactive object. See `SyncState`."""
         return self.__syncwave_state__  # atomic, no need to lock
-
-
-def is_reactive(value: Any) -> TypeIs[Reactive]:
-    # Internal faster replacement for `isinstance(value, Reactive)`.
-    # See https://github.com/python/cpython/issues/92810
-    # This intentionally returns False for `Syncwave` (virtual subclass of `Reactive`).
-    return getattr(type(value), "__syncwave_reactive__", False)
 
 
 X = ParamSpec("X")

@@ -10,7 +10,7 @@ from typing import Any, Final
 
 from pydantic import TypeAdapter
 
-from .reactive import is_reactive
+from .reactive import Reactive
 
 __all__ = []
 
@@ -19,7 +19,7 @@ _IMMUTABLE_TYPES: Final = (int, float, bool, str, bytes, type(None))
 
 
 def detach(value: Any, ta: TypeAdapter) -> Any:
-    if type(value) in _IMMUTABLE_TYPES or is_reactive(value):
+    if type(value) in _IMMUTABLE_TYPES or isinstance(value, Reactive):
         return value
     return ta.validate_json(ta.dump_json(value))
 

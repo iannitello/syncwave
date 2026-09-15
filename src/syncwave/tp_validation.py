@@ -31,7 +31,7 @@ from pydantic_core import (
 
 from .errors import unreachable
 from .ownership import ingest
-from .reactive import Context, Reactive, UnionCtx, is_reactive
+from .reactive import Context, Reactive, UnionCtx
 from .sync_collection import (
     KT,
     VT,
@@ -147,7 +147,14 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
                 return _get_sync_set_ctx(tp)
             if issubclass(origin, SyncModel):
                 return _parse_model(origin)
+
+            from .syncwave import Syncwave
+
+            if issubclass(origin, Syncwave) or origin is Reactive:
+                raise TypeError(f"`{tp_name}` cannot be used in a store.")
+
             unreachable()
+
         if is_sync_model_supported(origin):
             return _parse_model(origin)
         if is_dataclass(origin):
@@ -172,7 +179,7 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
 def validate_default(value: Any, ta: TypeAdapter, tp: Any) -> Any:
     tp_name = tp.__qualname__ if isclass(tp) and not get_args(tp) else str(tp)
     err = f"Default value `{value!r}` is not valid: "
-    if is_reactive(value):
+    if isinstance(value, Reactive):
         raise ValueError(err + "reactive values cannot be used as default.")
     try:
         return ingest(value, ta)
