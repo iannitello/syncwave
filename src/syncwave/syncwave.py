@@ -45,7 +45,7 @@ class StoreInfo:
 
 
 # Has to be thread-safe, this is a temporary solution just to start the implementation.
-class Syncwave(MutableMapping[str, Any], Reactive):
+class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
     """The main entry point to Syncwave.
 
     Start by creating an instance to interact with the stores.
