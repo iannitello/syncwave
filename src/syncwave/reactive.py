@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
 from threading import RLock
-from typing import Any, NoReturn, ParamSpec, TypeVar, final
+from typing import Any, ParamSpec, TypeVar, final
 
 from .errors import DeadReferenceError, unreachable
 
@@ -46,13 +46,22 @@ class UnionCtx(dict[type["Reactive"], Context]): ...
 class Reactive:
     """Base class shared by all reactive values in Syncwave.
 
-    All reactive types (`SyncDict`, `SyncList`, `SyncSet` and `SyncModel`) are
+    All reactive types (`SyncDict`, `SyncList`, `SyncSet`, and `SyncModel`) are
     subclasses of `Reactive`. You will mainly encounter it for type checks:
-    `isinstance(value, Reactive)`.
+    `isinstance(value, Reactive)`. `Reactive` itself cannot be instantiated or
+    subclassed directly; subclass one of the reactive types instead.
 
-    A reactive object can become dead when the corresponding store entry is removed or
-    replaced. Once dead, `sync_live` returns `False` and any further operation raises
-    `DeadReferenceError`.
+    A reactive object is always in one of three states, available as `sync_state`:
+
+    - Inert: the object was created directly (e.g. `SyncList([1, 2])`) and never
+      entered a store. It behaves like its plain counterpart.
+    - Live: the object belongs to a store. Changes made through it are validated and
+      written to the JSON file, and changes to the file are applied to it.
+    - Dead: the object was removed or replaced in its store. `sync_live` returns
+      `False` and any further operation raises `DeadReferenceError`.
+
+    A value enters a store as a copy: the store creates a live object holding the same
+    data, and the original stays inert for good. Read the store to get the live object.
 
     Example:
     ```python
@@ -75,11 +84,15 @@ class Reactive:
     __syncwave_sref__: StoreRef
     __syncwave_ctx__: Context
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:  # ruff: ignore[undocumented-public-method]
-        raise TypeError(
-            f"`{cls.__qualname__}` cannot be instantiated directly. "
-            "Reactive instances are created automatically when a value enters a store."
-        )
+    def __init_subclass__(cls, *, _syncwave_root: bool = False, **kwargs: Any) -> None:
+        if Reactive in cls.__bases__ and not _syncwave_root:
+            raise TypeError("`Reactive` cannot be subclassed directly.")
+        super().__init_subclass__(**kwargs)
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Raise `TypeError`: `Reactive` itself cannot be instantiated."""
+        if type(self) is Reactive:
+            raise TypeError("`Reactive` is a base class and cannot be instantiated.")
 
     def __syncwave_init__(self, sref: StoreRef, ctx: C) -> None:
         raise NotImplementedError

@@ -112,7 +112,7 @@ class SyncModelCtx(Context):
     fields_type_adapter: dict[str, TypeAdapter[Any]]
 
 
-class SyncModel(Reactive):
+class SyncModel(Reactive, _syncwave_root=True):
     """Base class for reactive models.
 
     Instances of `SyncModel` behave just like the original model: field access and
