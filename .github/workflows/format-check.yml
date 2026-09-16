@@ -29,10 +29,10 @@ jobs:
         run: uv sync
 
       - name: Check formatting with Ruff
-        run: uv run ruff format --check .
+        run: uv run ruff format --check --preview .
 
       - name: Check linting with Ruff
-        run: uv run ruff check .
+        run: uv run ruff check --preview .
 
       - name: Check typing with Ruff
         run: uv run ty check src
