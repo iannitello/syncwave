@@ -41,6 +41,7 @@ from .sync_collection import (
     SyncListCtx,
     SyncSet,
     SyncSetCtx,
+    type_args,
 )
 from .sync_model import SyncModel, SyncModelCtx, is_sync_model_supported
 
@@ -95,27 +96,31 @@ def collection_wrap(
         else:
             resolved_collection = SyncList
 
+    if resolved_collection is None:
+        return sync_model
+
     origin = get_origin(resolved_collection) or resolved_collection
     args = get_args(resolved_collection)
     tp_name = getattr(origin, "__qualname__", repr(origin))
+    is_dict = isclass(origin) and issubclass(origin, SyncDict)
+    is_list = isclass(origin) and issubclass(origin, SyncList)
+    is_set = isclass(origin) and issubclass(origin, SyncSet)
 
     if (len_args := len(args)) > 0:
-        if origin is not SyncDict:
+        if not is_dict:
             raise TypeError(f"`{tp_name}` does not support type arguments.")
-        if origin is SyncDict and len_args > 1:
-            raise TypeError("`SyncDict` supports only one type argument for the key.")
+        if len_args > 1:
+            raise TypeError(f"`{tp_name}` supports only one type argument for the key.")
         _validate_dict_key_tp(args[0])
-        return GenericAlias(SyncDict, (args[0], sync_model))
+        return GenericAlias(origin, (args[0], sync_model))
 
-    if origin is None:
-        return sync_model
-    if origin is SyncDict:
-        return GenericAlias(SyncDict, (str, sync_model))
-    if origin is SyncList:
-        return GenericAlias(SyncList, (sync_model,))
+    if is_dict:
+        return GenericAlias(origin, (str, sync_model))
+    if is_list:
+        return GenericAlias(origin, (sync_model,))
 
     err = "`collection` must be one of: `SyncDict`, `SyncList`, `None`, or `'auto'`."
-    if origin is SyncSet:
+    if is_set:
         err += " `SyncSet` cannot be used because it cannot contain reactive items."
     raise ValueError(err)
 
@@ -240,7 +245,7 @@ def _field_annotation(field_info: FieldInfo) -> Any:
 
 
 def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
-    args = get_args(tp)
+    args = type_args(tp, SyncDict)
 
     if len(args) == 2:
         _validate_dict_key_tp(args[0])
@@ -255,7 +260,7 @@ def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
         raise TypeError("`SyncDict` requires 0 or 2 type arguments.")
 
     return SyncDictCtx(
-        tp=SyncDict,
+        tp=get_origin(tp) or tp,
         inner_ctx=inner_ctx,
         key_type_adapter=key_type_adapter,
         value_type_adapter=value_type_adapter,
@@ -263,7 +268,7 @@ def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
 
 
 def _get_sync_list_ctx(tp: type[SyncList[VT]]) -> SyncListCtx[VT]:
-    args = get_args(tp)
+    args = type_args(tp, SyncList)
 
     if len(args) == 1:
         inner_ctx = drill_tp(args[0])
@@ -275,14 +280,14 @@ def _get_sync_list_ctx(tp: type[SyncList[VT]]) -> SyncListCtx[VT]:
         raise TypeError("`SyncList` requires 0 or 1 type argument.")
 
     return SyncListCtx(
-        tp=SyncList,
+        tp=get_origin(tp) or tp,
         inner_ctx=inner_ctx,
         item_type_adapter=item_type_adapter,
     )
 
 
 def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
-    args = get_args(tp)
+    args = type_args(tp, SyncSet)
 
     if len(args) == 1:
         tp_name = getattr(args[0], "__qualname__", repr(args[0]))
@@ -296,7 +301,7 @@ def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
         raise TypeError("`SyncSet` requires 0 or 1 type argument.")
 
     return SyncSetCtx(
-        tp=SyncSet,
+        tp=get_origin(tp) or tp,
         inner_ctx=None,
         item_type_adapter=item_type_adapter,
     )

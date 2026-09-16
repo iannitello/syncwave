@@ -16,9 +16,10 @@ from collections.abc import (
     MutableSet,
 )
 from dataclasses import dataclass
+from inspect import isclass
 from types import GenericAlias
-from typing import Any, Generic, NoReturn, SupportsIndex, TypeVar, final, get_args
-from typing_extensions import Self
+from typing import Any, Generic, NoReturn, SupportsIndex, final, get_args, get_origin
+from typing_extensions import Self, TypeVar
 
 from pydantic import GetCoreSchemaHandler as Handler
 from pydantic import TypeAdapter
@@ -41,8 +42,9 @@ from .reactive import (
 __all__ = ["SyncCollection", "SyncDict", "SyncList", "SyncSet"]
 
 
-KT = TypeVar("KT")
-VT = TypeVar("VT", bound=Reactive | Any)
+KT = TypeVar("KT", default=str)
+VT = TypeVar("VT", bound=Reactive | Any, default=Any)
+C = TypeVar("C", bound="SyncDict | SyncList | SyncSet")
 
 
 @final
@@ -84,9 +86,40 @@ class SyncCollection(Reactive, metaclass=ABCMeta, _syncwave_root=True):
         raise NotImplementedError
 
 
+def type_args(tp: Any, root: type[C]) -> tuple[Any, ...]:
+    # `get_args` for SyncCollection types, but works for `class Tags(SyncList[str])`.
+    origin = get_origin(tp) or tp
+    args = get_args(tp)
+
+    if origin is root or not (isclass(origin) and issubclass(origin, root)):
+        return args
+
+    for base in origin.__dict__.get("__orig_bases__", origin.__bases__):
+        base_origin = get_origin(base) or base
+        if isclass(base_origin) and issubclass(base_origin, root):
+            base_args = type_args(base, root)
+            break
+    else:
+        return args
+
+    # fills TypeVars left open
+    tp_vars = tuple(dict.fromkeys(a for a in base_args if isinstance(a, TypeVar)))
+    if not args:
+        return () if tp_vars else base_args
+    if not base_args:
+        return args
+    tp_name = origin.__qualname__
+    if not tp_vars:
+        raise TypeError(f"`{tp_name}` is not generic and cannot be subscripted.")
+    if (len_a := len(args)) != (len_tpv := len(tp_vars)):
+        raise TypeError(f"`{tp_name}` expects {len_tpv} type argument(s), got {len_a}.")
+    substitutions = dict(zip(tp_vars, args, strict=True))
+    return tuple(substitutions.get(a, a) for a in base_args)
+
+
 @dataclass(frozen=True)
 class SyncDictCtx(Context, Generic[KT, VT]):
-    tp: type[SyncDict]
+    tp: type[SyncDict[Any, Any]]
     inner_ctx: Context | UnionCtx | None
     key_type_adapter: TypeAdapter[KT] | TypeAdapter[str]
     value_type_adapter: TypeAdapter[VT]
@@ -153,7 +186,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive, _syncwave_root=True):
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
         dict_schema = (
             handler.generate_schema(GenericAlias(dict, args))
-            if (args := get_args(src))
+            if (args := type_args(src, SyncDict))
             # a bare SyncDict is treated as SyncDict[str, Any]
             else handler.generate_schema(GenericAlias(dict, (str, Any)))
         )
@@ -277,7 +310,8 @@ class SyncDict(MutableMapping[KT, VT], Reactive, _syncwave_root=True):
         return str(self.__data)
 
     def __repr__(self) -> str:
-        return f"<SyncDict {self.__data!r} ({self.__syncwave_state__.value})>"
+        tp_name, state = type(self).__qualname__, self.__syncwave_state__.value
+        return f"<{tp_name} {self.__data!r} ({state})>"
 
     def __setitem_reactive(self, k: KT, old: VT | None, new: VT, ctx: Context) -> None:
         if old is not None:
@@ -303,7 +337,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive, _syncwave_root=True):
 
 @dataclass(frozen=True)
 class SyncListCtx(Context, Generic[VT]):
-    tp: type[SyncList]
+    tp: type[SyncList[Any]]
     inner_ctx: Context | UnionCtx | None
     item_type_adapter: TypeAdapter[VT]
 
@@ -362,7 +396,7 @@ class SyncList(MutableSequence[VT], Reactive, _syncwave_root=True):
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
         list_schema = (
             handler.generate_schema(GenericAlias(list, args))
-            if (args := get_args(src))
+            if (args := type_args(src, SyncList))
             else handler.generate_schema(list)
         )
         ser_schema = cs.wrap_serializer_function_ser_schema(
@@ -518,7 +552,8 @@ class SyncList(MutableSequence[VT], Reactive, _syncwave_root=True):
         return str(self.__data)
 
     def __repr__(self) -> str:
-        return f"<SyncList {self.__data!r} ({self.__syncwave_state__.value})>"
+        tp_name, state = type(self).__qualname__, self.__syncwave_state__.value
+        return f"<{tp_name} {self.__data!r} ({state})>"
 
     def __setitem_union(self, i: int, old: VT, new: VT, u_ctx: UnionCtx) -> None:
         old_is_reactive = isinstance(old, Reactive)
@@ -552,7 +587,7 @@ class SyncList(MutableSequence[VT], Reactive, _syncwave_root=True):
 
 @dataclass(frozen=True)
 class SyncSetCtx(Context, Generic[VT]):
-    tp: type[SyncSet]
+    tp: type[SyncSet[Any]]
     inner_ctx: None  # never holds reactive items
     item_type_adapter: TypeAdapter[VT]
 
@@ -610,7 +645,7 @@ class SyncSet(MutableSet[VT], Reactive, _syncwave_root=True):
     def __get_pydantic_core_schema__(cls, src: Any, handler: Handler) -> cs.CoreSchema:
         set_schema = (
             handler.generate_schema(GenericAlias(set, args))
-            if (args := get_args(src))
+            if (args := type_args(src, SyncSet))
             else handler.generate_schema(set)
         )
         ser_schema = cs.wrap_serializer_function_ser_schema(
@@ -671,10 +706,9 @@ class SyncSet(MutableSet[VT], Reactive, _syncwave_root=True):
         return str(self.__data)
 
     def __repr__(self) -> str:
-        return f"<SyncSet {self.__data!r} ({self.__syncwave_state__.value})>"
+        tp_name, state = type(self).__qualname__, self.__syncwave_state__.value
+        return f"<{tp_name} {self.__data!r} ({state})>"
 
-
-C = TypeVar("C", bound=SyncDict | SyncList | SyncSet)
 
 ValFct, SerFct = cs.NoInfoWrapValidatorFunction, cs.WrapSerializerFunction
 
