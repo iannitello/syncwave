@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
 from threading import RLock
-from typing import Any, ParamSpec, TypeVar, final
+from typing import Any, ParamSpec, TypeVar, cast, final
 
 from .errors import DeadReferenceError, unreachable
 
@@ -168,22 +168,23 @@ def _id(value: Any) -> Any:  # identity function
 def reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X, Y]]:
     def decorator(fn: F[X, Y]) -> F[X, Y]:
         @wraps(fn)
-        def wrapper(self: R, *args: X.args, **kwargs: X.kwargs) -> Y:
+        def wrapper(*args: X.args, **kwargs: X.kwargs) -> Y:
+            self = cast(R, args[0])
             try:
                 sref = self.__syncwave_sref__
             except AttributeError as e:
                 if self.__syncwave_state__ is SyncState.INERT:
-                    return inert_fn(unwrap(self), *args, **kwargs)
+                    return inert_fn(unwrap(self), *args[1:], **kwargs)
                 unreachable(_NO_SREF.format(self.__syncwave_state__.value), from_=e)
 
             with sref.lock:
                 if self.__syncwave_state__ is SyncState.DEAD:
                     raise DeadReferenceError(reference=self)
                 if self.__syncwave_state__ is SyncState.LIVE:
-                    return fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+                    return fn(*args, **kwargs)
                 unreachable(_INERT_WITH_SREF)
 
-        return wrapper  # ty: ignore[invalid-return-type]
+        return wrapper
 
     return decorator
 
@@ -191,12 +192,13 @@ def reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X, Y]]
 def mut_reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X, None]]:
     def decorator(fn: F[X, Y]) -> F[X, None]:
         @wraps(fn)
-        def wrapper(self: R, *args: X.args, **kwargs: X.kwargs) -> None:
+        def wrapper(*args: X.args, **kwargs: X.kwargs) -> None:
+            self = cast(R, args[0])
             try:
                 sref = self.__syncwave_sref__
             except AttributeError as e:
                 if self.__syncwave_state__ is SyncState.INERT:
-                    inert_fn(unwrap(self), *args, **kwargs)
+                    inert_fn(unwrap(self), *args[1:], **kwargs)
                     return
                 unreachable(_NO_SREF.format(self.__syncwave_state__.value), from_=e)
 
@@ -204,7 +206,7 @@ def mut_reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X,
                 if self.__syncwave_state__ is SyncState.DEAD:
                     raise DeadReferenceError(reference=self)
                 if self.__syncwave_state__ is SyncState.LIVE:
-                    result = fn(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+                    result = fn(*args, **kwargs)
                     if result is not None:
                         fn_name = getattr(fn, "__qualname__", repr(fn))
                         unreachable(f"Mutating operation `{fn_name}` returned a value.")
@@ -212,7 +214,7 @@ def mut_reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X,
                     return
                 unreachable(_INERT_WITH_SREF)
 
-        return wrapper  # ty: ignore[invalid-return-type]
+        return wrapper
 
     return decorator
 
