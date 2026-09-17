@@ -165,7 +165,7 @@ def _id(value: Any) -> Any:  # identity function
     return value
 
 
-def reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X, Y]]:
+def reactive_op(inert_fn: F | None = None, unwrap: F = _id) -> F[[F[X, Y]], F[X, Y]]:
     def decorator(fn: F[X, Y]) -> F[X, Y]:
         @wraps(fn)
         def wrapper(*args: X.args, **kwargs: X.kwargs) -> Y:
@@ -174,6 +174,8 @@ def reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X, Y]]
                 sref = self.__syncwave_sref__
             except AttributeError as e:
                 if self.__syncwave_state__ is SyncState.INERT:
+                    if inert_fn is None:
+                        return fn(*args, **kwargs)
                     return inert_fn(unwrap(self), *args[1:], **kwargs)
                 unreachable(_NO_SREF.format(self.__syncwave_state__.value), from_=e)
 
@@ -189,7 +191,7 @@ def reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X, Y]]
     return decorator
 
 
-def mut_reactive_op(inert_fn: F, unwrap: F[[R], Any] = _id) -> F[[F[X, Y]], F[X, None]]:
+def mut_reactive_op(inert_fn: F, unwrap: F = _id) -> F[[F[X, Y]], F[X, None]]:
     def decorator(fn: F[X, Y]) -> F[X, None]:
         @wraps(fn)
         def wrapper(*args: X.args, **kwargs: X.kwargs) -> None:
