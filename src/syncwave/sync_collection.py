@@ -15,6 +15,7 @@ from collections.abc import (
     MutableSequence,
     MutableSet,
 )
+from copy import deepcopy
 from dataclasses import dataclass
 from inspect import isclass
 from types import GenericAlias
@@ -313,6 +314,16 @@ class SyncDict(MutableMapping[KT, VT], Reactive, _syncwave_root=True):
         tp_name, state = type(self).__qualname__, self.__syncwave_state__.value
         return f"<{tp_name} {self.__data!r} ({state})>"
 
+    @reactive_op()
+    def __copy__(self) -> Self:
+        return self.__new(dict(self))
+
+    @reactive_op()
+    def __deepcopy__(self, memo: dict[int, Any]) -> Self:
+        return self.__new(deepcopy(self.__data, memo))
+
+    copy = __copy__
+
     def __setitem_reactive(self, k: KT, old: VT | None, new: VT, ctx: Context) -> None:
         if old is not None:
             old.__syncwave_update__(new)
@@ -555,6 +566,16 @@ class SyncList(MutableSequence[VT], Reactive, _syncwave_root=True):
         tp_name, state = type(self).__qualname__, self.__syncwave_state__.value
         return f"<{tp_name} {self.__data!r} ({state})>"
 
+    @reactive_op()
+    def __copy__(self) -> Self:
+        return self.__new(list(self))
+
+    @reactive_op()
+    def __deepcopy__(self, memo: dict[int, Any]) -> Self:
+        return self.__new(deepcopy(self.__data, memo))
+
+    copy = __copy__
+
     def __setitem_union(self, i: int, old: VT, new: VT, u_ctx: UnionCtx) -> None:
         old_is_reactive = isinstance(old, Reactive)
         new_is_reactive = isinstance(new, Reactive)
@@ -708,6 +729,16 @@ class SyncSet(MutableSet[VT], Reactive, _syncwave_root=True):
     def __repr__(self) -> str:
         tp_name, state = type(self).__qualname__, self.__syncwave_state__.value
         return f"<{tp_name} {self.__data!r} ({state})>"
+
+    @reactive_op()
+    def __copy__(self) -> Self:
+        return self.__new(set(self))
+
+    @reactive_op()
+    def __deepcopy__(self, memo: dict[int, Any]) -> Self:
+        return self.__new(deepcopy(self.__data, memo))
+
+    copy = __copy__
 
 
 ValFct, SerFct = cs.NoInfoWrapValidatorFunction, cs.WrapSerializerFunction
