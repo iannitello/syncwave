@@ -45,7 +45,7 @@ __all__ = ["SyncCollection", "SyncDict", "SyncList", "SyncSet"]
 
 KT = TypeVar("KT", default=str)
 VT = TypeVar("VT", bound=Reactive | Any, default=Any)
-C = TypeVar("C", bound="SyncDict | SyncList | SyncSet")
+CT = TypeVar("CT", bound="SyncDict | SyncList | SyncSet")
 
 
 @final
@@ -87,7 +87,7 @@ class SyncCollection(Reactive, metaclass=ABCMeta, _syncwave_root=True):
         raise NotImplementedError
 
 
-def type_args(tp: Any, root: type[C]) -> tuple[Any, ...]:
+def type_args(tp: Any, root: type[CT]) -> tuple[Any, ...]:
     # `get_args` for SyncCollection types, but works for `class Tags(SyncList[str])`.
     origin = get_origin(tp) or tp
     args = get_args(tp)
@@ -323,6 +323,16 @@ class SyncDict(MutableMapping[KT, VT], Reactive, _syncwave_root=True):
         return self.__new(deepcopy(self.__data, memo))
 
     copy = __copy__
+
+    @reactive_op()
+    def __eq__(self, other: object, /) -> bool:
+        if isinstance(other, dict):
+            return self.__data == other
+        if isinstance(other, SyncDict):
+            return self.__data == dead_guard(other).__data
+        return NotImplemented
+
+    __hash__ = None
 
     def __setitem_reactive(self, k: KT, old: VT | None, new: VT, ctx: Context) -> None:
         if old is not None:
@@ -576,6 +586,16 @@ class SyncList(MutableSequence[VT], Reactive, _syncwave_root=True):
 
     copy = __copy__
 
+    @reactive_op()
+    def __eq__(self, other: object, /) -> bool:
+        if isinstance(other, list):
+            return self.__data == other
+        if isinstance(other, SyncList):
+            return self.__data == dead_guard(other).__data
+        return NotImplemented
+
+    __hash__ = None
+
     def __setitem_union(self, i: int, old: VT, new: VT, u_ctx: UnionCtx) -> None:
         old_is_reactive = isinstance(old, Reactive)
         new_is_reactive = isinstance(new, Reactive)
@@ -740,12 +760,22 @@ class SyncSet(MutableSet[VT], Reactive, _syncwave_root=True):
 
     copy = __copy__
 
+    @reactive_op()
+    def __eq__(self, other: object, /) -> bool:
+        if isinstance(other, (set, frozenset)):
+            return self.__data == other
+        if isinstance(other, SyncSet):
+            return self.__data == dead_guard(other).__data
+        return NotImplemented
 
-ValFct, SerFct = cs.NoInfoWrapValidatorFunction, cs.WrapSerializerFunction
+    __hash__ = None
 
 
-def _validator_factory(cls: type[C], new: F[[Any], C], unwrap: F[[C], Any]) -> ValFct:
-    def validate(value: Any, handler: cs.ValidatorFunctionWrapHandler) -> C:
+ValFn, SerFn = cs.NoInfoWrapValidatorFunction, cs.WrapSerializerFunction
+
+
+def _validator_factory(cls: type[CT], new: F[[Any], CT], unwrap: F[[CT], Any]) -> ValFn:
+    def validate(value: Any, handler: cs.ValidatorFunctionWrapHandler) -> CT:
         if isinstance(value, Reactive):
             dead_guard(value)
             if isinstance(value, cls):
@@ -755,7 +785,7 @@ def _validator_factory(cls: type[C], new: F[[Any], C], unwrap: F[[C], Any]) -> V
     return validate
 
 
-def _serializer_factory(cls: type[C], unwrap: F[[C], Any]) -> SerFct:
+def _serializer_factory(cls: type[CT], unwrap: F[[CT], Any]) -> SerFn:
     def serialize(value: Any, handler: cs.SerializerFunctionWrapHandler) -> Any:
         if isinstance(value, cls):
             return handler(unwrap(value))

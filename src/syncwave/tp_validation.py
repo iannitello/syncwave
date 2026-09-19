@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Container
 from dataclasses import is_dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
@@ -35,6 +34,7 @@ from .reactive import Context, Reactive, UnionCtx
 from .sync_collection import (
     KT,
     VT,
+    SyncCollection,
     SyncDict,
     SyncDictCtx,
     SyncList,
@@ -43,12 +43,12 @@ from .sync_collection import (
     SyncSetCtx,
     type_args,
 )
-from .sync_model import SyncModel, SyncModelCtx, is_sync_model_supported
+from .sync_model import SyncModel, SyncModelCtx, SyncRoot, is_pydantic_model
 
 if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
 
-    from .sync_model import SMS
+    from .sync_model import PM, RM
 
 __all__ = []
 
@@ -61,31 +61,25 @@ def str_guard(param: str, value: Any) -> None:
         raise ValueError(f"'{param}' cannot be empty or whitespace only.")
 
 
-def sync_model_guard(cls: Any, known_models: Container[type[SMS]]) -> None:
-    if cls in known_models:
-        raise ValueError(f"Class '{cls.__qualname__}' has already been made reactive.")
+def sync_model_guard(cls: Any) -> None:
     if not isclass(cls):
         raise TypeError(f"Expected a class, got `{type(cls).__qualname__}`.")
-    if not is_sync_model_supported(cls):
+    err = "Expected a subclass of `SyncModel`, `SyncRoot`, or `SyncDataclass`: "
+    if not is_pydantic_model(cls):
         if is_dataclass(cls):
-            raise TypeError(
-                "Standard `dataclasses.dataclass` are not supported, "
-                "use `pydantic.dataclasses.dataclass` instead."
-            )
-        raise TypeError(
-            f"'{cls.__qualname__}' cannot be made reactive. The supported types are:\n"
-            "  1. subclasses of `pydantic.BaseModel`,\n"
-            "  2. subclasses of `pydantic.RootModel`,\n"
-            "  3. classes decorated with `@pydantic.dataclasses.dataclass`."
-        )
-    _parse_model(cls, as_sync_model=True)
+            err += "use `SyncDataclass` instead of a standard `dataclass`."
+            raise TypeError(err)
+        raise TypeError(err + f"got `{cls.__qualname__}` instead.")
+    if not issubclass(cls, Reactive):
+        err += "use a reactive model instead of a standard Pydantic model."
+        raise TypeError(err)
 
 
 def collection_wrap(
-    cls: type[SMS],
-    sync_model: type[SyncModel],
+    cls: type[RM],
     collection: type[SyncDict | SyncList] | Literal["auto"] | None,
-) -> type | GenericAlias:
+) -> type[Reactive] | GenericAlias:
+
     resolved_collection = collection  # non "auto" case
     if collection == "auto":
         if issubclass(cls, RootModel):
@@ -97,11 +91,12 @@ def collection_wrap(
             resolved_collection = SyncList
 
     if resolved_collection is None:
-        return sync_model
+        return cls
 
     origin = get_origin(resolved_collection) or resolved_collection
     args = get_args(resolved_collection)
     tp_name = getattr(origin, "__qualname__", repr(origin))
+
     is_dict = isclass(origin) and issubclass(origin, SyncDict)
     is_list = isclass(origin) and issubclass(origin, SyncList)
     is_set = isclass(origin) and issubclass(origin, SyncSet)
@@ -112,12 +107,12 @@ def collection_wrap(
         if len_args > 1:
             raise TypeError(f"`{tp_name}` supports only one type argument for the key.")
         _validate_dict_key_tp(args[0])
-        return GenericAlias(origin, (args[0], sync_model))
+        return GenericAlias(origin, (args[0], cls))
 
     if is_dict:
-        return GenericAlias(origin, (str, sync_model))
+        return GenericAlias(origin, (str, cls))
     if is_list:
-        return GenericAlias(origin, (sync_model,))
+        return GenericAlias(origin, (cls,))
 
     err = "`collection` must be one of: `SyncDict`, `SyncList`, `None`, or `'auto'`."
     if is_set:
@@ -144,23 +139,28 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
         if issubclass(origin, Reactive):
             if _err_if_reactive:
                 raise TypeError(f"`{tp_name}` cannot be used here: {_err_if_reactive}")
+            from .syncwave import Syncwave
+
+            if issubclass(origin, Syncwave) or origin in (
+                Reactive,
+                SyncCollection,
+                SyncModel,
+                SyncRoot,
+                # SyncDataclass,
+            ):
+                raise TypeError(f"`{tp_name}` cannot be used here.")
+
             if issubclass(origin, SyncDict):
                 return _get_sync_dict_ctx(tp)
             if issubclass(origin, SyncList):
                 return _get_sync_list_ctx(tp)
             if issubclass(origin, SyncSet):
                 return _get_sync_set_ctx(tp)
-            if issubclass(origin, SyncModel):
+            if is_pydantic_model(origin):
                 return _parse_model(origin)
-
-            from .syncwave import Syncwave
-
-            if issubclass(origin, Syncwave) or origin is Reactive:
-                raise TypeError(f"`{tp_name}` cannot be used in a store.")
-
             unreachable()
 
-        if is_sync_model_supported(origin):
+        if is_pydantic_model(origin):
             return _parse_model(origin)
         if is_dataclass(origin):
             return _parse_model(py_dc.dataclass(origin))  # ty: ignore[invalid-argument-type]
@@ -184,8 +184,6 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
 def validate_default(value: Any, ta: TypeAdapter, tp: Any) -> Any:
     tp_name = tp.__qualname__ if isclass(tp) and not get_args(tp) else str(tp)
     err = f"Default value `{value!r}` is not valid: "
-    if isinstance(value, Reactive):
-        raise ValueError(err + "reactive values cannot be used as default.")
     try:
         return ingest(value, ta)
     except ValidationError as e:
@@ -194,28 +192,28 @@ def validate_default(value: Any, ta: TypeAdapter, tp: Any) -> Any:
         raise ValueError(err + f"cannot be serialized as type `{tp_name}`.") from e
 
 
-def _parse_model(cls: type[SMS], *, as_sync_model: bool = False) -> SyncModelCtx | None:
-    is_sync_model = issubclass(cls, SyncModel)
-    treat_as_sync_model = is_sync_model or as_sync_model
+def _parse_model(cls: type[PM]) -> SyncModelCtx | None:
+    # checking `issubclass(cls, Reactive)` should work, but type checking later fails
+    is_reactive = issubclass(cls, SyncModel)  # or issubclass(cls, SyncDataclass)
 
     config = getattr(cls, "model_config", {}) or getattr(cls, "__pydantic_config__", {})
-    if treat_as_sync_model and config.get("frozen", False):
-        raise TypeError(f"`{cls.__qualname__}` is frozen and cannot be made reactive.")
+    if is_reactive and config.get("frozen", False):
+        raise TypeError(f"Frozen model `{cls.__qualname__}` cannot be reactive.")
 
     fields_ctx: dict[str, Context | UnionCtx] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
 
     for field_name, field_info in cls.__pydantic_fields__.items():
-        err = f"Field `{field_name}` in `{cls.__qualname__}` cannot be reactive because"
-        if not treat_as_sync_model:
-            err += " it is not contained in a `SyncModel` (breaks the reactive chain)."
-        elif field_info.frozen:
-            err += " it is frozen."
-        else:
-            err = ""
+        err = f"Field `{field_name}` in `{cls.__qualname__}`: "
+        if is_reactive and field_info.frozen:
+            raise TypeError(err + "reactive models cannot have frozen fields.")
 
-        tp = _field_annotation(field_info)
-        field_ctx = drill_tp(tp, _err_if_reactive=err)
+        err += "not in a reactive model (breaks the reactive chain)."
+        field_ctx = drill_tp(
+            tp := _field_annotation(field_info),
+            _err_if_reactive="" if is_reactive else err,
+        )
+
         if field_ctx is not None:
             fields_ctx[field_name] = field_ctx
         fields_type_adapter[field_name] = TypeAdapter(tp)
@@ -223,13 +221,12 @@ def _parse_model(cls: type[SMS], *, as_sync_model: bool = False) -> SyncModelCtx
         if field_info.default is not PydanticUndefined:
             validate_default(field_info.default, fields_type_adapter[field_name], tp)
 
-    if is_sync_model:
+    if is_reactive:
         return SyncModelCtx(
             tp=cls,
             fields_ctx=fields_ctx,
             fields_type_adapter=fields_type_adapter,
         )
-
     return None
 
 
