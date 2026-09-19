@@ -4,11 +4,9 @@ from collections.abc import Callable as F
 from collections.abc import Iterator, MutableMapping
 from dataclasses import dataclass
 from functools import partial
-from keyword import iskeyword
 from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING, Any, Literal, cast
-from weakref import WeakSet
 
 from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
@@ -17,7 +15,6 @@ from .io import EmptyFile, io
 from .ownership import detach, ingest
 from .reactive import Context, Reactive, StoreRef, SyncState, UnionCtx
 from .sync_collection import SyncDict, SyncList
-from .sync_model import SyncModel, create_sync_model
 from .tp_validation import (
     collection_wrap,
     drill_tp,
@@ -30,7 +27,8 @@ from .watcher import watcher
 if TYPE_CHECKING:
     from types import GenericAlias
 
-    from .sync_model import SMS
+    from .sync_model import RM
+
 
 __all__ = ["Syncwave"]
 
@@ -81,7 +79,6 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
         io.create_dir(root)
         self.__root_path = root
         self.__stores: dict[str, tuple[Any, StoreInfo]] = {}
-        self.__models: WeakSet[type[SMS]] = WeakSet()
 
     @property
     def root_path(self) -> Path:
@@ -185,72 +182,13 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
         value, store_info = self.__stores[name]
         return detach(value, store_info.type_adapter)
 
-    def make_reactive(
-        self,
-        cls: type[SMS],
-        /,
-        *,
-        cls_name: str | None = None,
-    ) -> type[SyncModel]:
-        """Make a new reactive model from a regular model.
-
-        The returned class can be used when defining a store and its instances will be
-        reactive. This method offers more flexibility than [Syncwave.register](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.register),
-        which is the higher-level alternative.
-
-        The returned class inherits from both SyncModel and the original class `cls`.
-        The original class is not mutated by this method.
-
-        Example:
-        ```python
-        from pydantic import BaseModel
-        from syncwave import SyncList, Syncwave
-
-        syncwave = Syncwave()
-
-
-        class Customer(BaseModel):
-            name: str
-            age: int
-
-
-        SyncCustomer = syncwave.make_reactive(Customer)
-        customers = syncwave.create_store(SyncList[SyncCustomer], name="customers")
-        customers.append(Customer(name="Alice", age=30))
-        ```
-
-        ---
-
-        Abstract: Usage Documentation
-            [Syncwave](https://syncwave.dev/usage/syncwave/)
-
-        Args:
-            cls: Base class for the new reactive model.
-            cls_name: Custom name for the new class. Defaults to `"Sync" + cls.__name__`
-                if `None` is given.
-
-        Returns:
-            The new reactive model class.
-
-        """
-        sync_model_guard(cls, self.__models)
-
-        if cls_name is not None:
-            str_guard("cls_name", cls_name)
-            if not cls_name.isidentifier() or iskeyword(cls_name):
-                raise ValueError(f"'{cls_name}' is not a valid class name.")
-
-        sync_model = create_sync_model(cls, rename=cls_name or True)
-        self.__models.add(cls)
-        return sync_model
-
     def register(
         self,
         *,
         name: str,
         collection: type[SyncDict | SyncList] | Literal["auto"] | None = "auto",
         default: dict[str, Any] = EmptyFile,  # ty: ignore[invalid-parameter-default]
-    ) -> F[[type[SMS]], type[SMS]]:
+    ) -> F[[type[RM]], type[RM]]:
         """Register a model as a store with a class decorator.
 
         This is a convenience method that can be thought of as combining [Syncwave.make_reactive](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.make_reactive)
@@ -319,16 +257,13 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
         """
         if name in self.__stores:
             raise ValueError(f"Store '{name}' already exists.")
-
         str_guard("name", name)
         io.file_name_guard(name)
 
-        def decorator(cls: type[SMS]) -> type[SMS]:
-            sync_model_guard(cls, self.__models)
-            sync_model = create_sync_model(cls)
-            store_tp = collection_wrap(cls, sync_model, collection)
+        def decorator(cls: type[RM]) -> type[RM]:
+            sync_model_guard(cls)
+            store_tp = collection_wrap(cls, collection)
             self.__create_store(store_tp, name, default)
-            self.__models.add(cls)
             return cls
 
         return decorator
@@ -376,7 +311,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
         if name not in self.__stores:
             raise KeyError(f"Store '{name}' does not exist.")
         store_info = self.__stores[name][1]
-        return io.read_json(store_info.path)
+        return io.read_json(store_info.path).strip()
 
     def write_store_json(self, name: str, text: str) -> None:
         """Safely write to the JSON file associated with a store.

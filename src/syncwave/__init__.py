@@ -22,7 +22,7 @@ __version__ = "0.2.1"
 from .errors import DeadReferenceError
 from .reactive import Reactive, SyncState
 from .sync_collection import SyncCollection, SyncDict, SyncList, SyncSet
-from .sync_model import SyncModel, is_sync_model_supported
+from .sync_model import SyncModel, SyncRoot
 from .syncwave import Syncwave
 
 __all__ = [
@@ -32,8 +32,8 @@ __all__ = [
     "SyncDict",
     "SyncList",
     "SyncModel",
+    "SyncRoot",
     "SyncSet",
     "SyncState",
     "Syncwave",
-    "is_sync_model_supported",
 ]
