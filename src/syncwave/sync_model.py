@@ -18,6 +18,7 @@ from .reactive import (
     UnionCtx,
     dead_guard,
     mut_reactive_op,
+    reactive_op,
 )
 
 __all__ = ["SyncModel", "SyncRoot"]
@@ -203,6 +204,23 @@ class SyncModel(BaseModel, Reactive, _syncwave_root=True):
     def __repr__(self) -> str:
         return f"<{super().__repr__()} ({self.__syncwave_state__.value})>"
 
+    @reactive_op()
+    def __copy__(self) -> Self:
+        m = BaseModel.__copy__(self)
+        for name in _SYNCWAVE_ATTRS:
+            m.__dict__.pop(name, None)
+        for name in self.__pydantic_fields__:
+            if name in m.__dict__:
+                m.__dict__[name] = getattr(self, name)
+        return m
+
+    @reactive_op()
+    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Self:
+        shallow = BaseModel.__copy__(self)
+        for name in _SYNCWAVE_ATTRS:
+            shallow.__dict__.pop(name, None)
+        return BaseModel.__deepcopy__(shallow, memo)
+
     def __setattr_union(self, f_name: str, old: Any, new: Any, u_ctx: UnionCtx) -> None:
         old_is_reactive = isinstance(old, Reactive)
         new_is_reactive = isinstance(new, Reactive)
@@ -217,6 +235,9 @@ class SyncModel(BaseModel, Reactive, _syncwave_root=True):
             if new_is_reactive:
                 new.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
             BaseModel.__setattr__(self, f_name, new)
+
+
+_SYNCWAVE_ATTRS: Final = ("__syncwave_state__", "__syncwave_sref__", "__syncwave_ctx__")
 
 
 class SyncRoot(RootModel, SyncModel, _syncwave_root=True): ...  # ruff: ignore[undocumented-public-class]
