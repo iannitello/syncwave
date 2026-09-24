@@ -46,9 +46,10 @@ from .sync_collection import (
 from .sync_model import SyncModel, SyncModelCtx, SyncRoot, is_pydantic_model
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
     from pydantic.fields import FieldInfo
 
-    from .sync_model import PM, RM
+    from .sync_model import PydanticDataclass
 
 __all__ = []
 
@@ -76,7 +77,7 @@ def sync_model_guard(cls: Any) -> None:
 
 
 def collection_wrap(
-    cls: type[RM],
+    cls: type[SyncModel],
     collection: type[SyncDict | SyncList] | Literal["auto"] | None,
 ) -> type[Reactive] | GenericAlias:
 
@@ -192,12 +193,15 @@ def validate_default(value: Any, ta: TypeAdapter, tp: Any) -> Any:
         raise ValueError(err + f"cannot be serialized as type `{tp_name}`.") from e
 
 
-def _parse_model(cls: type[PM]) -> SyncModelCtx | None:
+def _parse_model(cls: type[BaseModel | PydanticDataclass]) -> SyncModelCtx | None:
     # checking `issubclass(cls, Reactive)` should work, but type checking later fails
     is_reactive = issubclass(cls, SyncModel)  # or issubclass(cls, SyncDataclass)
 
+    # `frozen` comes from the config (models, dataclasses) or from the dataclass options
     config = getattr(cls, "model_config", {}) or getattr(cls, "__pydantic_config__", {})
-    if is_reactive and config.get("frozen", False):
+    dc_params = getattr(cls, "__dataclass_params__", None)
+    frozen = config.get("frozen", False) or getattr(dc_params, "frozen", False)
+    if is_reactive and frozen:
         raise TypeError(f"Frozen model `{cls.__qualname__}` cannot be reactive.")
 
     fields_ctx: dict[str, Context | UnionCtx] = {}

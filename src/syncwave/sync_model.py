@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Final, TypeGuard
+from typing import TYPE_CHECKING, Any, Final, Generic, TypeGuard, TypeVar
 from typing_extensions import Self
 
-from pydantic import BaseModel, RootModel, TypeAdapter
-from pydantic import GetCoreSchemaHandler as Handler
+from pydantic import BaseModel, GetCoreSchemaHandler as Handler, RootModel, TypeAdapter
+from pydantic.root_model import RootModelRootType
 from pydantic_core import core_schema as cs
 
 from .errors import DeadReferenceError, unreachable
@@ -23,55 +23,88 @@ from .reactive import (
 
 __all__ = ["SyncModel", "SyncRoot"]
 
+if TYPE_CHECKING:
+    from typing import ClassVar, Protocol
+
+    from _typeshed import DataclassInstance as StandardDataclass
+    from pydantic import ConfigDict
+    from pydantic.fields import FieldInfo
+
+    class PydanticDataclass(StandardDataclass, Protocol):
+        __pydantic_config__: ClassVar[ConfigDict]
+        __pydantic_fields__: ClassVar[dict[str, FieldInfo]]
+
+
+def is_pydantic_model(cls: type[Any]) -> TypeGuard[type[BaseModel | PydanticDataclass]]:
+    # assumes `cls` is a class (called from trusted code)
+    return hasattr(cls, "__pydantic_fields__")
+
+
+SM = TypeVar("SM", bound="SyncModel")
+
 
 _MISSING: Final = object()
+_SYNCWAVE_ATTRS: Final = ("__syncwave_state__", "__syncwave_sref__", "__syncwave_ctx__")
+
+
+def _detach_fields(self: SyncModel, target: SyncModel) -> None:
+    for name in type(self).__pydantic_fields__:
+        if name in target.__dict__:
+            target.__dict__[name] = getattr(self, name)
 
 
 @dataclass(frozen=True)
 class SyncModelCtx(Context):
-    tp: type[RM]
+    tp: type[SyncModel]
     fields_ctx: dict[str, Context | UnionCtx]
     fields_type_adapter: dict[str, TypeAdapter[Any]]
 
 
 class SyncModel(BaseModel, Reactive, _syncwave_root=True):
-    """Base class for reactive models.
+    """Base class for reactive Pydantic models.
 
-    Instances of `SyncModel` behave just like the original model: field access and
-    assignment work exactly the same way. The difference is that every field assignment
-    triggers a write to the backing JSON file, and external changes to the file are
-    reflected in the same object.
+    Subclass `SyncModel` instead of `pydantic.BaseModel` to define a reactive model.
+    Fields, validators, `model_config`, and everything else work as with a regular
+    Pydantic model. A reactive model has three states (see `SyncState`):
 
-    You will rarely interact with `SyncModel` directly. Instances appear when you access
-    reactive model values from a store, and `isinstance(value, SyncModel)` is the main
-    way to check for them.
+    - An instance created directly (`Settings(volume=8)`) is inert: it behaves like a
+      regular Pydantic instance and is not connected to any store.
+    - An instance read from a store is live: assigning a field validates the value and
+      writes it to the JSON file, and changes to the file are applied to the instance.
+    - An instance removed from its store is dead: any operation raises
+      `DeadReferenceError`.
+
+    A value enters a store as a copy, so the instance you pass stays inert and the
+    store hands you a live one. Reactive fields (`SyncList[str]`, another reactive
+    model, ...) are live as well when the model is live. Subclassing a reactive model
+    gives another reactive model, and so does `pydantic.create_model` with
+    `__base__=SyncModel`. For a single-value model, see `SyncRoot`.
+
+    Restrictions: a reactive model cannot be frozen and cannot have frozen fields, and
+    field defaults must be valid for their type (checked at class definition).
 
     Example:
     ```python
-    from pydantic import BaseModel
-    from syncwave import SyncModel, Syncwave
+    from syncwave import SyncList, SyncModel, Syncwave
 
     syncwave = Syncwave()
 
 
-    @syncwave.register(name="customers")
-    class Customer(BaseModel):
-        name: str
-        age: int
+    class Settings(SyncModel):
+        volume: int = 8
+        recent_files: SyncList[str] = SyncList()
 
 
-    customers = syncwave["customers"]
-    customers.append({"name": "Alice", "age": 30})
-    alice = customers[0]
-    isinstance(alice, SyncModel)  # True
-    alice.age = 31  # writes to customers.json immediately
-    print(alice)  # name='Alice' age=31
+    settings = syncwave.create_store(Settings, name="settings")
+    settings.volume = 7  # written to settings.json
+    settings.recent_files.append("notes.txt")  # written too
+    print(settings)  # <Settings(volume=7, recent_files=[notes.txt]) (live)>
     ```
 
     ---
 
     Abstract: Usage Documentation
-        [SyncModel](https://syncwave.dev/usage/syncwave/)
+        [SyncModel](https://syncwave.dev/usage/models/)
 
     """
 
@@ -209,9 +242,7 @@ class SyncModel(BaseModel, Reactive, _syncwave_root=True):
         m = BaseModel.__copy__(self)
         for name in _SYNCWAVE_ATTRS:
             m.__dict__.pop(name, None)
-        for name in self.__pydantic_fields__:
-            if name in m.__dict__:
-                m.__dict__[name] = getattr(self, name)
+        _detach_fields(self, m)
         return m
 
     @reactive_op()
@@ -237,34 +268,30 @@ class SyncModel(BaseModel, Reactive, _syncwave_root=True):
             BaseModel.__setattr__(self, f_name, new)
 
 
-_SYNCWAVE_ATTRS: Final = ("__syncwave_state__", "__syncwave_sref__", "__syncwave_ctx__")
+class SyncRoot(SyncModel, RootModel, Generic[RootModelRootType], _syncwave_root=True):
+    """Base class for reactive root models.
+
+    Shorthand for `class Locale(SyncModel, RootModel[str])`: a reactive model holding a
+    single value under the `root` field. Everything from `SyncModel` applies. The JSON
+    file holds the bare value, not an object around it.
+
+    Example:
+    ```python
+    from syncwave import SyncRoot, Syncwave
+
+    syncwave = Syncwave()
 
 
-class SyncRoot(RootModel, SyncModel, _syncwave_root=True): ...  # ruff: ignore[undocumented-public-class]
+    class Locale(SyncRoot[str]): ...
 
 
-if TYPE_CHECKING:
-    from dataclasses import field
-    from typing import ClassVar, Protocol
-    from typing_extensions import dataclass_transform
+    locale = syncwave.create_store(Locale, name="locale")
+    locale.root = "en-US"  # written to locale.json as "en-US"
+    ```
 
-    from _typeshed import DataclassInstance as StandardDataclass
-    from pydantic import ConfigDict, Field
-    from pydantic.fields import FieldInfo
+    ---
 
-    class PydanticDataclass(StandardDataclass, Protocol):
-        __pydantic_config__: ClassVar[ConfigDict]
-        __pydantic_fields__: ClassVar[dict[str, FieldInfo]]
+    Abstract: Usage Documentation
+        [SyncRoot](https://syncwave.dev/usage/models/)
 
-    @dataclass_transform(field_specifiers=(field, Field))
-    class SyncDataclass(Reactive, _syncwave_root=True):
-        __pydantic_config__: ClassVar[ConfigDict]
-        __pydantic_fields__: ClassVar[dict[str, FieldInfo]]
-
-    PM = BaseModel | PydanticDataclass  # Pydantic Model
-    RM = SyncModel | SyncDataclass  # Reactive Model
-
-
-def is_pydantic_model(cls: type[Any]) -> TypeGuard[type[PM]]:
-    # assumes `cls` is a class (called from trusted code)
-    return hasattr(cls, "__pydantic_fields__")
+    """

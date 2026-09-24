@@ -10,7 +10,7 @@ Imports available from this module:
 - [SyncList](https://syncwave.dev/api/sync_collections/#syncwave.SyncList)
 - [SyncSet](https://syncwave.dev/api/sync_collections/#syncwave.SyncSet)
 - [SyncModel](https://syncwave.dev/api/sync_model/#syncwave.SyncModel)
-- [is_sync_model_supported](https://syncwave.dev/api/sync_model/#syncwave.is_sync_model_supported)
+- [SyncRoot](https://syncwave.dev/api/sync_model/#syncwave.SyncRoot)
 - [Reactive](https://syncwave.dev/api/reactive/#syncwave.Reactive)
 - [SyncState](https://syncwave.dev/api/reactive/#syncwave.SyncState)
 - [DeadReferenceError](https://syncwave.dev/api/errors/#syncwave.DeadReferenceError)
