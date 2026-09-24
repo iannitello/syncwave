@@ -28,7 +28,7 @@ __all__ = ["Syncwave"]
 if TYPE_CHECKING:
     from types import GenericAlias
 
-    from .sync_model import RM
+    from .sync_model import SM
 
 
 @dataclass(frozen=True)
@@ -186,7 +186,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
         name: str,
         collection: type[SyncDict | SyncList] | Literal["auto"] | None = "auto",
         default: dict[str, Any] = EmptyFile,  # ty: ignore[invalid-parameter-default]
-    ) -> F[[type[RM]], type[RM]]:
+    ) -> F[[type[SM]], type[SM]]:
         """Register a reactive model as a store with a class decorator.
 
         This is [Syncwave.create_store](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.create_store)
@@ -253,7 +253,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
         str_guard("name", name)
         io.file_name_guard(name)
 
-        def decorator(cls: type[RM]) -> type[RM]:
+        def decorator(cls: type[SM]) -> type[SM]:
             sync_model_guard(cls)
             store_tp = collection_wrap(cls, collection)
             self.__create_store(store_tp, name, default)
