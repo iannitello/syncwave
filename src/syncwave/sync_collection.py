@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 from abc import ABCMeta
-from collections.abc import Callable as F
 from collections.abc import (
+    Callable as F,
     Iterable,
     Iterator,
     Mapping,
@@ -22,10 +22,8 @@ from types import GenericAlias
 from typing import Any, Generic, NoReturn, SupportsIndex, final, get_args, get_origin
 from typing_extensions import Self, TypeVar
 
-from pydantic import GetCoreSchemaHandler as Handler
-from pydantic import TypeAdapter
-from pydantic_core import SchemaSerializer
-from pydantic_core import core_schema as cs
+from pydantic import GetCoreSchemaHandler as Handler, TypeAdapter
+from pydantic_core import SchemaSerializer, core_schema as cs
 
 from .errors import unreachable
 from .ownership import detach, ingest

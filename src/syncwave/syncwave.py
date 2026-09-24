@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable as F
-from collections.abc import Iterator, MutableMapping
+from collections.abc import Callable as F, Iterator, MutableMapping
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -24,13 +23,12 @@ from .tp_validation import (
 )
 from .watcher import watcher
 
+__all__ = ["Syncwave"]
+
 if TYPE_CHECKING:
     from types import GenericAlias
 
     from .sync_model import RM
-
-
-__all__ = ["Syncwave"]
 
 
 @dataclass(frozen=True)
@@ -189,26 +187,22 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
         collection: type[SyncDict | SyncList] | Literal["auto"] | None = "auto",
         default: dict[str, Any] = EmptyFile,  # ty: ignore[invalid-parameter-default]
     ) -> F[[type[RM]], type[RM]]:
-        """Register a model as a store with a class decorator.
+        """Register a reactive model as a store with a class decorator.
 
-        This is a convenience method that can be thought of as combining [Syncwave.make_reactive](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.make_reactive)
-        and [Syncwave.create_store](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.create_store)
-        in one step.
-
-        The decorated class is left unchanged, but Syncwave uses it to create a new
-        reactive class that is then wrapped in a collection (controlled by the
-        `collection` parameter). The resulting type is used to create a new store.
+        This is [Syncwave.create_store](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.create_store)
+        with automatic collection wrapping: the decorated class is wrapped in a
+        collection controlled by the `collection` parameter, and the resulting type is
+        used to create a new store. The class itself is returned unchanged.
 
         Example:
         ```python
-        from pydantic import BaseModel
-        from syncwave import Syncwave
+        from syncwave import SyncModel, Syncwave
 
         syncwave = Syncwave()
 
 
         @syncwave.register(name="customers")
-        class Customer(BaseModel):
+        class Customer(SyncModel):
             name: str
             age: int
 
@@ -219,16 +213,15 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
 
         # equivalent to...
 
-        # from syncwave import SyncList
+        # from syncwave import SyncList, SyncModel
 
 
-        # class Customer(BaseModel):
+        # class Customer(SyncModel):
         #     name: str
         #     age: int
 
 
-        # SyncCustomer = syncwave.make_reactive(Customer)
-        # customers = syncwave.create_store(SyncList[SyncCustomer], name="customers")
+        # customers = syncwave.create_store(SyncList[Customer], name="customers")
         # customers.append(Customer(name="Alice", age=30))
         ```
 
@@ -251,8 +244,8 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
                 values since the class is not defined yet when the decorator runs.
 
         Returns:
-            A decorator that accepts a class as an argument to create a new reactive
-                store and returns the original class unchanged.
+            A decorator that accepts a reactive model class, creates the store, and
+                returns the class unchanged.
 
         """
         if name in self.__stores:

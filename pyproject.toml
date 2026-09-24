@@ -51,6 +51,7 @@ select = [
     "C4",  # flake8-comprehensions
     "ANN", # flake8-annotations
     "FBT", # flake8-boolean-trap
+    "ICN", # flake8-import-conventions
     "PYI", # flake8-pyi
     "SIM", # flake8-simplify
     "RUF", # ruff
@@ -85,3 +86,10 @@ pydocstyle = { convention = "google" }
 required-imports = ["from __future__ import annotations"]
 extra-standard-library = ["typing_extensions"]
 known-third-party = ["fastapi", "pydantic", "syncwave"]
+combine-as-imports = true
+
+[tool.ruff.lint.flake8-import-conventions]
+banned-from = ["os"]
+
+[tool.ruff.lint.flake8-import-conventions.extend-aliases]
+"collections.abc.Callable" = "F"

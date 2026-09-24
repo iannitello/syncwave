@@ -303,10 +303,12 @@ from syncwave import SyncDict, SyncList, Syncwave
 syncwave = Syncwave()
 
 songs = syncwave.create_store(SyncList[SyncDict[str, str]], name="songs")
-songs.extend([
-    {"title": "Sweet Virginia", "artist": "The Rolling Stones"},
-    {"title": "Dreams", "artist": "Fleetwood Mac"},
-])
+songs.extend(
+    [
+        {"title": "Sweet Virginia", "artist": "The Rolling Stones"},
+        {"title": "Dreams", "artist": "Fleetwood Mac"},
+    ]
+)
 
 sweet_virginia = songs[0]  # reference to the song at position 0
 songs.insert(0, {"title": "Bones", "artist": "The Killers"})  # takes position 0
@@ -326,10 +328,12 @@ from syncwave import SyncDict, SyncList, Syncwave
 syncwave = Syncwave()
 
 top_songs = syncwave.create_store(SyncList[SyncDict[str, str]], name="top_songs")
-top_songs.extend([
-    {"title": "Sweet Virginia", "artist": "The Rolling Stones"},
-    {"title": "Dreams", "artist": "Fleetwood Mac"},
-])
+top_songs.extend(
+    [
+        {"title": "Sweet Virginia", "artist": "The Rolling Stones"},
+        {"title": "Dreams", "artist": "Fleetwood Mac"},
+    ]
+)
 
 most_popular_song = top_songs[0]
 top_songs.insert(0, {"title": "Bones", "artist": "The Killers"})  # new hit!
