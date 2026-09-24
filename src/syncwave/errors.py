@@ -18,14 +18,13 @@ class DeadReferenceError(RuntimeError):
 
     Example:
     ```python
-    from pydantic import BaseModel
-    from syncwave import DeadReferenceError, Syncwave
+    from syncwave import DeadReferenceError, SyncModel, Syncwave
 
     syncwave = Syncwave()
 
 
     @syncwave.register(name="customers")
-    class Customer(BaseModel):
+    class Customer(SyncModel):
         name: str
         age: int
 

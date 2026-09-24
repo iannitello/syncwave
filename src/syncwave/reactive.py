@@ -46,10 +46,9 @@ class UnionCtx(dict[type["Reactive"], Context]): ...
 class Reactive:
     """Base class shared by all reactive values in Syncwave.
 
-    All reactive types (`SyncDict`, `SyncList`, `SyncSet`, and `SyncModel`) are
-    subclasses of `Reactive`. You will mainly encounter it for type checks:
-    `isinstance(value, Reactive)`. `Reactive` itself cannot be instantiated or
-    subclassed directly; subclass one of the reactive types instead.
+    All reactive types are subclasses of `Reactive`. You will mainly encounter it for
+    type checks: `isinstance(value, Reactive)`. `Reactive` itself cannot be instantiated
+    or subclassed directly; subclass one of the reactive types instead.
 
     A reactive object is always in one of three states, available as `sync_state`:
 
@@ -117,14 +116,13 @@ class Reactive:
 
         Example:
         ```python
-        from pydantic import BaseModel
-        from syncwave import Syncwave
+        from syncwave import SyncModel, Syncwave
 
         syncwave = Syncwave()
 
 
         @syncwave.register(name="customers")
-        class Customer(BaseModel):
+        class Customer(SyncModel):
             name: str
             age: int
 

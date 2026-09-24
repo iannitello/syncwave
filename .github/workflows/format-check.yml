@@ -35,4 +35,4 @@ jobs:
         run: uv run ruff check --preview .
 
       - name: Check typing with Ruff
-        run: uv run ty check src
+        run: uv run ty check .

@@ -163,7 +163,7 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
         if is_pydantic_model(origin):
             return _parse_model(origin)
         if is_dataclass(origin):
-            return _parse_model(py_dc.dataclass(origin))  # ty: ignore[invalid-argument-type]
+            return _parse_model(py_dc.dataclass()(origin))
 
         if issubclass(origin, dict):
             if args:
@@ -231,14 +231,12 @@ def _parse_model(cls: type[PM]) -> SyncModelCtx | None:
 
 
 def _field_annotation(field_info: FieldInfo) -> Any:
-    metadata = list(field_info.metadata)
-    if (discriminator := field_info.discriminator) is not None:
-        if not isinstance(discriminator, Discriminator):
-            discriminator = Discriminator(discriminator)
-        metadata.append(discriminator)
-    if not metadata:
-        return field_info.annotation
-    return Annotated[(field_info.annotation, *metadata)]  # ty: ignore[invalid-type-form]
+    tp = field_info.rebuild_annotation()
+    if (discriminator := field_info.discriminator) is None:
+        return tp
+    if not isinstance(discriminator, Discriminator):
+        discriminator = Discriminator(discriminator)
+    return Annotated[tp, discriminator]
 
 
 def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
