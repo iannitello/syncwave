@@ -5,15 +5,17 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from threading import RLock
-from typing import TYPE_CHECKING, Any, Literal, cast
+from types import GenericAlias
+from typing import Any, Literal, cast
 
 from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
 from .errors import unreachable
 from .io import EmptyFile, io
 from .ownership import detach, ingest
-from .reactive import Context, Reactive, StoreRef, SyncState, UnionCtx
+from .reactive import Context, Reactive, StoreRef, SyncState, UnionCtx, is_reactive
 from .sync_collection import SyncDict, SyncList
+from .sync_model import SM
 from .tp_validation import (
     collection_wrap,
     drill_tp,
@@ -24,11 +26,6 @@ from .tp_validation import (
 from .watcher import watcher
 
 __all__ = ["Syncwave"]
-
-if TYPE_CHECKING:
-    from types import GenericAlias
-
-    from .sync_model import SM
 
 
 @dataclass(frozen=True)
@@ -112,7 +109,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
         value, store_info = self.__stores[key]
         watcher.unwatch(store_info.path)
         with store_info.sref.lock:
-            if isinstance(value, Reactive):
+            if is_reactive(value):
                 value.__syncwave_kill__()
         del self.__stores[key]
         io.remove_file(store_info.path)
@@ -370,12 +367,12 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
 
         if value is EmptyFile:
             raise ValueError(f"Unable to create store '{name}' without a default.")
-        value = cast(Any, value)  # removes the EmptyFileType for type checking
+        value = cast("Any", value)  # removes the EmptyFileType for type checking
 
         sref = StoreRef(lock=RLock(), on_change=partial(self.__on_store_change, name))
         store_info = StoreInfo(name, path, type_adapter, sref, ctx)
 
-        if isinstance(value, Reactive):
+        if is_reactive(value):
             if ctx is None:
                 unreachable()
             elif isinstance(ctx, Context):
@@ -421,8 +418,8 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
             old_value.__syncwave_update__(new_value)
         # case 3: union content type
         elif isinstance(ctx, UnionCtx):
-            old_is_reactive = isinstance(old_value, Reactive)
-            new_is_reactive = isinstance(new_value, Reactive)
+            old_is_reactive = is_reactive(old_value)
+            new_is_reactive = is_reactive(new_value)
             same_type = type(old_value) is (new_type := type(new_value))
 
             if old_is_reactive and new_is_reactive and same_type:

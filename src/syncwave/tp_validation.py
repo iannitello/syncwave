@@ -16,7 +16,16 @@ from ipaddress import (
 from pathlib import Path
 from re import Pattern
 from types import GenericAlias, UnionType
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_origin
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Literal,
+    Union,
+    cast,
+    get_args,
+    get_origin,
+)
 from uuid import UUID
 
 import pydantic.dataclasses as py_dc
@@ -30,7 +39,7 @@ from pydantic_core import (
 
 from .errors import unreachable
 from .ownership import ingest
-from .reactive import Context, Reactive, UnionCtx
+from .reactive import Context, Reactive, ReactiveProtocol, UnionCtx, is_reactive_cls
 from .sync_collection import (
     KT,
     VT,
@@ -71,7 +80,7 @@ def sync_model_guard(cls: Any) -> None:
             err += "use `SyncDataclass` instead of a standard `dataclass`."
             raise TypeError(err)
         raise TypeError(err + f"got `{cls.__qualname__}` instead.")
-    if not issubclass(cls, Reactive):
+    if not is_reactive_cls(cls):
         err += "use a reactive model instead of a standard Pydantic model."
         raise TypeError(err)
 
@@ -79,7 +88,7 @@ def sync_model_guard(cls: Any) -> None:
 def collection_wrap(
     cls: type[SyncModel],
     collection: type[SyncDict | SyncList] | Literal["auto"] | None,
-) -> type[Reactive] | GenericAlias:
+) -> type[ReactiveProtocol] | GenericAlias:
 
     resolved_collection = collection  # non "auto" case
     if collection == "auto":
@@ -92,7 +101,7 @@ def collection_wrap(
             resolved_collection = SyncList
 
     if resolved_collection is None:
-        return cls
+        return cast("type[ReactiveProtocol]", cls)
 
     origin = get_origin(resolved_collection) or resolved_collection
     args = get_args(resolved_collection)
@@ -137,7 +146,7 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
     _handle_literal(origin, args)  # nothing to do, just to check there are args
 
     if isclass(origin):
-        if issubclass(origin, Reactive):
+        if is_reactive_cls(origin):
             if _err_if_reactive:
                 raise TypeError(f"`{tp_name}` cannot be used here: {_err_if_reactive}")
             from .syncwave import Syncwave
@@ -147,7 +156,6 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
                 SyncCollection,
                 SyncModel,
                 SyncRoot,
-                # SyncDataclass,
             ):
                 raise TypeError(f"`{tp_name}` cannot be used here.")
 
@@ -194,7 +202,6 @@ def validate_default(value: Any, ta: TypeAdapter, tp: Any) -> Any:
 
 
 def _parse_model(cls: type[BaseModel | PydanticDataclass]) -> SyncModelCtx | None:
-    # checking `issubclass(cls, Reactive)` should work, but type checking later fails
     is_reactive = issubclass(cls, SyncModel)  # or issubclass(cls, SyncDataclass)
 
     # `frozen` comes from the config (models, dataclasses) or from the dataclass options

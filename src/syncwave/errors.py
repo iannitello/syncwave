@@ -4,8 +4,9 @@ from typing import TYPE_CHECKING, NoReturn
 
 __all__ = ["DeadReferenceError"]
 
+
 if TYPE_CHECKING:
-    from .reactive import Reactive
+    from .reactive import ReactiveProtocol
 
 
 class DeadReferenceError(RuntimeError):
@@ -42,7 +43,7 @@ class DeadReferenceError(RuntimeError):
 
     """
 
-    def __init__(self, *, reference: Reactive) -> None:  # ruff: ignore[undocumented-public-init]
+    def __init__(self, *, reference: ReactiveProtocol) -> None:  # ruff: ignore[undocumented-public-init]
         message = f"Operation attempted on a dead reference: {reference!r}"
         super().__init__(message)
 
