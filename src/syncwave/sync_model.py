@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Final, Generic, TypeGuard, TypeVar
+from typing import TYPE_CHECKING, Any, Final, Generic, TypeGuard, TypeVar, cast
 from typing_extensions import Self
 
 from pydantic import BaseModel, GetCoreSchemaHandler as Handler, RootModel, TypeAdapter
@@ -13,10 +13,12 @@ from .ownership import detach, ingest
 from .reactive import (
     Context,
     Reactive,
+    ReactiveProtocol,
     StoreRef,
     SyncState,
     UnionCtx,
     dead_guard,
+    is_reactive,
     mut_reactive_op,
     reactive_op,
 )
@@ -132,7 +134,7 @@ class SyncModel(BaseModel, Reactive, _syncwave_root=True):
             value = self.__dict__.get(name)
 
             # can be the case for a default value e.g. `SyncList[str] = []`
-            if not isinstance(value, Reactive):
+            if not is_reactive(value):
                 ta = ctx.fields_type_adapter[name]
                 value = self.__dict__[name] = ta.validate_python(value)
 
@@ -143,7 +145,7 @@ class SyncModel(BaseModel, Reactive, _syncwave_root=True):
                 value.__syncwave_init__(sref, field_ctx)
             # case 3: union content type
             elif isinstance(field_ctx, UnionCtx):
-                if isinstance(value, Reactive):
+                if is_reactive(value):
                     value.__syncwave_init__(sref, field_ctx[type(value)])
             else:
                 unreachable()
@@ -151,7 +153,7 @@ class SyncModel(BaseModel, Reactive, _syncwave_root=True):
     def __syncwave_kill__(self) -> None:
         for name in self.__syncwave_ctx__.fields_ctx:
             value = self.__dict__.get(name)
-            if isinstance(value, Reactive):
+            if is_reactive(value):
                 value.__syncwave_kill__()
         object.__setattr__(self, "__syncwave_state__", SyncState.DEAD)
 
@@ -163,7 +165,7 @@ class SyncModel(BaseModel, Reactive, _syncwave_root=True):
             new_value = new.__dict__.get(name)
 
             # can be the case for a default value e.g. `SyncList[str] = []`
-            if field_ctx is not None and not isinstance(new_value, Reactive):
+            if field_ctx is not None and not is_reactive(new_value):
                 ta = ctx.fields_type_adapter[name]
                 new_value = ta.validate_python(new_value)
 
@@ -189,7 +191,7 @@ class SyncModel(BaseModel, Reactive, _syncwave_root=True):
             field_ta = ctx.fields_type_adapter.get(name)
             if field_ta is not None:
                 if __dict__["__syncwave_state__"] is SyncState.DEAD:
-                    raise DeadReferenceError(reference=self)
+                    raise DeadReferenceError(reference=cast("ReactiveProtocol", self))
                 value = __dict__.get(name, _MISSING)
                 if value is not _MISSING:
                     return detach(value, field_ta)
@@ -253,8 +255,8 @@ class SyncModel(BaseModel, Reactive, _syncwave_root=True):
         return BaseModel.__deepcopy__(shallow, memo)
 
     def __setattr_union(self, f_name: str, old: Any, new: Any, u_ctx: UnionCtx) -> None:
-        old_is_reactive = isinstance(old, Reactive)
-        new_is_reactive = isinstance(new, Reactive)
+        old_is_reactive = is_reactive(old)
+        new_is_reactive = is_reactive(new)
         same_type = type(old) is (new_type := type(new))
 
         if old_is_reactive and new_is_reactive and same_type:

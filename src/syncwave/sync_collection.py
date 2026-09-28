@@ -30,10 +30,12 @@ from .ownership import detach, ingest
 from .reactive import (
     Context,
     Reactive,
+    ReactiveProtocol,
     StoreRef,
     SyncState,
     UnionCtx,
     dead_guard,
+    is_reactive,
     mut_reactive_op,
     reactive_op,
 )
@@ -42,7 +44,8 @@ __all__ = ["SyncCollection", "SyncDict", "SyncList", "SyncSet"]
 
 
 KT = TypeVar("KT", default=str)
-VT = TypeVar("VT", bound=Reactive | Any, default=Any)
+VT = TypeVar("VT", bound=ReactiveProtocol | Any, default=Any)
+
 CT = TypeVar("CT", bound="SyncDict | SyncList | SyncSet")
 
 
@@ -223,14 +226,14 @@ class SyncDict(MutableMapping[KT, VT], Reactive, _syncwave_root=True):
         # case 3: union content type
         elif isinstance(inner_ctx, UnionCtx):
             for value in self.__data.values():
-                if isinstance(value, Reactive):
+                if is_reactive(value):
                     value.__syncwave_init__(sref, inner_ctx[type(value)])
         else:
             unreachable()
 
     def __syncwave_kill__(self) -> None:
         for value in self.__data.values():
-            if isinstance(value, Reactive):
+            if is_reactive(value):
                 value.__syncwave_kill__()
         self.__syncwave_state__ = SyncState.DEAD
 
@@ -261,7 +264,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive, _syncwave_root=True):
             # items to remove
             for key in old_keys - new_keys:
                 old_value = self.__data.pop(key)
-                if isinstance(old_value, Reactive):
+                if is_reactive(old_value):
                     old_value.__syncwave_kill__()
         else:
             unreachable()
@@ -293,7 +296,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive, _syncwave_root=True):
     @mut_reactive_op(inert_fn=dict.__delitem__, unwrap=__data_unwrap)
     def __delitem__(self, key: KT) -> None:
         old_value = self.__data.pop(key)
-        if isinstance(old_value, Reactive):
+        if is_reactive(old_value):
             old_value.__syncwave_kill__()
 
     @reactive_op(inert_fn=dict.__iter__, unwrap=__data_unwrap)
@@ -323,7 +326,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive, _syncwave_root=True):
     copy = __copy__
 
     @reactive_op()
-    def __eq__(self, other: object, /) -> bool:
+    def __eq__(self, other: Any, /) -> bool:
         if isinstance(other, dict):
             return self.__data == other
         if isinstance(other, SyncDict):
@@ -340,8 +343,8 @@ class SyncDict(MutableMapping[KT, VT], Reactive, _syncwave_root=True):
             self.__data[k] = new
 
     def __setitem_union(self, k: KT, old: VT | None, new: VT, u_ctx: UnionCtx) -> None:
-        old_is_reactive = isinstance(old, Reactive)
-        new_is_reactive = isinstance(new, Reactive)
+        old_is_reactive = is_reactive(old)
+        new_is_reactive = is_reactive(new)
         same_type = type(old) is (new_type := type(new))
 
         if old_is_reactive and new_is_reactive and same_type:
@@ -452,14 +455,14 @@ class SyncList(MutableSequence[VT], Reactive, _syncwave_root=True):
         # case 3: union content type
         elif isinstance(inner_ctx, UnionCtx):
             for item in self.__data:
-                if isinstance(item, Reactive):
+                if is_reactive(item):
                     item.__syncwave_init__(sref, inner_ctx[type(item)])
         else:
             unreachable()
 
     def __syncwave_kill__(self) -> None:
         for item in self.__data:
-            if isinstance(item, Reactive):
+            if is_reactive(item):
                 item.__syncwave_kill__()
         self.__syncwave_state__ = SyncState.DEAD
 
@@ -498,7 +501,7 @@ class SyncList(MutableSequence[VT], Reactive, _syncwave_root=True):
             if new_len > old_len:
                 for i in range(old_len, new_len):
                     new_item = new.__data[i]
-                    if isinstance(new_item, Reactive):
+                    if is_reactive(new_item):
                         new_item.__syncwave_init__(
                             self.__syncwave_sref__, inner_ctx[type(new_item)]
                         )
@@ -507,7 +510,7 @@ class SyncList(MutableSequence[VT], Reactive, _syncwave_root=True):
             elif old_len > new_len:
                 for _ in range(old_len - new_len):
                     old_item = self.__data.pop()
-                    if isinstance(old_item, Reactive):
+                    if is_reactive(old_item):
                         old_item.__syncwave_kill__()
         else:
             unreachable()
@@ -585,7 +588,7 @@ class SyncList(MutableSequence[VT], Reactive, _syncwave_root=True):
     copy = __copy__
 
     @reactive_op()
-    def __eq__(self, other: object, /) -> bool:
+    def __eq__(self, other: Any, /) -> bool:
         if isinstance(other, list):
             return self.__data == other
         if isinstance(other, SyncList):
@@ -595,8 +598,8 @@ class SyncList(MutableSequence[VT], Reactive, _syncwave_root=True):
     __hash__ = None
 
     def __setitem_union(self, i: int, old: VT, new: VT, u_ctx: UnionCtx) -> None:
-        old_is_reactive = isinstance(old, Reactive)
-        new_is_reactive = isinstance(new, Reactive)
+        old_is_reactive = is_reactive(old)
+        new_is_reactive = is_reactive(new)
         same_type = type(old) is (new_type := type(new))
 
         if old_is_reactive and new_is_reactive and same_type:
@@ -719,7 +722,7 @@ class SyncSet(MutableSet[VT], Reactive, _syncwave_root=True):
         self.__data = new.__data
 
     @reactive_op(inert_fn=set.__contains__, unwrap=__data_unwrap)
-    def __contains__(self, value: object) -> bool:
+    def __contains__(self, value: Any) -> bool:
         return value in self.__data
 
     @reactive_op(inert_fn=set.__iter__, unwrap=__data_unwrap)
@@ -759,7 +762,7 @@ class SyncSet(MutableSet[VT], Reactive, _syncwave_root=True):
     copy = __copy__
 
     @reactive_op()
-    def __eq__(self, other: object, /) -> bool:
+    def __eq__(self, other: Any, /) -> bool:
         if isinstance(other, (set, frozenset)):
             return self.__data == other
         if isinstance(other, SyncSet):
@@ -774,7 +777,7 @@ ValFn, SerFn = cs.NoInfoWrapValidatorFunction, cs.WrapSerializerFunction
 
 def _validator_factory(cls: type[CT], new: F[[Any], CT], unwrap: F[[CT], Any]) -> ValFn:
     def validate(value: Any, handler: cs.ValidatorFunctionWrapHandler) -> CT:
-        if isinstance(value, Reactive):
+        if is_reactive(value):
             dead_guard(value)
             if isinstance(value, cls):
                 value = unwrap(value)

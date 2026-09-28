@@ -5,15 +5,28 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
 from threading import RLock
-from typing import Any, ParamSpec, TypeVar, cast, final
+from typing import Any, Literal, ParamSpec, Protocol, TypeVar, cast, final
+from typing_extensions import TypeIs
 
 from .errors import DeadReferenceError, unreachable
 
 __all__ = ["Reactive", "SyncState"]
 
 
-C = TypeVar("C", bound="Context")
-R = TypeVar("R", bound="Reactive")
+class ReactiveProtocol(Protocol):
+    __syncwave_state__: SyncState
+    __syncwave_sref__: StoreRef
+    __syncwave_ctx__: Context
+    __syncwave_is_reactive__: Literal[True]
+
+    def __syncwave_init__(self, sref: StoreRef, ctx: C) -> None: ...
+    def __syncwave_kill__(self) -> None: ...
+    def __syncwave_update__(self, new: Any) -> None: ...
+
+    @property
+    def sync_live(self) -> bool: ...
+    @property
+    def sync_state(self) -> SyncState: ...
 
 
 class SyncState(str, Enum):
@@ -37,10 +50,14 @@ class StoreRef:
 
 @dataclass(frozen=True)
 class Context:
-    tp: type[Reactive]
+    tp: type[ReactiveProtocol]
 
 
-class UnionCtx(dict[type["Reactive"], Context]): ...
+class UnionCtx(dict[type[ReactiveProtocol], Context]): ...
+
+
+C = TypeVar("C", bound=Context)
+R = TypeVar("R", bound=ReactiveProtocol)
 
 
 class Reactive:
@@ -82,10 +99,12 @@ class Reactive:
     __syncwave_state__: SyncState = SyncState.INERT
     __syncwave_sref__: StoreRef
     __syncwave_ctx__: Context
+    __syncwave_is_reactive__: Literal[True] = True
 
     def __init_subclass__(cls, *, _syncwave_root: bool = False, **kwargs: Any) -> None:
         if Reactive in cls.__bases__ and not _syncwave_root:
             raise TypeError("`Reactive` cannot be subclassed directly.")
+        cls.__syncwave_is_reactive__ = True
         super().__init_subclass__(**kwargs)
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -150,24 +169,29 @@ class Reactive:
         return self.__syncwave_state__  # atomic, no need to lock
 
 
+def is_reactive(o: Any) -> TypeIs[ReactiveProtocol]:
+    return "__syncwave_is_reactive__" in type(o).__dict__
+
+
+def is_reactive_cls(cls: type[Any]) -> TypeIs[type[ReactiveProtocol]]:
+    # assumes `cls` is a class (called from trusted code)
+    return "__syncwave_is_reactive__" in cls.__dict__
+
+
+# identity function
+def _id(value: Any) -> Any:
+    return value
+
+
 X = ParamSpec("X")
 Y = TypeVar("Y")
-
-
-# A reactive object has a store reference iff it is not inert.
-_NO_SREF = "A {} reactive object has no store reference."
-_INERT_WITH_SREF = "An inert reactive object has a store reference."
-
-
-def _id(value: Any) -> Any:  # identity function
-    return value
 
 
 def reactive_op(inert_fn: F | None = None, unwrap: F = _id) -> F[[F[X, Y]], F[X, Y]]:
     def decorator(fn: F[X, Y]) -> F[X, Y]:
         @wraps(fn)
         def wrapper(*args: X.args, **kwargs: X.kwargs) -> Y:
-            self = cast(R, args[0])
+            self = cast("R", args[0])
             try:
                 sref = self.__syncwave_sref__
             except AttributeError as e:
@@ -175,14 +199,15 @@ def reactive_op(inert_fn: F | None = None, unwrap: F = _id) -> F[[F[X, Y]], F[X,
                     if inert_fn is None:
                         return fn(*args, **kwargs)
                     return inert_fn(unwrap(self), *args[1:], **kwargs)
-                unreachable(_NO_SREF.format(self.__syncwave_state__.value), from_=e)
+                err = "A {} reactive object has no store reference."
+                unreachable(err.format(self.__syncwave_state__.value), from_=e)
 
             with sref.lock:
                 if self.__syncwave_state__ is SyncState.DEAD:
                     raise DeadReferenceError(reference=self)
                 if self.__syncwave_state__ is SyncState.LIVE:
                     return fn(*args, **kwargs)
-                unreachable(_INERT_WITH_SREF)
+                unreachable("An inert reactive object has a store reference.")
 
         return wrapper
 
@@ -193,14 +218,15 @@ def mut_reactive_op(inert_fn: F, unwrap: F = _id) -> F[[F[X, Y]], F[X, None]]:
     def decorator(fn: F[X, Y]) -> F[X, None]:
         @wraps(fn)
         def wrapper(*args: X.args, **kwargs: X.kwargs) -> None:
-            self = cast(R, args[0])
+            self = cast("R", args[0])
             try:
                 sref = self.__syncwave_sref__
             except AttributeError as e:
                 if self.__syncwave_state__ is SyncState.INERT:
                     inert_fn(unwrap(self), *args[1:], **kwargs)
                     return
-                unreachable(_NO_SREF.format(self.__syncwave_state__.value), from_=e)
+                err = "A {} reactive object has no store reference."
+                unreachable(err.format(self.__syncwave_state__.value), from_=e)
 
             with sref.lock:
                 if self.__syncwave_state__ is SyncState.DEAD:
@@ -212,7 +238,7 @@ def mut_reactive_op(inert_fn: F, unwrap: F = _id) -> F[[F[X, Y]], F[X, None]]:
                         unreachable(f"Mutating operation `{fn_name}` returned a value.")
                     sref.on_change()
                     return
-                unreachable(_INERT_WITH_SREF)
+                unreachable("An inert reactive object has a store reference.")
 
         return wrapper
 
