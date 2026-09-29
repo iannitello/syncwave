@@ -62,7 +62,7 @@ class SyncModelCtx(Context):
     fields_type_adapter: dict[str, TypeAdapter[Any]]
 
 
-class SyncModel(BaseModel, Reactive, _syncwave_root=True):
+class SyncModel(BaseModel, Reactive[SyncModelCtx], _syncwave=True):
     """Base class for reactive Pydantic models.
 
     Subclass `SyncModel` instead of `pydantic.BaseModel` to define a reactive model.
@@ -191,7 +191,7 @@ class SyncModel(BaseModel, Reactive, _syncwave_root=True):
             field_ta = ctx.fields_type_adapter.get(name)
             if field_ta is not None:
                 if __dict__["__syncwave_state__"] is SyncState.DEAD:
-                    raise DeadReferenceError(reference=cast("ReactiveProtocol", self))
+                    raise DeadReferenceError(reference=self)
                 value = __dict__.get(name, _MISSING)
                 if value is not _MISSING:
                     return detach(value, field_ta)
@@ -270,7 +270,7 @@ class SyncModel(BaseModel, Reactive, _syncwave_root=True):
             BaseModel.__setattr__(self, f_name, new)
 
 
-class SyncRoot(SyncModel, RootModel, Generic[RootModelRootType], _syncwave_root=True):
+class SyncRoot(SyncModel, RootModel, Generic[RootModelRootType], _syncwave=True):
     """Base class for reactive root models.
 
     Shorthand for `class Locale(SyncModel, RootModel[str])`: a reactive model holding a
