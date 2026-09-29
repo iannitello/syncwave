@@ -50,7 +50,7 @@ CT = TypeVar("CT", bound="SyncDict | SyncList | SyncSet")
 
 
 @final
-class SyncCollection(Reactive, metaclass=ABCMeta, _syncwave_root=True):
+class SyncCollection(Reactive, metaclass=ABCMeta, _syncwave=True):
     """Virtual base class for Syncwave's reactive collection types.
 
     The `SyncCollection` types are `SyncDict`, `SyncList`, and `SyncSet`.
@@ -127,7 +127,7 @@ class SyncDictCtx(Context, Generic[KT, VT]):
     value_type_adapter: TypeAdapter[VT]
 
 
-class SyncDict(MutableMapping[KT, VT], Reactive, _syncwave_root=True):
+class SyncDict(MutableMapping[KT, VT], Reactive[SyncDictCtx[KT, VT]], _syncwave=True):
     """A reactive dictionary.
 
     `SyncDict` behaves like a regular `dict`. Assignments, updates, and deletions
@@ -364,7 +364,7 @@ class SyncListCtx(Context, Generic[VT]):
     item_type_adapter: TypeAdapter[VT]
 
 
-class SyncList(MutableSequence[VT], Reactive, _syncwave_root=True):
+class SyncList(MutableSequence[VT], Reactive[SyncListCtx[VT]], _syncwave=True):
     """A reactive list.
 
     `SyncList` behaves like a regular `list`. Appending, replacing, inserting, and
@@ -634,7 +634,7 @@ class SyncSetCtx(Context, Generic[VT]):
     item_type_adapter: TypeAdapter[VT]
 
 
-class SyncSet(MutableSet[VT], Reactive, _syncwave_root=True):
+class SyncSet(MutableSet[VT], Reactive[SyncSetCtx[VT]], _syncwave=True):
     """A reactive set.
 
     `SyncSet` behaves like a regular `set`. Adding and discarding items trigger a write

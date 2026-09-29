@@ -16,16 +16,7 @@ from ipaddress import (
 from pathlib import Path
 from re import Pattern
 from types import GenericAlias, UnionType
-from typing import (
-    TYPE_CHECKING,
-    Annotated,
-    Any,
-    Literal,
-    Union,
-    cast,
-    get_args,
-    get_origin,
-)
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_origin
 from uuid import UUID
 
 import pydantic.dataclasses as py_dc
@@ -101,7 +92,7 @@ def collection_wrap(
             resolved_collection = SyncList
 
     if resolved_collection is None:
-        return cast("type[ReactiveProtocol]", cls)
+        return cls
 
     origin = get_origin(resolved_collection) or resolved_collection
     args = get_args(resolved_collection)

@@ -5,28 +5,45 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
 from threading import RLock
-from typing import Any, Literal, ParamSpec, Protocol, TypeVar, cast, final
-from typing_extensions import TypeIs
+from typing import Any, Generic, Literal, ParamSpec, Protocol, TypeVar, cast, final
+from typing_extensions import Self, TypeIs
 
 from .errors import DeadReferenceError, unreachable
 
 __all__ = ["Reactive", "SyncState"]
 
 
-class ReactiveProtocol(Protocol):
-    __syncwave_state__: SyncState
+C = TypeVar("C", bound="Context")
+
+
+class ReactiveProtocol(Protocol[C]):
+    __syncwave_ctx__: C
     __syncwave_sref__: StoreRef
-    __syncwave_ctx__: Context
+    __syncwave_state__: SyncState
     __syncwave_is_reactive__: Literal[True]
 
     def __syncwave_init__(self, sref: StoreRef, ctx: C) -> None: ...
     def __syncwave_kill__(self) -> None: ...
-    def __syncwave_update__(self, new: Any) -> None: ...
+    def __syncwave_update__(self: Self, new: Self) -> None: ...
 
     @property
     def sync_live(self) -> bool: ...
     @property
     def sync_state(self) -> SyncState: ...
+
+
+@dataclass(frozen=True)
+class Context:
+    tp: type[ReactiveProtocol]
+
+
+class UnionCtx(dict[type[ReactiveProtocol], Context]): ...
+
+
+@dataclass(frozen=True)
+class StoreRef:
+    lock: RLock
+    on_change: F[[], None]
 
 
 class SyncState(str, Enum):
@@ -42,25 +59,7 @@ class SyncState(str, Enum):
     DEAD = "dead"
 
 
-@dataclass(frozen=True)
-class StoreRef:
-    lock: RLock
-    on_change: F[[], None]
-
-
-@dataclass(frozen=True)
-class Context:
-    tp: type[ReactiveProtocol]
-
-
-class UnionCtx(dict[type[ReactiveProtocol], Context]): ...
-
-
-C = TypeVar("C", bound=Context)
-R = TypeVar("R", bound=ReactiveProtocol)
-
-
-class Reactive:
+class Reactive(Generic[C]):
     """Base class shared by all reactive values in Syncwave.
 
     All reactive types are subclasses of `Reactive`. You will mainly encounter it for
@@ -96,13 +95,13 @@ class Reactive:
 
     """
 
-    __syncwave_state__: SyncState = SyncState.INERT
+    __syncwave_ctx__: C
     __syncwave_sref__: StoreRef
-    __syncwave_ctx__: Context
+    __syncwave_state__: SyncState = SyncState.INERT
     __syncwave_is_reactive__: Literal[True] = True
 
-    def __init_subclass__(cls, *, _syncwave_root: bool = False, **kwargs: Any) -> None:
-        if Reactive in cls.__bases__ and not _syncwave_root:
+    def __init_subclass__(cls, *, _syncwave: bool = False, **kwargs: Any) -> None:
+        if Reactive in cls.__bases__ and not _syncwave:
             raise TypeError("`Reactive` cannot be subclassed directly.")
         cls.__syncwave_is_reactive__ = True
         super().__init_subclass__(**kwargs)
@@ -118,7 +117,7 @@ class Reactive:
     def __syncwave_kill__(self) -> None:
         raise NotImplementedError
 
-    def __syncwave_update__(self, new: R) -> None:
+    def __syncwave_update__(self: Self, new: Self) -> None:
         raise NotImplementedError
 
     @final
@@ -191,7 +190,7 @@ def reactive_op(inert_fn: F | None = None, unwrap: F = _id) -> F[[F[X, Y]], F[X,
     def decorator(fn: F[X, Y]) -> F[X, Y]:
         @wraps(fn)
         def wrapper(*args: X.args, **kwargs: X.kwargs) -> Y:
-            self = cast("R", args[0])
+            self = cast(ReactiveProtocol, args[0])
             try:
                 sref = self.__syncwave_sref__
             except AttributeError as e:
@@ -218,7 +217,7 @@ def mut_reactive_op(inert_fn: F, unwrap: F = _id) -> F[[F[X, Y]], F[X, None]]:
     def decorator(fn: F[X, Y]) -> F[X, None]:
         @wraps(fn)
         def wrapper(*args: X.args, **kwargs: X.kwargs) -> None:
-            self = cast("R", args[0])
+            self = cast(ReactiveProtocol, args[0])
             try:
                 sref = self.__syncwave_sref__
             except AttributeError as e:
@@ -243,6 +242,9 @@ def mut_reactive_op(inert_fn: F, unwrap: F = _id) -> F[[F[X, Y]], F[X, None]]:
         return wrapper
 
     return decorator
+
+
+R = TypeVar("R", bound=ReactiveProtocol)
 
 
 def dead_guard(value: R) -> R:

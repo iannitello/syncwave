@@ -38,7 +38,7 @@ class StoreInfo:
 
 
 # Has to be thread-safe, this is a temporary solution just to start the implementation.
-class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
+class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
     """The main entry point to Syncwave.
 
     Start by creating an instance to interact with the stores.
@@ -367,7 +367,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave_root=True):
 
         if value is EmptyFile:
             raise ValueError(f"Unable to create store '{name}' without a default.")
-        value = cast("Any", value)  # removes the EmptyFileType for type checking
+        value = cast(Any, value)  # removes the EmptyFileType for type checking
 
         sref = StoreRef(lock=RLock(), on_change=partial(self.__on_store_change, name))
         store_info = StoreInfo(name, path, type_adapter, sref, ctx)
