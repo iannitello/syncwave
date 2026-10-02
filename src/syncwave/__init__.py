@@ -11,8 +11,10 @@ Imports available from this module:
 - [SyncSet](https://syncwave.dev/api/sync_collections/#syncwave.SyncSet)
 - [SyncModel](https://syncwave.dev/api/sync_model/#syncwave.SyncModel)
 - [SyncRoot](https://syncwave.dev/api/sync_model/#syncwave.SyncRoot)
-- [Reactive](https://syncwave.dev/api/reactive/#syncwave.Reactive)
+- [sync_dataclass](https://syncwave.dev/api/sync_model/#syncwave.sync_dataclass)
+- [is_sync_dataclass](https://syncwave.dev/api/sync_model/#syncwave.is_sync_dataclass)
 - [SyncState](https://syncwave.dev/api/reactive/#syncwave.SyncState)
+- [Reactive](https://syncwave.dev/api/reactive/#syncwave.Reactive)
 - [DeadReferenceError](https://syncwave.dev/api/errors/#syncwave.DeadReferenceError)
 """
 
@@ -22,7 +24,7 @@ __version__ = "0.2.1"
 from .errors import DeadReferenceError
 from .reactive import Reactive, SyncState
 from .sync_collection import SyncCollection, SyncDict, SyncList, SyncSet
-from .sync_model import SyncModel, SyncRoot
+from .sync_model import SyncModel, SyncRoot, is_sync_dataclass, sync_dataclass
 from .syncwave import Syncwave
 
 __all__ = [
@@ -36,4 +38,6 @@ __all__ = [
     "SyncSet",
     "SyncState",
     "Syncwave",
+    "is_sync_dataclass",
+    "sync_dataclass",
 ]

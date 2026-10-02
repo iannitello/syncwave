@@ -6,7 +6,7 @@ from functools import partial
 from pathlib import Path
 from threading import RLock
 from types import GenericAlias
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
@@ -15,7 +15,6 @@ from .io import EmptyFile, io
 from .ownership import detach, ingest
 from .reactive import Context, Reactive, StoreRef, SyncState, UnionCtx, is_reactive
 from .sync_collection import SyncDict, SyncList
-from .sync_model import SM
 from .tp_validation import (
     collection_wrap,
     drill_tp,
@@ -26,6 +25,10 @@ from .tp_validation import (
 from .watcher import watcher
 
 __all__ = ["Syncwave"]
+
+
+if TYPE_CHECKING:
+    from .sync_model import RM_T
 
 
 @dataclass(frozen=True)
@@ -183,7 +186,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         name: str,
         collection: type[SyncDict | SyncList] | Literal["auto"] | None = "auto",
         default: dict[str, Any] = EmptyFile,  # ty: ignore[invalid-parameter-default]
-    ) -> F[[type[SM]], type[SM]]:
+    ) -> F[[type[RM_T]], type[RM_T]]:
         """Register a reactive model as a store with a class decorator.
 
         This is [Syncwave.create_store](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.create_store)
@@ -250,7 +253,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         str_guard("name", name)
         io.file_name_guard(name)
 
-        def decorator(cls: type[SM]) -> type[SM]:
+        def decorator(cls: type[RM_T]) -> type[RM_T]:
             sync_model_guard(cls)
             store_tp = collection_wrap(cls, collection)
             self.__create_store(store_tp, name, default)

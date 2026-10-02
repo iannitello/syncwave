@@ -13,16 +13,16 @@ from .errors import DeadReferenceError, unreachable
 __all__ = ["Reactive", "SyncState"]
 
 
-C = TypeVar("C", bound="Context")
+CTX = TypeVar("CTX", bound="Context")
 
 
-class ReactiveProtocol(Protocol[C]):
-    __syncwave_ctx__: C
+class ReactiveProtocol(Protocol[CTX]):
+    __syncwave_ctx__: CTX
     __syncwave_sref__: StoreRef
     __syncwave_state__: SyncState
     __syncwave_is_reactive__: Literal[True]
 
-    def __syncwave_init__(self, sref: StoreRef, ctx: C) -> None: ...
+    def __syncwave_init__(self, sref: StoreRef, ctx: CTX) -> None: ...
     def __syncwave_kill__(self) -> None: ...
     def __syncwave_update__(self: Self, new: Self) -> None: ...
 
@@ -49,9 +49,9 @@ class StoreRef:
 class SyncState(str, Enum):
     """Lifecycle of a reactive object.
 
-    `INERT`: never entered a store, behaves like the plain counterpart.
-    `LIVE`: connected to a store.
-    `DEAD`: removed from its store, every operation raises `DeadReferenceError`.
+    - `INERT`: never entered a store, behaves like the plain counterpart.
+    - `LIVE`: connected to a store.
+    - `DEAD`: removed from its store, every operation raises `DeadReferenceError`.
     """
 
     INERT = "inert"
@@ -59,12 +59,14 @@ class SyncState(str, Enum):
     DEAD = "dead"
 
 
-class Reactive(Generic[C]):
+class Reactive(Generic[CTX]):
     """Base class shared by all reactive values in Syncwave.
 
     All reactive types are subclasses of `Reactive`. You will mainly encounter it for
     type checks: `isinstance(value, Reactive)`. `Reactive` itself cannot be instantiated
-    or subclassed directly; subclass one of the reactive types instead.
+    or subclassed directly; subclass one of the reactive types instead. Reactive
+    dataclasses (see `sync_dataclass`) keep their own MRO, so they are the exception:
+    check them with `is_sync_dataclass`.
 
     A reactive object is always in one of three states, available as `sync_state`:
 
@@ -95,7 +97,7 @@ class Reactive(Generic[C]):
 
     """
 
-    __syncwave_ctx__: C
+    __syncwave_ctx__: CTX
     __syncwave_sref__: StoreRef
     __syncwave_state__: SyncState = SyncState.INERT
     __syncwave_is_reactive__: Literal[True] = True
@@ -111,7 +113,7 @@ class Reactive(Generic[C]):
         if type(self) is Reactive:
             raise TypeError("`Reactive` is a base class and cannot be instantiated.")
 
-    def __syncwave_init__(self, sref: StoreRef, ctx: C) -> None:
+    def __syncwave_init__(self, sref: StoreRef, ctx: CTX) -> None:
         raise NotImplementedError
 
     def __syncwave_kill__(self) -> None:
@@ -244,10 +246,10 @@ def mut_reactive_op(inert_fn: F, unwrap: F = _id) -> F[[F[X, Y]], F[X, None]]:
     return decorator
 
 
-R = TypeVar("R", bound=ReactiveProtocol)
+RP = TypeVar("RP", bound=ReactiveProtocol)
 
 
-def dead_guard(value: R) -> R:
+def dead_guard(value: RP) -> RP:
     if value.__syncwave_state__ is SyncState.DEAD:
         raise DeadReferenceError(reference=value)
     return value

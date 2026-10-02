@@ -93,3 +93,4 @@ banned-from = ["os"]
 
 [tool.ruff.lint.flake8-import-conventions.extend-aliases]
 "collections.abc.Callable" = "F"
+"pydantic.dataclasses.dataclass" = "py_dataclass"
