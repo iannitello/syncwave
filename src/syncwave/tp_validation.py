@@ -43,13 +43,19 @@ from .sync_collection import (
     SyncSetCtx,
     type_args,
 )
-from .sync_model import SyncModel, SyncModelCtx, SyncRoot, is_pydantic_model
+from .sync_model import (
+    SyncModel,
+    SyncModelCtx,
+    SyncRoot,
+    is_pydantic_model,
+    is_sync_dataclass,
+)
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
     from pydantic.fields import FieldInfo
 
-    from .sync_model import PydanticDataclass
+    from .sync_model import PydanticDataclass, SyncDataclass
 
 __all__ = []
 
@@ -65,10 +71,11 @@ def str_guard(param: str, value: Any) -> None:
 def sync_model_guard(cls: Any) -> None:
     if not isclass(cls):
         raise TypeError(f"Expected a class, got `{type(cls).__qualname__}`.")
-    err = "Expected a subclass of `SyncModel`, `SyncRoot`, or `SyncDataclass`: "
+    _undecorated_guard(cls)
+    err = "Expected a subclass of `SyncModel`, or a reactive dataclass: "
     if not is_pydantic_model(cls):
         if is_dataclass(cls):
-            err += "use `SyncDataclass` instead of a standard `dataclass`."
+            err += "use `@sync_dataclass` instead of a standard `@dataclass`."
             raise TypeError(err)
         raise TypeError(err + f"got `{cls.__qualname__}` instead.")
     if not is_reactive_cls(cls):
@@ -77,7 +84,7 @@ def sync_model_guard(cls: Any) -> None:
 
 
 def collection_wrap(
-    cls: type[SyncModel],
+    cls: type[SyncModel | SyncDataclass],
     collection: type[SyncDict | SyncList] | Literal["auto"] | None,
 ) -> type[ReactiveProtocol] | GenericAlias:
 
@@ -160,6 +167,7 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
                 return _parse_model(origin)
             unreachable()
 
+        _undecorated_guard(origin)
         if is_pydantic_model(origin):
             return _parse_model(origin)
         if is_dataclass(origin):
@@ -193,9 +201,9 @@ def validate_default(value: Any, ta: TypeAdapter, tp: Any) -> Any:
 
 
 def _parse_model(cls: type[BaseModel | PydanticDataclass]) -> SyncModelCtx | None:
-    is_reactive = issubclass(cls, SyncModel)  # or issubclass(cls, SyncDataclass)
+    # using `is_reactive_cls` is equivalent, but the type checker doesn't understand
+    is_reactive = issubclass(cls, SyncModel) or is_sync_dataclass(cls)
 
-    # `frozen` comes from the config (models, dataclasses) or from the dataclass options
     config = getattr(cls, "model_config", {}) or getattr(cls, "__pydantic_config__", {})
     dc_params = getattr(cls, "__dataclass_params__", None)
     frozen = config.get("frozen", False) or getattr(dc_params, "frozen", False)
@@ -230,6 +238,12 @@ def _parse_model(cls: type[BaseModel | PydanticDataclass]) -> SyncModelCtx | Non
             fields_type_adapter=fields_type_adapter,
         )
     return None
+
+
+def _undecorated_guard(cls: type[Any]) -> None:
+    # if a subclass of a SyncDataclass isn't itself decorated by `@sync_dataclass`
+    if getattr(cls, "__syncwave_is_reactive__", False) and not is_reactive_cls(cls):
+        raise TypeError(f"Decorate {cls.__qualname__} with `@sync_dataclass`.")
 
 
 def _field_annotation(field_info: FieldInfo) -> Any:
