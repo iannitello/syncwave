@@ -19,8 +19,15 @@ from types import GenericAlias, UnionType
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_origin
 from uuid import UUID
 
-import pydantic.dataclasses as py_dc
-from pydantic import ByteSize, Discriminator, RootModel, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    ByteSize,
+    Discriminator,
+    RootModel,
+    TypeAdapter,
+    ValidationError,
+)
+from pydantic.dataclasses import dataclass as py_dataclass, is_pydantic_dataclass
 from pydantic_core import (
     PydanticSerializationError,
     PydanticUndefined,
@@ -52,7 +59,6 @@ from .sync_model import (
 )
 
 if TYPE_CHECKING:
-    from pydantic import BaseModel
     from pydantic.fields import FieldInfo
 
     from .sync_model import PydanticDataclass, SyncDataclass
@@ -68,19 +74,25 @@ def str_guard(param: str, value: Any) -> None:
         raise ValueError(f"'{param}' cannot be empty or whitespace only.")
 
 
-def sync_model_guard(cls: Any) -> None:
+def model_guard(cls: Any) -> None:
     if not isclass(cls):
         raise TypeError(f"Expected a class, got `{type(cls).__qualname__}`.")
-    _undecorated_guard(cls)
-    err = "Expected a subclass of `SyncModel`, or a reactive dataclass: "
-    if not is_pydantic_model(cls):
-        if is_dataclass(cls):
-            err += "use `@sync_dataclass` instead of a standard `@dataclass`."
-            raise TypeError(err)
-        raise TypeError(err + f"got `{cls.__qualname__}` instead.")
-    if not is_reactive_cls(cls):
-        err += "use a reactive model instead of a standard Pydantic model."
-        raise TypeError(err)
+
+    if issubclass(cls, SyncModel):
+        return
+    if issubclass(cls, BaseModel):
+        raise TypeError("Use a `SyncModel` instead of a `BaseModel`.")
+
+    if (is_py_dataclass := is_pydantic_dataclass(cls)) and is_reactive_cls(cls):
+        return
+    if is_py_dataclass:
+        raise TypeError("Use `@sync_dataclass` instead of a Pydantic dataclass.")
+    if is_dataclass(cls):
+        _undecorated_guard(cls)
+        raise TypeError("Use `@sync_dataclass` instead of a standard dataclass.")
+
+    err = f"Expected a `SyncModel` or a reactive dataclass, got `{cls.__qualname__}`."
+    raise TypeError(err)
 
 
 def collection_wrap(
@@ -171,7 +183,7 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
         if is_pydantic_model(origin):
             return _parse_model(origin)
         if is_dataclass(origin):
-            return _parse_model(py_dc.dataclass()(origin))
+            return _parse_model(py_dataclass()(origin))
 
         if issubclass(origin, dict):
             if args:
