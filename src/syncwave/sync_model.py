@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from copy import deepcopy
 from dataclasses import dataclass, field
 from inspect import isclass
@@ -8,6 +9,7 @@ from typing_extensions import Self, TypeIs, dataclass_transform
 
 from pydantic import BaseModel, GetCoreSchemaHandler as Handler, RootModel, TypeAdapter
 from pydantic.dataclasses import dataclass as py_dataclass, is_pydantic_dataclass
+from pydantic.errors import PydanticUndefinedAnnotation
 from pydantic.fields import Field, PrivateAttr
 from pydantic.root_model import RootModelRootType
 from pydantic_core import core_schema as cs
@@ -96,9 +98,8 @@ class SyncModel(BaseModel, Reactive[SyncModelCtx], _syncwave=True):
     def __pydantic_on_complete__(cls) -> None:
         if cls.__module__ == __name__:
             return
-        from .tp_validation import drill_tp
 
-        drill_tp(cls)
+        _eager_validate(cls)
         super().__pydantic_on_complete__()
 
     def __syncwave_init__(self, sref: StoreRef, ctx: SyncModelCtx) -> None:
@@ -390,11 +391,8 @@ def sync_dataclass(
             dc.__repr__ = _repr
         dc.__hash__ = None
 
-        # for unresolved forward refs, the checks run at `create_store` instead
         if dc.__pydantic_complete__:
-            from .tp_validation import drill_tp
-
-            drill_tp(dc)
+            _eager_validate(dc)
         return dc
 
     return decorate if _cls is None else decorate(_cls)
@@ -568,3 +566,12 @@ def _detach_fields(self: RM_T, target: RM_T) -> None:
     for name in type(self).__pydantic_fields__:
         if name in target.__dict__:
             target.__dict__[name] = getattr(self, name)
+
+
+def _eager_validate(cls: type[RM]) -> None:
+    from .tp_validation import drill_tp
+    # Validate a reactive class when it's defined, but ignore errors with unresolved
+    # forwardref. `create_store` will re-validate and then an unresolved ref raises.
+
+    with contextlib.suppress(PydanticUndefinedAnnotation):
+        drill_tp(cls)

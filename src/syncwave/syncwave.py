@@ -18,8 +18,8 @@ from .sync_collection import SyncDict, SyncList
 from .tp_validation import (
     collection_wrap,
     drill_tp,
+    model_guard,
     str_guard,
-    sync_model_guard,
     validate_default,
 )
 from .watcher import watcher
@@ -254,7 +254,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         io.file_name_guard(name)
 
         def decorator(cls: type[RM_T]) -> type[RM_T]:
-            sync_model_guard(cls)
+            model_guard(cls)
             store_tp = collection_wrap(cls, collection)
             self.__create_store(store_tp, name, default)
             return cls
