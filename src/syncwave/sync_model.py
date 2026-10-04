@@ -4,7 +4,7 @@ import contextlib
 from copy import deepcopy
 from dataclasses import dataclass, field
 from inspect import isclass
-from typing import TYPE_CHECKING, Any, ClassVar, Final, Generic, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Final, Generic, TypeVar, overload
 from typing_extensions import Self, TypeIs, dataclass_transform
 
 from pydantic import BaseModel, GetCoreSchemaHandler as Handler, RootModel, TypeAdapter
@@ -19,7 +19,7 @@ from .ownership import detach, ingest
 from .reactive import (
     Context,
     Reactive,
-    ReactiveProtocol,
+    ReactiveLike,
     StoreRef,
     SyncState,
     UnionCtx,
@@ -174,28 +174,27 @@ class SyncRoot(SyncModel, RootModel, Generic[RootModelRootType], _syncwave=True)
 
 if TYPE_CHECKING:
     from collections.abc import Callable as F
-    from typing import Literal, Protocol
+    from typing import ClassVar, Literal, Protocol
 
     from pydantic import ConfigDict
     from pydantic.dataclasses import PydanticDataclass
 
-    class SyncDataclass(PydanticDataclass, ReactiveProtocol[SyncModelCtx], Protocol):
-        __syncwave_base_setattr__: ClassVar[FSet]
-        __syncwave_base_delattr__: ClassVar[FDel]
+    class SyncDataclass(PydanticDataclass, ReactiveLike[SyncModelCtx], Protocol):
+        __syncwave_dc_base_setattr__: ClassVar[FSet]
+        __syncwave_dc_base_delattr__: ClassVar[FDel]
 
-    RM = SyncModel | SyncDataclass
-    RM_T = TypeVar("RM_T", bound=RM)
+    SyncModelLike = SyncModel | SyncDataclass
 
-    FSet = F[[RM, str, Any], None]
-    FDel = F[[RM, str], None]
+    FSet = F[[SyncModelLike, str, Any], None]
+    FDel = F[[SyncModelLike, str], None]
 
 
-def is_pydantic_model(cls: type[Any]) -> TypeIs[type[BaseModel | PydanticDataclass]]:
+def is_pydantic_like(cls: type[Any]) -> TypeIs[type[BaseModel | PydanticDataclass]]:
     # assumes `cls` is a class (called from trusted code)
     return hasattr(cls, "__pydantic_fields__")
 
 
-_T = TypeVar("_T")
+T = TypeVar("T")
 
 
 @overload
@@ -210,10 +209,10 @@ def sync_dataclass(
     config: ConfigDict | type[object] | None = None,
     kw_only: bool = False,
     slots: Literal[False] = False,
-) -> F[[type[_T]], type[SyncDataclass]]: ...
+) -> F[[type[T]], type[SyncDataclass]]: ...
 @overload
 def sync_dataclass(
-    _cls: type[_T],
+    _cls: type[T],
     *,
     init: Literal[False] = False,
     repr: bool = True,
@@ -227,7 +226,7 @@ def sync_dataclass(
 ) -> type[SyncDataclass]: ...
 @dataclass_transform(field_specifiers=(field, Field, PrivateAttr))
 def sync_dataclass(
-    _cls: type[_T] | None = None,
+    _cls: type[T] | None = None,
     *,
     init: Literal[False] = False,
     repr: bool = True,  # ruff: ignore[builtin-argument-shadowing]
@@ -238,7 +237,7 @@ def sync_dataclass(
     config: ConfigDict | type[object] | None = None,
     kw_only: bool = False,
     slots: Literal[False] = False,
-) -> F[[type[_T]], type[SyncDataclass]] | type[SyncDataclass]:
+) -> F[[type[T]], type[SyncDataclass]] | type[SyncDataclass]:
     """Make a reactive Pydantic dataclass.
 
     Use it like `pydantic.dataclasses.dataclass`, which it applies: the class becomes a
@@ -304,7 +303,7 @@ def sync_dataclass(
     if slots:
         raise TypeError("`slots=True` is not supported.")
 
-    def decorate(cls: type[_T]) -> type[SyncDataclass]:
+    def decorate(cls: type[T]) -> type[SyncDataclass]:
         if not isclass(cls):
             raise TypeError("`@sync_dataclass` must decorate a class.")
         if issubclass(cls, BaseModel):
@@ -333,27 +332,27 @@ def sync_dataclass(
             slots=False,
         )(cls)
 
-        def get_base_fn(fn_name: str) -> F:
+        def get_dc_base_fn(fn_name: str) -> F:
             if fn_name in dc.__dict__:
                 return dc.__dict__[fn_name]
-            sw_attr = f"__syncwave_base_{fn_name.strip('_')}__"
+            sw_attr = f"__syncwave_dc_base_{fn_name.strip('_')}__"
             if (fn := getattr(dc, sw_attr, None)) is not None:
                 return fn
             return getattr(dc, fn_name)
 
-        dc.__syncwave_base_setattr__ = (base_setattr := get_base_fn("__setattr__"))
-        dc.__syncwave_base_delattr__ = (base_delattr := get_base_fn("__delattr__"))
+        dc.__syncwave_dc_base_setattr__ = (b_setattr := get_dc_base_fn("__setattr__"))
+        dc.__syncwave_dc_base_delattr__ = (b_delattr := get_dc_base_fn("__delattr__"))
 
         def update_(self: SyncDataclass, new: SyncDataclass) -> None:
-            _update(self, new, base_setattr)
+            _update(self, new, b_setattr)
 
-        @mut_reactive_op(inert_fn=base_setattr)
+        @mut_reactive_op(inert_fn=b_setattr)
         def setattr_(self: SyncDataclass, name: str, value: Any) -> None:
-            _setattr(self, name, value, base_setattr)
+            _setattr(self, name, value, b_setattr)
 
-        @mut_reactive_op(inert_fn=base_delattr)
+        @mut_reactive_op(inert_fn=b_delattr)
         def delattr_(self: SyncDataclass, name: str) -> None:
-            _delattr(self, name, base_delattr)
+            _delattr(self, name, b_delattr)
 
         @reactive_op()
         def _copy(self: SyncDataclass) -> SyncDataclass:
@@ -417,7 +416,7 @@ _MISSING: Final = object()
 _LIVE_ATTRS: Final = ("__syncwave_state__", "__syncwave_sref__", "__syncwave_ctx__")
 
 
-def _init(self: RM, sref: StoreRef, ctx: SyncModelCtx) -> None:
+def _init(self: SyncModelLike, sref: StoreRef, ctx: SyncModelCtx) -> None:
     object.__setattr__(self, "__syncwave_state__", SyncState.LIVE)
     object.__setattr__(self, "__syncwave_sref__", sref)
     object.__setattr__(self, "__syncwave_ctx__", ctx)
@@ -443,7 +442,7 @@ def _init(self: RM, sref: StoreRef, ctx: SyncModelCtx) -> None:
             unreachable()
 
 
-def _kill(self: RM) -> None:
+def _kill(self: SyncModelLike) -> None:
     for name in self.__syncwave_ctx__.fields_ctx:
         value = self.__dict__.get(name)
         if is_reactive(value):
@@ -451,7 +450,7 @@ def _kill(self: RM) -> None:
     object.__setattr__(self, "__syncwave_state__", SyncState.DEAD)
 
 
-def _update(self: RM_T, new: RM_T, base_setattr: FSet) -> None:
+def _update(self: SyncModelLike, new: SyncModelLike, b_setattr: FSet) -> None:
     ctx = self.__syncwave_ctx__
 
     for name in ctx.fields_type_adapter:
@@ -465,21 +464,21 @@ def _update(self: RM_T, new: RM_T, base_setattr: FSet) -> None:
 
         # case 1: non-reactive content type
         if field_ctx is None:
-            _base_write(self, name, new_value, base_setattr)
+            _base_write(self, name, new_value, b_setattr)
         # case 2: fixed reactive content type
         elif isinstance(field_ctx, Context):
             old_value = self.__dict__[name]  # can't be None
             old_value.__syncwave_update__(new_value)
-            _base_write(self, name, old_value, base_setattr)
+            _base_write(self, name, old_value, b_setattr)
         # case 3: union content type
         elif isinstance(field_ctx, UnionCtx):
             old_value = self.__dict__.get(name)
-            _setattr_union(self, name, old_value, new_value, field_ctx, base_setattr)
+            _setattr_union(self, name, old_value, new_value, field_ctx, b_setattr)
         else:
             unreachable()
 
 
-def _getattribute(self: RM, name: str) -> Any:
+def _getattribute(self: SyncModelLike, name: str) -> Any:
     __dict__ = object.__getattribute__(self, "__dict__")
     ctx: SyncModelCtx | None = __dict__.get("__syncwave_ctx__")
     if ctx is not None:
@@ -493,14 +492,14 @@ def _getattribute(self: RM, name: str) -> Any:
     return object.__getattribute__(self, name)
 
 
-def _setattr(self: RM, name: str, new_value: Any, base_setattr: FSet) -> None:
+def _setattr(self: SyncModelLike, name: str, new_value: Any, b_setattr: FSet) -> None:
     ctx = self.__syncwave_ctx__
 
     field_ta = ctx.fields_type_adapter.get(name)
     # case for a non-model field
     if field_ta is None:
         # will still trigger `on_change` even though the field is not tracked
-        _base_write(self, name, new_value, base_setattr)
+        _base_write(self, name, new_value, b_setattr)
         return
 
     field_ctx = ctx.fields_ctx.get(name)
@@ -508,32 +507,37 @@ def _setattr(self: RM, name: str, new_value: Any, base_setattr: FSet) -> None:
 
     # case 1: non-reactive content type
     if field_ctx is None:
-        _base_write(self, name, new_value, base_setattr)
+        _base_write(self, name, new_value, b_setattr)
     # case 2: fixed reactive content type
     elif isinstance(field_ctx, Context):
         old_value = self.__dict__[name]  # can't be None
         old_value.__syncwave_update__(new_value)
-        _base_write(self, name, old_value, base_setattr)
+        _base_write(self, name, old_value, b_setattr)
     # case 3: union content type
     elif isinstance(field_ctx, UnionCtx):
         old_value = self.__dict__.get(name)
-        _setattr_union(self, name, old_value, new_value, field_ctx, base_setattr)
+        _setattr_union(self, name, old_value, new_value, field_ctx, b_setattr)
     else:
         unreachable()
 
 
-def _delattr(self: RM, name: str, base_delattr: FDel) -> None:
+def _delattr(self: SyncModelLike, name: str, b_delattr: FDel) -> None:
     ctx = self.__syncwave_ctx__
     if name in ctx.fields_type_adapter:
         raise AttributeError(
             f"Cannot delete tracked field `{name}` to keep the model in sync. "
             "Set it to `None` instead (if the field type allows it)."
         )
-    base_delattr(self, name)
+    b_delattr(self, name)
 
 
 def _setattr_union(
-    self: RM, f_name: str, old: Any, new: Any, u_ctx: UnionCtx, base_setattr: FSet
+    self: SyncModelLike,
+    f_name: str,
+    old: Any,
+    new: Any,
+    u_ctx: UnionCtx,
+    b_setattr: FSet,
 ) -> None:
     old_is_reactive = is_reactive(old)
     new_is_reactive = is_reactive(new)
@@ -541,20 +545,20 @@ def _setattr_union(
 
     if old_is_reactive and new_is_reactive and same_type:
         old.__syncwave_update__(new)
-        _base_write(self, f_name, old, base_setattr)
+        _base_write(self, f_name, old, b_setattr)
     else:
         if old_is_reactive:
             old.__syncwave_kill__()
         if new_is_reactive:
             new.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
-        _base_write(self, f_name, new, base_setattr)
+        _base_write(self, f_name, new, b_setattr)
 
 
-def _base_write(self: RM, name: str, value: Any, base_setattr: FSet) -> None:
+def _base_write(self: SyncModelLike, name: str, value: Any, b_setattr: FSet) -> None:
     # TODO review this
     live = {k: self.__dict__[k] for k in _LIVE_ATTRS}
-    base_setattr(self, name, value)
-    # With `validate_assignment=True`, `base_setattr` validates `value` again, and a
+    b_setattr(self, name, value)
+    # With `validate_assignment=True`, `b_setattr` validates `value` again, and a
     # reactive value comes back as an inert copy. On a dataclass, it also rebuilds the
     # instance `__dict__` with the fields only, dropping the `__syncwave_*` entries.
     self.__dict__.update(live)
@@ -562,13 +566,13 @@ def _base_write(self: RM, name: str, value: Any, base_setattr: FSet) -> None:
         self.__dict__[name] = value
 
 
-def _detach_fields(self: RM_T, target: RM_T) -> None:
+def _detach_fields(self: SyncModelLike, target: SyncModelLike) -> None:
     for name in type(self).__pydantic_fields__:
         if name in target.__dict__:
             target.__dict__[name] = getattr(self, name)
 
 
-def _eager_validate(cls: type[RM]) -> None:
+def _eager_validate(cls: type[SyncModelLike]) -> None:
     from .tp_validation import drill_tp
     # Validate a reactive class when it's defined, but ignore errors with unresolved
     # forwardref. `create_store` will re-validate and then an unresolved ref raises.

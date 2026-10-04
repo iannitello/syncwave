@@ -37,7 +37,7 @@ from pydantic_core import (
 
 from .errors import unreachable
 from .ownership import ingest
-from .reactive import Context, Reactive, ReactiveProtocol, UnionCtx, is_reactive_cls
+from .reactive import Context, Reactive, ReactiveLike, UnionCtx, is_reactive_cls
 from .sync_collection import (
     KT,
     VT,
@@ -54,7 +54,7 @@ from .sync_model import (
     SyncModel,
     SyncModelCtx,
     SyncRoot,
-    is_pydantic_model,
+    is_pydantic_like,
     is_sync_dataclass,
 )
 
@@ -98,7 +98,7 @@ def model_guard(cls: Any) -> None:
 def collection_wrap(
     cls: type[SyncModel | SyncDataclass],
     collection: type[SyncDict | SyncList] | Literal["auto"] | None,
-) -> type[ReactiveProtocol] | GenericAlias:
+) -> type[ReactiveLike] | GenericAlias:
 
     resolved_collection = collection  # non "auto" case
     if collection == "auto":
@@ -175,12 +175,12 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
                 return _get_sync_list_ctx(tp)
             if issubclass(origin, SyncSet):
                 return _get_sync_set_ctx(tp)
-            if is_pydantic_model(origin):
+            if is_pydantic_like(origin):
                 return _parse_model(origin)
             unreachable()
 
         _undecorated_guard(origin)
-        if is_pydantic_model(origin):
+        if is_pydantic_like(origin):
             return _parse_model(origin)
         if is_dataclass(origin):
             return _parse_model(py_dataclass()(origin))

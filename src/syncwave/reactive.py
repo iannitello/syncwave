@@ -13,16 +13,16 @@ from .errors import DeadReferenceError, unreachable
 __all__ = ["Reactive", "SyncState"]
 
 
-CTX = TypeVar("CTX", bound="Context")
+Context_T = TypeVar("Context_T", bound="Context")
 
 
-class ReactiveProtocol(Protocol[CTX]):
-    __syncwave_ctx__: CTX
+class ReactiveLike(Protocol[Context_T]):
+    __syncwave_ctx__: Context_T
     __syncwave_sref__: StoreRef
     __syncwave_state__: SyncState
     __syncwave_is_reactive__: Literal[True]
 
-    def __syncwave_init__(self, sref: StoreRef, ctx: CTX) -> None: ...
+    def __syncwave_init__(self, sref: StoreRef, ctx: Context_T) -> None: ...
     def __syncwave_kill__(self) -> None: ...
     def __syncwave_update__(self: Self, new: Self) -> None: ...
 
@@ -34,10 +34,10 @@ class ReactiveProtocol(Protocol[CTX]):
 
 @dataclass(frozen=True)
 class Context:
-    tp: type[ReactiveProtocol]
+    tp: type[ReactiveLike]
 
 
-class UnionCtx(dict[type[ReactiveProtocol], Context]): ...
+class UnionCtx(dict[type[ReactiveLike], Context]): ...
 
 
 @dataclass(frozen=True)
@@ -59,7 +59,7 @@ class SyncState(str, Enum):
     DEAD = "dead"
 
 
-class Reactive(Generic[CTX]):
+class Reactive(Generic[Context_T]):
     """Base class shared by all reactive values in Syncwave.
 
     All reactive types are subclasses of `Reactive`. You will mainly encounter it for
@@ -97,7 +97,7 @@ class Reactive(Generic[CTX]):
 
     """
 
-    __syncwave_ctx__: CTX
+    __syncwave_ctx__: Context_T
     __syncwave_sref__: StoreRef
     __syncwave_state__: SyncState = SyncState.INERT
     __syncwave_is_reactive__: Literal[True] = True
@@ -113,7 +113,7 @@ class Reactive(Generic[CTX]):
         if type(self) is Reactive:
             raise TypeError("`Reactive` is a base class and cannot be instantiated.")
 
-    def __syncwave_init__(self, sref: StoreRef, ctx: CTX) -> None:
+    def __syncwave_init__(self, sref: StoreRef, ctx: Context_T) -> None:
         raise NotImplementedError
 
     def __syncwave_kill__(self) -> None:
@@ -170,11 +170,11 @@ class Reactive(Generic[CTX]):
         return self.__syncwave_state__  # atomic, no need to lock
 
 
-def is_reactive(o: Any) -> TypeIs[ReactiveProtocol]:
+def is_reactive(o: Any) -> TypeIs[ReactiveLike]:
     return "__syncwave_is_reactive__" in type(o).__dict__
 
 
-def is_reactive_cls(cls: type[Any]) -> TypeIs[type[ReactiveProtocol]]:
+def is_reactive_cls(cls: type[Any]) -> TypeIs[type[ReactiveLike]]:
     # assumes `cls` is a class (called from trusted code)
     return "__syncwave_is_reactive__" in cls.__dict__
 
@@ -192,7 +192,7 @@ def reactive_op(inert_fn: F | None = None, unwrap: F = _id) -> F[[F[X, Y]], F[X,
     def decorator(fn: F[X, Y]) -> F[X, Y]:
         @wraps(fn)
         def wrapper(*args: X.args, **kwargs: X.kwargs) -> Y:
-            self = cast(ReactiveProtocol, args[0])
+            self = cast(ReactiveLike, args[0])
             try:
                 sref = self.__syncwave_sref__
             except AttributeError as e:
@@ -219,7 +219,7 @@ def mut_reactive_op(inert_fn: F, unwrap: F = _id) -> F[[F[X, Y]], F[X, None]]:
     def decorator(fn: F[X, Y]) -> F[X, None]:
         @wraps(fn)
         def wrapper(*args: X.args, **kwargs: X.kwargs) -> None:
-            self = cast(ReactiveProtocol, args[0])
+            self = cast(ReactiveLike, args[0])
             try:
                 sref = self.__syncwave_sref__
             except AttributeError as e:
@@ -246,10 +246,10 @@ def mut_reactive_op(inert_fn: F, unwrap: F = _id) -> F[[F[X, Y]], F[X, None]]:
     return decorator
 
 
-RP = TypeVar("RP", bound=ReactiveProtocol)
+RT = TypeVar("RT", bound=ReactiveLike)
 
 
-def dead_guard(value: RP) -> RP:
+def dead_guard(value: RT) -> RT:
     if value.__syncwave_state__ is SyncState.DEAD:
         raise DeadReferenceError(reference=value)
     return value

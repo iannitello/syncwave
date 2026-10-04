@@ -6,7 +6,7 @@ from functools import partial
 from pathlib import Path
 from threading import RLock
 from types import GenericAlias
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
 from pydantic import PydanticSchemaGenerationError, TypeAdapter
 
@@ -28,7 +28,9 @@ __all__ = ["Syncwave"]
 
 
 if TYPE_CHECKING:
-    from .sync_model import RM_T
+    from .sync_model import SyncModelLike
+
+    SyncModelLike_T = TypeVar("SyncModelLike_T", bound=SyncModelLike)
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,9 @@ class StoreInfo:
     type_adapter: TypeAdapter
     sref: StoreRef
     ctx: Context | UnionCtx | None
+
+
+T = TypeVar("T")
 
 
 # Has to be thread-safe, this is a temporary solution just to start the implementation.
@@ -132,7 +137,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         items = {k: v[0] for k, v in self.__stores.items()}
         return f"<Syncwave {items!r}>"
 
-    def create_store(self, tp: type, /, *, name: str, default: Any = EmptyFile) -> Any:
+    def create_store(self, tp: type[T], /, *, name: str, default: Any = EmptyFile) -> T:
         """Create a store persisted to a JSON file and two-way synced with it.
 
         A store is an item (key/value pair) on a `Syncwave` instance, and each store has
@@ -186,7 +191,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         name: str,
         collection: type[SyncDict | SyncList] | Literal["auto"] | None = "auto",
         default: dict[str, Any] = EmptyFile,  # ty: ignore[invalid-parameter-default]
-    ) -> F[[type[RM_T]], type[RM_T]]:
+    ) -> F[[type[SyncModelLike_T]], type[SyncModelLike_T]]:
         """Register a reactive model as a store with a class decorator.
 
         This is [Syncwave.create_store](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.create_store)
@@ -253,7 +258,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         str_guard("name", name)
         io.file_name_guard(name)
 
-        def decorator(cls: type[RM_T]) -> type[RM_T]:
+        def decorator(cls: type[SyncModelLike_T]) -> type[SyncModelLike_T]:
             model_guard(cls)
             store_tp = collection_wrap(cls, collection)
             self.__create_store(store_tp, name, default)

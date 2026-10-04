@@ -30,7 +30,7 @@ from .ownership import detach, ingest
 from .reactive import (
     Context,
     Reactive,
-    ReactiveProtocol,
+    ReactiveLike,
     StoreRef,
     SyncState,
     UnionCtx,
@@ -44,9 +44,7 @@ __all__ = ["SyncCollection", "SyncDict", "SyncList", "SyncSet"]
 
 
 KT = TypeVar("KT", default=str)
-VT = TypeVar("VT", bound=ReactiveProtocol | Any, default=Any)
-
-CT = TypeVar("CT", bound="SyncDict | SyncList | SyncSet")
+VT = TypeVar("VT", bound=ReactiveLike | Any, default=Any)
 
 
 @final
@@ -88,7 +86,7 @@ class SyncCollection(Reactive, metaclass=ABCMeta, _syncwave=True):
         raise NotImplementedError
 
 
-def type_args(tp: Any, root: type[CT]) -> tuple[Any, ...]:
+def type_args(tp: Any, root: type[SyncDict | SyncList | SyncSet]) -> tuple[Any, ...]:
     # `get_args` for SyncCollection types, but works for `class Tags(SyncList[str])`.
     origin = get_origin(tp) or tp
     args = get_args(tp)
@@ -772,6 +770,7 @@ class SyncSet(MutableSet[VT], Reactive[SyncSetCtx[VT]], _syncwave=True):
     __hash__ = None
 
 
+CT = TypeVar("CT", bound=SyncDict[Any, Any] | SyncList[Any] | SyncSet[Any])
 ValFn, SerFn = cs.NoInfoWrapValidatorFunction, cs.WrapSerializerFunction
 
 
