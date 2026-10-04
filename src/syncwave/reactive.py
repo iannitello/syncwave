@@ -200,8 +200,8 @@ def reactive_op(inert_fn: F | None = None, unwrap: F = _id) -> F[[F[X, Y]], F[X,
                     if inert_fn is None:
                         return fn(*args, **kwargs)
                     return inert_fn(unwrap(self), *args[1:], **kwargs)
-                err = "A {} reactive object has no store reference."
-                unreachable(err.format(self.__syncwave_state__.value), from_=e)
+                err = "A %s reactive object has no store reference."
+                unreachable(err % (self.__syncwave_state__.value), from_=e)
 
             with sref.lock:
                 if self.__syncwave_state__ is SyncState.DEAD:
@@ -226,8 +226,8 @@ def mut_reactive_op(inert_fn: F, unwrap: F = _id) -> F[[F[X, Y]], F[X, None]]:
                 if self.__syncwave_state__ is SyncState.INERT:
                     inert_fn(unwrap(self), *args[1:], **kwargs)
                     return
-                err = "A {} reactive object has no store reference."
-                unreachable(err.format(self.__syncwave_state__.value), from_=e)
+                err = "A %s reactive object has no store reference."
+                unreachable(err % (self.__syncwave_state__.value), from_=e)
 
             with sref.lock:
                 if self.__syncwave_state__ is SyncState.DEAD:

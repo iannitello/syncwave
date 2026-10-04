@@ -27,7 +27,7 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
 )
-from pydantic.dataclasses import dataclass as py_dataclass, is_pydantic_dataclass
+from pydantic.dataclasses import dataclass as py_dataclass
 from pydantic_core import (
     PydanticSerializationError,
     PydanticUndefined,
@@ -56,6 +56,7 @@ from .sync_model import (
     SyncRoot,
     is_pydantic_like,
     is_sync_dataclass,
+    undecorated_guard,
 )
 
 if TYPE_CHECKING:
@@ -72,27 +73,6 @@ def str_guard(param: str, value: Any) -> None:
         raise TypeError(f"Expected a `str` for param '{param}', got `{tp_name}`.")
     if not value.strip():
         raise ValueError(f"'{param}' cannot be empty or whitespace only.")
-
-
-def model_guard(cls: Any) -> None:
-    if not isclass(cls):
-        raise TypeError(f"Expected a class, got `{type(cls).__qualname__}`.")
-
-    if issubclass(cls, SyncModel):
-        return
-    if issubclass(cls, BaseModel):
-        raise TypeError("Use a `SyncModel` instead of a `BaseModel`.")
-
-    if (is_py_dataclass := is_pydantic_dataclass(cls)) and is_reactive_cls(cls):
-        return
-    if is_py_dataclass:
-        raise TypeError("Use `@sync_dataclass` instead of a Pydantic dataclass.")
-    if is_dataclass(cls):
-        _undecorated_guard(cls)
-        raise TypeError("Use `@sync_dataclass` instead of a standard dataclass.")
-
-    err = f"Expected a `SyncModel` or a reactive dataclass, got `{cls.__qualname__}`."
-    raise TypeError(err)
 
 
 def collection_wrap(
@@ -179,7 +159,7 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
                 return _parse_model(origin)
             unreachable()
 
-        _undecorated_guard(origin)
+        undecorated_guard(origin)
         if is_pydantic_like(origin):
             return _parse_model(origin)
         if is_dataclass(origin):
@@ -250,12 +230,6 @@ def _parse_model(cls: type[BaseModel | PydanticDataclass]) -> SyncModelCtx | Non
             fields_type_adapter=fields_type_adapter,
         )
     return None
-
-
-def _undecorated_guard(cls: type[Any]) -> None:
-    # if a subclass of a SyncDataclass isn't itself decorated by `@sync_dataclass`
-    if getattr(cls, "__syncwave_is_reactive__", False) and not is_reactive_cls(cls):
-        raise TypeError(f"Decorate {cls.__qualname__} with `@sync_dataclass`.")
 
 
 def _field_annotation(field_info: FieldInfo) -> Any:
