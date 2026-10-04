@@ -35,7 +35,7 @@ __all__ = ["SyncModel", "SyncRoot", "is_sync_dataclass", "sync_dataclass"]
 
 @dataclass(frozen=True)
 class SyncModelCtx(Context):
-    tp: type[SyncModel | SyncDataclass]
+    tp: type[SyncModelLike]
     fields_ctx: dict[str, Context | UnionCtx]
     fields_type_adapter: dict[str, TypeAdapter[Any]]
 
@@ -183,15 +183,17 @@ if TYPE_CHECKING:
         __syncwave_dc_base_setattr__: ClassVar[FSet]
         __syncwave_dc_base_delattr__: ClassVar[FDel]
 
+    ModelLike = BaseModel | PydanticDataclass
     SyncModelLike = SyncModel | SyncDataclass
 
     FSet = F[[SyncModelLike, str, Any], None]
     FDel = F[[SyncModelLike, str], None]
 
 
-def is_pydantic_like(cls: type[Any]) -> TypeIs[type[BaseModel | PydanticDataclass]]:
+def is_model_like(cls: type[Any]) -> TypeIs[type[ModelLike]]:
     # assumes `cls` is a class (called from trusted code)
-    return hasattr(cls, "__pydantic_fields__")
+    is_base_model = issubclass(cls, BaseModel) and cls is not BaseModel
+    return is_base_model or is_pydantic_dataclass(cls)
 
 
 T = TypeVar("T")
