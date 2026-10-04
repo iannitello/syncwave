@@ -49,10 +49,8 @@ class _Watcher:
         dir_path = file_path.parent
         with self._lock:
             if dir_path not in self._watched_dirs:
-                self._watched_dirs[dir_path] = (
-                    self._observer.schedule(self._event_handler, str(dir_path)),
-                    set(),
-                )
+                w = self._observer.schedule(self._event_handler, str(dir_path))
+                self._watched_dirs[dir_path] = (w, set())
             self._watched_dirs[dir_path][1].add(file_path)
         # set or reset the callback no matter what
         bound_callback = partial(callback, *args, **kwargs)
@@ -94,10 +92,8 @@ class _Watcher:
             dir_path.mkdir(parents=True, exist_ok=True)
             watch, watched_files = self._watched_dirs[dir_path]
             self._observer.unschedule(watch)
-            self._watched_dirs[dir_path] = (
-                self._observer.schedule(self._event_handler, str(dir_path)),
-                watched_files,
-            )
+            w = self._observer.schedule(self._event_handler, str(dir_path))
+            self._watched_dirs[dir_path] = (w, watched_files)
 
 
 class _EventHandler(FileSystemEventHandler):
@@ -157,11 +153,7 @@ class _EventHandler(FileSystemEventHandler):
             if timer := self._debounce_timers.get(file_path):
                 timer.cancel()
 
-            timer = Timer(
-                self.DEBOUNCE_WINDOW,
-                self._scheduled_callback,
-                args=(file_path,),
-            )
+            timer = Timer(self.DEBOUNCE_WINDOW, self._scheduled_callback, (file_path,))
             self._debounce_timers[file_path] = timer
             timer.start()
 
