@@ -15,8 +15,9 @@ from ipaddress import (
 )
 from pathlib import Path
 from re import Pattern
-from types import GenericAlias, UnionType
+from types import UnionType
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_origin
+from typing_extensions import Never
 from uuid import UUID
 
 from pydantic import (
@@ -87,47 +88,55 @@ def validate_default(value: Any, ta: TypeAdapter, tp: Any) -> Any:
 
 def collection_wrap(
     cls: type[SyncModelLike],
-    collection: type[SyncDict | SyncList] | Literal["auto"] | None,
-) -> type[ReactiveLike] | GenericAlias:
+    collection: type[SyncDict[Any, Never] | SyncList[Never]] | Literal["auto"] | None,
+) -> type[ReactiveLike]:
 
-    resolved_collection = collection  # non "auto" case
+    if collection is None:
+        return cls
     if collection == "auto":
         if issubclass(cls, RootModel):
-            resolved_collection = None
-        elif "key" in cls.__pydantic_fields__:
-            key_tp = cls.__pydantic_fields__["key"].annotation
-            resolved_collection = GenericAlias(SyncDict, (key_tp,))
-        else:
-            resolved_collection = SyncList
+            return cls
+        if "key" in cls.__pydantic_fields__:
+            key_tp = _field_annotation(cls.__pydantic_fields__["key"])
+            _validate_dict_key_tp(key_tp)
+            return SyncDict[key_tp, cls]
+        return SyncList[cls]
 
-    if resolved_collection is None:
-        return cls
-
-    origin = get_origin(resolved_collection) or resolved_collection
-    args = get_args(resolved_collection)
+    origin: Any = get_origin(collection) or collection  # Any for type checkers
+    args = get_args(collection)
     tp_name = getattr(origin, "__qualname__", repr(origin))
 
     is_dict = isclass(origin) and issubclass(origin, SyncDict)
     is_list = isclass(origin) and issubclass(origin, SyncList)
     is_set = isclass(origin) and issubclass(origin, SyncSet)
 
-    if (len_args := len(args)) > 0:
-        if not is_dict:
-            raise TypeError(f"`{tp_name}` does not support type arguments.")
-        if len_args > 1:
-            raise TypeError(f"`{tp_name}` supports only one type argument for the key.")
-        _validate_dict_key_tp(args[0])
-        return GenericAlias(origin, (args[0], cls))
+    if not (is_dict or is_list):
+        err = "`collection` must be `SyncDict`, `SyncList`, `None`, or `'auto'`. "
+        if is_set:
+            err += "`SyncSet` cannot be used because it cannot contain reactive items."
+        else:
+            err += f"Got `{tp_name}` instead."
+        raise ValueError(err)
 
-    if is_dict:
-        return GenericAlias(origin, (str, cls))
     if is_list:
-        return GenericAlias(origin, (cls,))
+        if args:
+            raise TypeError(
+                f"`{tp_name}` takes no type arguments when passed as `collection`: "
+                "its items are the decorated class."
+            )
+        return origin[cls]
 
-    err = "`collection` must be one of: `SyncDict`, `SyncList`, `None`, or `'auto'`."
-    if is_set:
-        err += " `SyncSet` cannot be used because it cannot contain reactive items."
-    raise ValueError(err)
+    if len(args) > 1:
+        raise TypeError(
+            f"`{tp_name}` takes only the key type when passed as `collection`, e.g. "
+            f"`{tp_name}[int]`: its values are the decorated class."
+        )
+    if is_dict:
+        if not args:
+            return origin[str, cls]
+        _validate_dict_key_tp(args[0])
+        return origin[args[0], cls]
+    unreachable()
 
 
 def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
@@ -151,12 +160,8 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
                 raise TypeError(f"`{tp_name}` cannot be used here: {_err_if_reactive}")
             from .syncwave import Syncwave
 
-            if issubclass(origin, Syncwave) or origin in (
-                Reactive,
-                SyncCollection,
-                SyncModel,
-                SyncRoot,
-            ):
+            bases = (Reactive, SyncCollection, SyncModel, SyncRoot)
+            if issubclass(origin, Syncwave) or origin in bases:
                 raise TypeError(f"`{tp_name}` cannot be used here.")
 
             if issubclass(origin, SyncDict):
@@ -238,10 +243,8 @@ def _parse_fields(cls: type[ModelLike], key: type) -> SyncModelCtx | None:
             raise TypeError(err + "reactive models cannot have frozen fields.")
 
         err += "not in a reactive model (breaks the reactive chain)."
-        field_ctx = drill_tp(
-            tp := _field_annotation(field_info),
-            _err_if_reactive="" if is_reactive else err,
-        )
+        tp = _field_annotation(field_info)
+        field_ctx = drill_tp(tp, _err_if_reactive="" if is_reactive else err)
 
         if field_ctx is not None:
             fields_ctx[field_name] = field_ctx

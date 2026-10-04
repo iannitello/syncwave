@@ -6,8 +6,8 @@ from functools import partial
 from inspect import isclass
 from pathlib import Path
 from threading import RLock
-from types import GenericAlias
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
+from typing_extensions import Never
 
 from pydantic import BaseModel, PydanticSchemaGenerationError, TypeAdapter
 from pydantic.dataclasses import is_pydantic_dataclass
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     from .sync_model import SyncModelLike
 
-    # `Dataclass` isn't actually accepted at runtime, but type checkers think
+    # A stdlib `Dataclass` isn't actually accepted at runtime, but type checkers think
     # `sync_dataclass` returns a normal `Dataclass` because of `dataclass_transform`.
     SyncModelLike_T = TypeVar("SyncModelLike_T", bound=SyncModelLike | Dataclass)
 
@@ -190,8 +190,10 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         self,
         *,
         name: str,
-        collection: type[SyncDict | SyncList] | Literal["auto"] | None = "auto",
-        default: dict[str, Any] = EmptyFile,  # ty: ignore[invalid-parameter-default]
+        collection: type[SyncDict[Any, Never] | SyncList[Never]]
+        | Literal["auto"]
+        | None = "auto",
+        default: Any = EmptyFile,
     ) -> F[[type[SyncModelLike_T]], type[SyncModelLike_T]]:
         """Register a reactive model as a store with a class decorator.
 
@@ -240,14 +242,22 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
             name: Name of the store. This is also the key used to access the store
                 (`syncwave[name]`), and the name of the corresponding JSON file
                 (`<root_path>/<name>.json`).
-            collection: Controls how the model is wrapped in a collection. See
-                [usage](https://syncwave.dev/usage/syncwave/) for more details on the
-                available options.
+            collection: The collection the model is wrapped in. `SyncList` holds a
+                list of models. `SyncDict` holds models by key: keys are `str` by
+                default, pass the key type as the only type argument for another key
+                type, e.g. `SyncDict[int]`. The items or values are always the
+                decorated class, which is why the type hint has `Never` in their
+                place. `None` stores the model itself, without a collection. `"auto"`
+                picks `None` for a root model, a `SyncDict` keyed by the type of the
+                `key` field if the model has one, and `SyncList` otherwise. See
+                [usage](https://syncwave.dev/usage/syncwave/) for more details.
             default: Default initial value for the store. Ignored if the file already
                 exists and is not empty. Only mandatory when there's no collection
-                wrapping the model (`collection=None` or "auto" with a RootModel) and
-                the model has fields without defaults. Pass a plain `dict` of field
-                values since the class is not defined yet when the decorator runs.
+                wrapping the model (`collection=None`, or `"auto"` with a root model)
+                and the model has fields without defaults. Pass plain data, since the
+                class is not defined yet when the decorator runs: a `dict` of field
+                values for an unwrapped model, or the collection's value when the
+                model is wrapped (a `list` for `SyncList`, a `dict` for `SyncDict`).
 
         Returns:
             A decorator that accepts a reactive model class, creates the store, and
@@ -375,7 +385,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         io.write_json(store_info.path, text)
         self.__on_file_change(store_info)
 
-    def __create_store(self, tp: type | GenericAlias, name: str, default: Any) -> None:
+    def __create_store(self, tp: type[Any], name: str, default: Any) -> None:
         try:
             type_adapter = TypeAdapter(tp)
         except PydanticSchemaGenerationError as e:

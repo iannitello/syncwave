@@ -500,9 +500,8 @@ class SyncList(MutableSequence[VT], Reactive[SyncListCtx[VT]], _syncwave=True):
                 for i in range(old_len, new_len):
                     new_item = new.__data[i]
                     if is_reactive(new_item):
-                        new_item.__syncwave_init__(
-                            self.__syncwave_sref__, inner_ctx[type(new_item)]
-                        )
+                        ctx = inner_ctx[type(new_item)]
+                        new_item.__syncwave_init__(self.__syncwave_sref__, ctx)
                     self.__data.append(new_item)
             # items to remove
             elif old_len > new_len:
