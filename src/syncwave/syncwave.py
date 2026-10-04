@@ -1,36 +1,37 @@
 from __future__ import annotations
 
 from collections.abc import Callable as F, Iterator, MutableMapping
-from dataclasses import dataclass
+from dataclasses import dataclass, is_dataclass
 from functools import partial
+from inspect import isclass
 from pathlib import Path
 from threading import RLock
 from types import GenericAlias
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
-from pydantic import PydanticSchemaGenerationError, TypeAdapter
+from pydantic import BaseModel, PydanticSchemaGenerationError, TypeAdapter
+from pydantic.dataclasses import is_pydantic_dataclass
 
 from .errors import unreachable
 from .io import EmptyFile, io
 from .ownership import detach, ingest
 from .reactive import Context, Reactive, StoreRef, SyncState, UnionCtx, is_reactive
 from .sync_collection import SyncDict, SyncList
-from .tp_validation import (
-    collection_wrap,
-    drill_tp,
-    model_guard,
-    str_guard,
-    validate_default,
-)
+from .sync_model import SyncModel, is_sync_dataclass, undecorated_guard
+from .tp_validation import collection_wrap, drill_tp, str_guard, validate_default
 from .watcher import watcher
 
 __all__ = ["Syncwave"]
 
 
 if TYPE_CHECKING:
+    from _typeshed import DataclassInstance as Dataclass
+
     from .sync_model import SyncModelLike
 
-    SyncModelLike_T = TypeVar("SyncModelLike_T", bound=SyncModelLike)
+    # `Dataclass` isn't actually accepted at runtime, but type checkers think
+    # `sync_dataclass` returns a normal `Dataclass` because of `dataclass_transform`.
+    SyncModelLike_T = TypeVar("SyncModelLike_T", bound=SyncModelLike | Dataclass)
 
 
 @dataclass(frozen=True)
@@ -259,10 +260,26 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         io.file_name_guard(name)
 
         def decorator(cls: type[SyncModelLike_T]) -> type[SyncModelLike_T]:
-            model_guard(cls)
-            store_tp = collection_wrap(cls, collection)
-            self.__create_store(store_tp, name, default)
-            return cls
+            if not isclass(cls):
+                raise TypeError(f"Expected a class, got `{type(cls).__qualname__}`.")
+
+            if issubclass(cls, SyncModel) or is_sync_dataclass(cls):
+                store_tp = collection_wrap(cls, collection)
+                self.__create_store(store_tp, name, default)
+                return cls
+
+            err = "Use %s instead of a %s."
+            if issubclass(cls, BaseModel):
+                raise TypeError(err % ("a `SyncModel`", "`BaseModel`"))
+            if is_pydantic_dataclass(cls):
+                raise TypeError(err % ("`@sync_dataclass`", "Pydantic dataclass"))
+            if is_dataclass(cls):
+                undecorated_guard(cls)
+                raise TypeError(err % ("`@sync_dataclass`", "standard dataclass"))
+            raise TypeError(
+                "Expected a `SyncModel` or a reactive dataclass, "
+                f"but got `{cls.__qualname__}` instead."
+            )
 
         return decorator
 

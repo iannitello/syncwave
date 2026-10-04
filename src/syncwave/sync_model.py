@@ -412,6 +412,12 @@ def is_sync_dataclass(cls: type[Any], /) -> TypeIs[type[SyncDataclass]]:
     return isclass(cls) and is_pydantic_dataclass(cls) and is_reactive_cls(cls)
 
 
+def undecorated_guard(cls: type[Any]) -> None:
+    # if a subclass of a SyncDataclass isn't itself decorated by `@sync_dataclass`
+    if getattr(cls, "__syncwave_is_reactive__", False) and not is_reactive_cls(cls):
+        raise TypeError(f"Decorate {cls.__qualname__} with `@sync_dataclass`.")
+
+
 _MISSING: Final = object()
 _LIVE_ATTRS: Final = ("__syncwave_state__", "__syncwave_sref__", "__syncwave_ctx__")
 
