@@ -27,7 +27,8 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
 )
-from pydantic.dataclasses import dataclass as py_dataclass
+from pydantic.dataclasses import dataclass as py_dataclass, rebuild_dataclass
+from pydantic.fields import FieldInfo
 from pydantic_core import (
     PydanticSerializationError,
     PydanticUndefined,
@@ -54,17 +55,15 @@ from .sync_model import (
     SyncModel,
     SyncModelCtx,
     SyncRoot,
-    is_pydantic_like,
+    is_model_like,
     is_sync_dataclass,
     undecorated_guard,
 )
 
-if TYPE_CHECKING:
-    from pydantic.fields import FieldInfo
-
-    from .sync_model import PydanticDataclass, SyncDataclass
-
 __all__ = []
+
+if TYPE_CHECKING:
+    from .sync_model import ModelLike, SyncModelLike
 
 
 def str_guard(param: str, value: Any) -> None:
@@ -75,8 +74,19 @@ def str_guard(param: str, value: Any) -> None:
         raise ValueError(f"'{param}' cannot be empty or whitespace only.")
 
 
+def validate_default(value: Any, ta: TypeAdapter, tp: Any) -> Any:
+    tp_name = tp.__qualname__ if isclass(tp) and not get_args(tp) else str(tp)
+    err = f"Default value `{value!r}` is not valid: "
+    try:
+        return ingest(value, ta)
+    except ValidationError as e:
+        raise ValueError(err + f"cannot be validated against type `{tp_name}`.") from e
+    except PydanticSerializationError as e:
+        raise ValueError(err + f"cannot be serialized as type `{tp_name}`.") from e
+
+
 def collection_wrap(
-    cls: type[SyncModel | SyncDataclass],
+    cls: type[SyncModelLike],
     collection: type[SyncDict | SyncList] | Literal["auto"] | None,
 ) -> type[ReactiveLike] | GenericAlias:
 
@@ -155,15 +165,16 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
                 return _get_sync_list_ctx(tp)
             if issubclass(origin, SyncSet):
                 return _get_sync_set_ctx(tp)
-            if is_pydantic_like(origin):
+            if is_model_like(origin):
                 return _parse_model(origin)
             unreachable()
 
         undecorated_guard(origin)
-        if is_pydantic_like(origin):
+        if is_model_like(origin):
             return _parse_model(origin)
         if is_dataclass(origin):
-            return _parse_model(py_dataclass()(origin))
+            py_dc = py_dataclass()(origin)
+            return _parse_model(py_dc, key=origin)
 
         if issubclass(origin, dict):
             if args:
@@ -181,18 +192,30 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
     return None
 
 
-def validate_default(value: Any, ta: TypeAdapter, tp: Any) -> Any:
-    tp_name = tp.__qualname__ if isclass(tp) and not get_args(tp) else str(tp)
-    err = f"Default value `{value!r}` is not valid: "
+_KNOWN_MODELS: dict[type[Any], SyncModelCtx | None] = {}
+
+
+def _parse_model(cls: type[ModelLike], key: type | None = None) -> SyncModelCtx | None:
+    key_ = key if key is not None else cls
+    if key_ in _KNOWN_MODELS:
+        return _KNOWN_MODELS[key_]
+
+    if not cls.__pydantic_complete__:
+        if issubclass(cls, BaseModel):
+            cls.model_rebuild()  # runs `__pydantic_on_complete__`, which parses
+        else:
+            rebuild_dataclass(cls)
+        if key_ in _KNOWN_MODELS:
+            return _KNOWN_MODELS[key_]
+
     try:
-        return ingest(value, ta)
-    except ValidationError as e:
-        raise ValueError(err + f"cannot be validated against type `{tp_name}`.") from e
-    except PydanticSerializationError as e:
-        raise ValueError(err + f"cannot be serialized as type `{tp_name}`.") from e
+        return _parse_fields(cls, key_)
+    except BaseException:
+        _KNOWN_MODELS.pop(key_, None)  # never keep a half-built context
+        raise
 
 
-def _parse_model(cls: type[BaseModel | PydanticDataclass]) -> SyncModelCtx | None:
+def _parse_fields(cls: type[ModelLike], key: type) -> SyncModelCtx | None:
     # using `is_reactive_cls` is equivalent, but the type checker doesn't understand
     is_reactive = issubclass(cls, SyncModel) or is_sync_dataclass(cls)
 
@@ -202,8 +225,12 @@ def _parse_model(cls: type[BaseModel | PydanticDataclass]) -> SyncModelCtx | Non
     if is_reactive and frozen:
         raise TypeError(f"Frozen model `{cls.__qualname__}` cannot be reactive.")
 
+    # Entering `ctx` empty and filled below. Recursive references get this same object.
     fields_ctx: dict[str, Context | UnionCtx] = {}
     fields_type_adapter: dict[str, TypeAdapter[Any]] = {}
+
+    ctx = SyncModelCtx(cls, fields_ctx, fields_type_adapter) if is_reactive else None
+    _KNOWN_MODELS[key] = ctx
 
     for field_name, field_info in cls.__pydantic_fields__.items():
         err = f"Field `{field_name}` in `{cls.__qualname__}`: "
@@ -223,13 +250,7 @@ def _parse_model(cls: type[BaseModel | PydanticDataclass]) -> SyncModelCtx | Non
         if field_info.default is not PydanticUndefined:
             validate_default(field_info.default, fields_type_adapter[field_name], tp)
 
-    if is_reactive:
-        return SyncModelCtx(
-            tp=cls,
-            fields_ctx=fields_ctx,
-            fields_type_adapter=fields_type_adapter,
-        )
-    return None
+    return ctx
 
 
 def _field_annotation(field_info: FieldInfo) -> Any:
@@ -242,29 +263,26 @@ def _field_annotation(field_info: FieldInfo) -> Any:
 
 
 def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
+    origin = get_origin(tp) or tp
     args = type_args(tp, SyncDict)
 
     if len(args) == 2:
         _validate_dict_key_tp(args[0])
         inner_ctx = drill_tp(args[1])
         key_type_adapter = TypeAdapter(args[0])
-        value_type_adapter = TypeAdapter(args[1])
+        val_type_adapter = TypeAdapter(args[1])
     elif len(args) == 0:
         inner_ctx = None
         key_type_adapter = TypeAdapter(str)
-        value_type_adapter = TypeAdapter(Any)
+        val_type_adapter = TypeAdapter(Any)
     else:
         raise TypeError("`SyncDict` requires 0 or 2 type arguments.")
 
-    return SyncDictCtx(
-        tp=get_origin(tp) or tp,
-        inner_ctx=inner_ctx,
-        key_type_adapter=key_type_adapter,
-        value_type_adapter=value_type_adapter,
-    )
+    return SyncDictCtx(origin, inner_ctx, key_type_adapter, val_type_adapter)
 
 
 def _get_sync_list_ctx(tp: type[SyncList[VT]]) -> SyncListCtx[VT]:
+    origin = get_origin(tp) or tp
     args = type_args(tp, SyncList)
 
     if len(args) == 1:
@@ -276,14 +294,11 @@ def _get_sync_list_ctx(tp: type[SyncList[VT]]) -> SyncListCtx[VT]:
     else:
         raise TypeError("`SyncList` requires 0 or 1 type argument.")
 
-    return SyncListCtx(
-        tp=get_origin(tp) or tp,
-        inner_ctx=inner_ctx,
-        item_type_adapter=item_type_adapter,
-    )
+    return SyncListCtx(origin, inner_ctx, item_type_adapter)
 
 
 def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
+    origin = get_origin(tp) or tp
     args = type_args(tp, SyncSet)
 
     if len(args) == 1:
@@ -297,11 +312,7 @@ def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
     else:
         raise TypeError("`SyncSet` requires 0 or 1 type argument.")
 
-    return SyncSetCtx(
-        tp=get_origin(tp) or tp,
-        inner_ctx=None,
-        item_type_adapter=item_type_adapter,
-    )
+    return SyncSetCtx(origin, None, item_type_adapter)
 
 
 # Whitelist: types that round-trip as dict keys through JSON (dump_json/validate_json).
