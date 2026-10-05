@@ -96,6 +96,7 @@ class _IO:
         default: Any | EmptyFileType = EmptyFile,
     ) -> Any | EmptyFileType:
 
+        created = not path.exists()
         self.create_file(path)
         content = path.read_text(encoding=self.ENCODING).strip()
         if content:
@@ -103,6 +104,8 @@ class _IO:
         else:
             value = default if default is not EmptyFile else self._get_default(ta)
             if value is EmptyFile:
+                if created:
+                    path.unlink()
                 return EmptyFile
         self._atomic_write(path, self._serialize(value, ta))
         return value
