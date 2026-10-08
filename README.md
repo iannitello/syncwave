@@ -34,7 +34,7 @@ Requires Python 3.10+.
 
 ## Quick Start
 
-Bind a Pydantic model to a JSON file with `@syncwave.register`:
+Bind a Pydantic model to a JSON file with `@syncwave.store`:
 
 ```python
 from pydantic import BaseModel
@@ -46,7 +46,7 @@ syncwave = Syncwave()
 
 # Creates `syncstores/customers.json` automatically.
 # If the file already exists, its data is loaded into the store.
-@syncwave.register(name="customers")
+@syncwave.store(name="customers")
 class Customer(BaseModel):
     key: int
     name: str
@@ -100,7 +100,7 @@ The full documentation lives at [syncwave.dev](https://syncwave.dev/):
 
 - [Syncwave](https://syncwave.dev/usage/syncwave/): the entry point, stores, two-way sync, validation.
 - [Collections](https://syncwave.dev/usage/collections/): `SyncDict`, `SyncList`, `SyncSet`, and nesting.
-- [Models](https://syncwave.dev/usage/models/): making your Pydantic models reactive with `@syncwave.register`.
+- [Models](https://syncwave.dev/usage/models/): making your Pydantic models reactive with `@syncwave.store`.
 - [Reactivity](https://syncwave.dev/usage/reactivity/): references, in place updates, lifecycles.
 - [Types and Validation](https://syncwave.dev/usage/types_and_validation/): what can be a store, defaults, keys, coercion.
 - [JSON Files](https://syncwave.dev/usage/json_files/): atomic writes, safe access, external edits.

@@ -141,7 +141,7 @@ class Reactive(Generic[Context_T]):
         syncwave = Syncwave()
 
 
-        @syncwave.register(name="customers")
+        @syncwave.store(name="customers")
         class Customer(SyncModel):
             name: str
             age: int
