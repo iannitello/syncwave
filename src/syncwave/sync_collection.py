@@ -310,8 +310,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive[SyncDictCtx[KT, VT]], _syncwave=
         return str(self.__data)
 
     def __repr__(self) -> str:
-        tp_name, state = type(self).__qualname__, self.__syncwave_state__.value
-        return f"<{tp_name} {self.__data!r} ({state})>"
+        return f"<{self.__data!r} ({self.__syncwave_state__.value})>"
 
     @reactive_op()
     def __copy__(self) -> Self:
@@ -571,8 +570,7 @@ class SyncList(MutableSequence[VT], Reactive[SyncListCtx[VT]], _syncwave=True):
         return str(self.__data)
 
     def __repr__(self) -> str:
-        tp_name, state = type(self).__qualname__, self.__syncwave_state__.value
-        return f"<{tp_name} {self.__data!r} ({state})>"
+        return f"<{self.__data!r} ({self.__syncwave_state__.value})>"
 
     @reactive_op()
     def __copy__(self) -> Self:
@@ -745,8 +743,7 @@ class SyncSet(MutableSet[VT], Reactive[SyncSetCtx[VT]], _syncwave=True):
         return str(self.__data)
 
     def __repr__(self) -> str:
-        tp_name, state = type(self).__qualname__, self.__syncwave_state__.value
-        return f"<{tp_name} {self.__data!r} ({state})>"
+        return f"<{self.__data!r} ({self.__syncwave_state__.value})>"
 
     @reactive_op()
     def __copy__(self) -> Self:

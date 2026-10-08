@@ -88,7 +88,7 @@ app = FastAPI()
 syncwave = Syncwave()
 
 
-@syncwave.register(name="customers")
+@syncwave.store(name="customers")
 class Customer(BaseModel):
     name: str
     age: int

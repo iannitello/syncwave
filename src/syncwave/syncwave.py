@@ -6,7 +6,7 @@ from functools import partial
 from inspect import isclass
 from pathlib import Path
 from threading import RLock
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, TypeVar, cast
 from typing_extensions import Never
 
 from pydantic import BaseModel, PydanticSchemaGenerationError, TypeAdapter
@@ -103,7 +103,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         if key not in self.__stores:
             raise KeyError(
                 f"Store '{key}' does not exist. "
-                "Use `syncwave.create_store(...)`, or `@syncwave.register(...)` first."
+                "Use `syncwave.create_store(...)`, or `@syncwave.store(...)` first."
             )
         str_guard("key", key)
 
@@ -137,6 +137,17 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
     def __repr__(self) -> str:
         items = {k: v[0] for k, v in self.__stores.items()}
         return f"<Syncwave {items!r}>"
+
+    def __copy__(self) -> NoReturn:
+        raise TypeError("A `Syncwave` instance cannot be copied.")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> NoReturn:
+        raise TypeError("A `Syncwave` instance cannot be copied.")
+
+    def __eq__(self, other: Any, /) -> bool:
+        return True if other is self else NotImplemented
+
+    __hash__ = None
 
     def create_store(self, tp: type[T], /, *, name: str, default: Any = EmptyFile) -> T:
         """Create a store persisted to a JSON file and two-way synced with it.
@@ -186,7 +197,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         value, store_info = self.__stores[name]
         return detach(value, store_info.type_adapter)
 
-    def register(
+    def store(
         self,
         *,
         name: str,
@@ -195,7 +206,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         | None = "auto",
         default: Any = EmptyFile,
     ) -> F[[type[SyncModelLike_T]], type[SyncModelLike_T]]:
-        """Register a reactive model as a store with a class decorator.
+        """Create a store from a reactive model as a class decorator.
 
         This is [Syncwave.create_store](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.create_store)
         with automatic collection wrapping: the decorated class is wrapped in a
@@ -209,7 +220,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         syncwave = Syncwave()
 
 
-        @syncwave.register(name="customers")
+        @syncwave.store(name="customers")
         class Customer(SyncModel):
             name: str
             age: int
