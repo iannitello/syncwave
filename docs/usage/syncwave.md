@@ -43,7 +43,7 @@ syncwave["numbers"] = [1, 2, 3]
 This raises an error:
 
 ```console
-KeyError: "Store 'numbers' does not exist. Use `syncwave.create_store(...)`, or `@syncwave.register(...)` first."
+KeyError: "Store 'numbers' does not exist. Use `syncwave.create_store(...)`, or `@syncwave.store(...)` first."
 ```
 
 You cannot insert a value under a key that doesn't exist because Syncwave needs additional information, most importantly a **type** the data must conform to. The correct way to create a store is to use [`syncwave.create_store(...)`](../api/syncwave/#syncwave.Syncwave.create_store): that's where you pass that type, along with other optional parameters to configure the store[^1].
@@ -52,7 +52,21 @@ You cannot insert a value under a key that doesn't exist because Syncwave needs 
 
 The only `dict` operations rejected are those that would insert a key that doesn't exist yet, whether explicitly, like the assignment above, or implicitly, like calling `syncwave.update(...)` with new keys. Everything else from the `dict` interface works as expected.
 
-So let's create your first store the right way:
+```python
+len(syncwave)  # number of stores
+list(syncwave)  # store names
+"numbers" in syncwave  # membership test
+
+del syncwave["numbers"]  # deletes the store and its JSON file
+```
+
+Be careful with that last one, and with operations such as `pop` and `clear`: deleting a store also deletes its JSON file from disk and **all data will be lost!**[^2]
+
+[^2]:
+    Whether the file gets deleted or not when deleting a store will become configurable in
+    future versions of the library.
+
+Create your first store like this:
 
 ```python title="main.py" hl_lines="5 6"
 from syncwave import Syncwave
@@ -67,7 +81,7 @@ Three things to notice:
 
 - `list[int]` declares the type of the store: a list of integers.
 - `name="numbers"` gives the store its key. It determines how you access it (`syncwave["numbers"]`) and the name of its JSON file (`syncstores/numbers.json`).
-- `create_store` returns the store's initial value and it's assigned to `numbers`.
+- `create_store` returns the store's initial value, which is assigned to `numbers`.
 
 Run the program:
 
@@ -128,13 +142,7 @@ syncwave.create_store(int, name="counter", default=0)
     | `str`  | `""`   |
     | `None` | `null` |
 
-    However, what about an empty JSON file? Python doesn't have something like `undefined` that could represent the absence of a value.
-
-    | Python                 | JSON |
-    | ---------------------- | ---- |
-    | :lucide-x: `undefined` | ` `  |
-
-    What value should then be in `syncwave["empty_file"]`? `None` already represents a file containing `null`, and besides, `None` wouldn't even be a valid value for a store declared as `list[int]`.
+    However, what about an empty JSON file? Python doesn't have something like `undefined` that could represent the absence of a value. What value should then be in `syncwave["empty_file"]`? `None` already represents a file containing `null`, and besides, `None` wouldn't even be a valid value for a store declared as `list[int]`.
 
     For that reason, as soon as you create a store it must be filled with something, and that thing must be a valid value with respect to the store's type.
 
@@ -201,10 +209,6 @@ The `[1, 2, 3]` you wrote earlier is gone, and the file now holds the new data. 
     Remember: reading a store hands you a copy, so an in-place change like `syncwave["numbers"].append(10)` only modifies that copy. The store and the JSON file are untouched.
 
     With plain (non-reactive) types, change a store by assigning a whole new value, and read the value fresh through the `syncwave` instance when you need it. [Reactive types](#why-reactivity) lift both restrictions.
-
-!!! tip "Writes are debounced"
-
-    Syncwave batches rapid successive changes and writes them to disk a fraction of a second later. If you programmatically want to read the file content at an exact moment, use [read_store_json](../api/syncwave/#syncwave.Syncwave.read_store_json), which always returns the up-to-date content. Everything about how Syncwave interacts with the disk is covered in [JSON Files](./json_files/).
 
 ### Writing Keeps a Copy
 
@@ -279,6 +283,7 @@ syncwave["numbers"] = [1, 2, "hello"]
 pydantic_core._pydantic_core.ValidationError: 1 validation error for list[int]
 2
   Input should be a valid integer, unable to parse string as an integer [type=int_parsing, input_value='hello', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/int_parsing
 ```
 
 Validation is powered by [Pydantic](https://docs.pydantic.dev/latest/), so you get the exact same behavior and error messages you may already know. [Types and Validation](./types_and_validation/) covers store types in depth.
@@ -334,22 +339,6 @@ syncwave["anything"] = {"anything": [1, "two", None]}
 
 You lose the guarantees that come with a real type, but the two-way sync works exactly the same. This is handy for prototyping, or for data whose shape you genuinely don't control.
 
-## Manage Stores
-
-As mentioned earlier, the standard `dict` interface works on the `syncwave` instance:
-
-```python
-len(syncwave)  # number of stores
-list(syncwave)  # store names
-"numbers" in syncwave  # membership test
-
-del syncwave["numbers"]  # delete a store
-```
-
-Be careful with that last one: deleting a store also deletes its JSON file from disk and **all data will be lost!**[^2]
-
-[^2]: Whether the file gets deleted or not when deleting a store will become configurable in future versions of the library.
-
 ## Why Reactivity
 
 Everything on this page followed the same pattern: you read a store's current value through the `syncwave` instance, and you change it by assigning a whole new value through the instance. That's because Syncwave has no way to detect in-place changes to plain Python objects. It can't know that someone called `append` on a regular list (short of comparing the whole content over and over), so the only operations it can react to are the ones that go through the instance.
@@ -360,7 +349,7 @@ Everything on this page followed the same pattern: you read a store's current va
 
     Copying at both boundaries (read and write) prevents that. Reads hand you a copy, so mutating what you got can't touch the store. Writes keep a copy, so mutating your original afterward can't either. The internal value stays exclusively in Syncwave's hands, and the only changes that reach it are the ones made through the instance, which Syncwave sees and syncs.
 
-    There are two exceptions to the rule. First, immutable values like `int` and `str` are just passed as they are: they can't be changed in place, so a copy would protect nothing. Second, the reactive types (that you're about to see), because Syncwave can detect and react to in-place mutations on them.
+    There are two exceptions to the rule. First, immutable values like `int` and `str` are just passed as they are: they can't be changed in place, so a copy would protect nothing. Second, reading a reactive type (that you're about to see) hands you the store's own object, because Syncwave can detect and react to in-place mutations on it.
 
 That word, _react_, is the heart of the library. An object is **reactive** when it stays connected to the store data: changes made through it are detected, validated, and written to the JSON file, and changes coming from the file are applied to it. The `syncwave` instance is itself reactive, which is why the assignment pattern works. Its entries are whole stores, though. To get the same behavior for values _inside_ a store, Syncwave provides its own reactive objects.
 
@@ -380,7 +369,7 @@ The store type is now `SyncList[int]`. The value returned by `create_store` is k
 print(type(numbers))  # <class 'syncwave.sync_collection.SyncList'>
 ```
 
-If you ever need to check, all reactive objects are instances of the [`Reactive`](../api/reactive/) class: `isinstance(numbers, Reactive)` returns `True`.
+`SyncList` is a subclass of the [`Reactive`](../api/reactive/) class. You can use it for verifications such as `isinstance(numbers, Reactive)`, which returns `True`.
 
 Now, `numbers` will stay synchronized with the store when it changes:
 
