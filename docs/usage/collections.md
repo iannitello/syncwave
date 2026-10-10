@@ -4,11 +4,15 @@
 
     [`syncwave.SyncCollection`](../api/sync_collections/)
 
-This page introduces the reactive collections: `SyncDict`, `SyncList`, and `SyncSet`. You'll see the states their instances go through, how they nest into each other, and how each of the three works.
+This page introduces the reactive collections: `SyncDict`, `SyncList`, and `SyncSet`. You'll see the lifecycle of their instances, how they nest into each other, and how each of the three works.
 
 ## Why Reactive Collections
 
-The [previous page](./syncwave/) showed the limitations of a store holding a plain `list`:
+!!! info "Skip"
+
+    This is just a reminder of the previous page. Feel free to [skip](#the-synccollection-types) if you just read it.
+
+A store holding a plain `list` is limited:
 
 ```python title="main.py"
 from syncwave import Syncwave
@@ -70,7 +74,7 @@ A reactive object is always in one of three states: **inert**, **live**, or **de
 
 ### Inert
 
-You can create a reactive collection, with the same arguments as its regular counterpart:
+You can create a reactive collection with the same arguments as its regular counterpart:
 
 ```python title="main.py"
 from syncwave import SyncList
@@ -105,17 +109,17 @@ If you want to change the whole store, just assign a regular `list` where a reac
 syncwave["numbers"] = [1, 2, 3]  # assign a regular list
 ```
 
-Here `syncwave["numbers"]` was already a `SyncList`, so the assignment didn't create a new one: Syncwave updated the existing instance in place with the new values. That's how the variable `numbers` stays connected; more formally, `numbers is syncwave["numbers"]` is still `True`. See [Updates Happen In Place](./reactivity#updates-happen-in-place) for more details.
+Here `syncwave["numbers"]` was already a `SyncList`, so the assignment didn't create a new one: Syncwave updated the existing instance in place with the new values. That's how the variable `numbers` stays connected; more formally, `numbers is syncwave["numbers"]` is still `True`. See [Updates Happen In Place](./reactivity/#updates-happen-in-place) for more details.
 
 You can assign an inert `SyncList` too, but just like a regular `list`, it's copied on the way in. The store keeps its own live object, and yours stays inert:
 
 ```python
-my_numbers = SyncList([7, 8, 9])
-syncwave["numbers"] = my_numbers
+inert_list = SyncList([1, 2, 3])
+syncwave["numbers"] = inert_list
 
-my_numbers.append(10)  # doesn't reach the store
-print(syncwave["numbers"])  # [7, 8, 9]
-print(my_numbers.sync_state)  # SyncState.INERT
+inert_list.append(4)  # doesn't reach the store
+print(syncwave["numbers"])  # [1, 2, 3]
+print(inert_list.sync_state)  # SyncState.INERT
 ```
 
 An inert object never becomes live. To get a live object, read it from the store.
@@ -133,7 +137,7 @@ numbers.append(4)
 ```
 
 ```console
-syncwave.errors.DeadReferenceError: Operation attempted on a dead reference: <[7, 8, 9] (dead)>
+syncwave.errors.DeadReferenceError: Operation attempted on a dead reference: <[1, 2, 3] (dead)>
 ```
 
 A dead object is permanently disconnected, and using it raises a `DeadReferenceError`. If it kept accepting changes, it would silently drift away from the file, and that kind of bug is hard to track down.
@@ -161,7 +165,7 @@ print(playlists)  # {'synthwave': <['Nightcall — Kavinsky'] (live)>}
 
 ```json title="syncstores/playlists.json"
 {
-  "synthwave": ["Nightcall — Kavinsky"]
+    "synthwave": ["Nightcall — Kavinsky"]
 }
 ```
 
@@ -179,13 +183,15 @@ TypeError: `SyncList` cannot be used here: `list` is not a reactive container.
 
 The reverse is fine: a plain type inside a reactive collection (like `SyncList[list[int]]`) is valid; the chain simply ends there. The inner lists are ordinary Python objects with the usual restriction: change them by assignment, not in place.
 
-That restriction should look familiar. The copy behavior described in [Syncwave](./syncwave/) was never specific to the `syncwave` instance. Every reactive container treats the non-reactive values it holds the same way: a read hands you a copy, a write keeps one. In a `SyncList[list[int]]` store, reading `store[0]` gives you a copy of the inner list, and assigning a list to `store[0]` keeps one. The `syncwave` instance was simply the first reactive container you met. Wherever the reactive chain ends, the same pattern holds: change plain values by assigning through their closest reactive parent, and read them fresh when you need the current data.
+That restriction should look familiar. The [copy behavior](./syncwave/#copies-on-read-and-write) described in the previous page was never specific to the `syncwave` instance. Every reactive container treats the non-reactive values it holds the same way: a read hands you a copy, a write keeps one. In a `SyncList[list[int]]` store, reading `store[0]` gives you a copy of the inner list, and assigning a list to `store[0]` keeps one. The `syncwave` instance was simply the first reactive container you met. Wherever the reactive chain ends, the same pattern holds: change plain values by assigning through their closest reactive parent, and read them fresh when you need the current data.
 
 ### Deep Instance Creation
 
 Note how in the above example, the plain `[]` assigned to `playlists["synthwave"]` became a live `SyncList` on the way in. What you saw in [Live](#live) happens at every level, not just at the store root.
 
-This works at any depth, and with more complex data too; the appropriate reactive objects are always constructed on the way in. Say you receive some plain data from elsewhere in your program; you can insert it as is:
+This works at any depth, and with more complex data too; the appropriate reactive objects are always constructed on the way in.
+
+Say you receive some plain data from elsewhere in your program; you can insert it as is:
 
 ```python
 incoming_data = {"road_trip": ["Sweet Virginia — The Rolling Stones"]}
@@ -202,8 +208,11 @@ Assuming `syncstores/playlists.json` contained the data from the previous exampl
 
 ```json title="syncstores/playlists.json"
 {
-  "synthwave": ["Nightcall — Kavinsky"],
-  "road_trip": ["Sweet Virginia — The Rolling Stones", "Dreams — Fleetwood Mac"]
+    "synthwave": ["Nightcall — Kavinsky"],
+    "road_trip": [
+        "Sweet Virginia — The Rolling Stones",
+        "Dreams — Fleetwood Mac"
+    ]
 }
 ```
 
@@ -222,11 +231,13 @@ Just like a store-level variable, `road_trip` stays connected in both directions
 
 This is all pretty intuitive for the items under a `SyncDict`, but it's a bit less so in the case of `SyncList` and `SyncSet`. Make sure you read [Position-Based Identity](#position-based-identity) and [Hashable Items](#hashable-items) to understand their less obvious behaviors.
 
-If you delete the whole entry, either with `del playlists["road_trip"]` or by removing it from the file, `road_trip` becomes [dead](#dead), and so does every reactive object inside it. There would be more to say about which objects die and when, but these concepts apply to all reactive types, not just reactive collections, so let's leave it at that. [Reactivity](./reactivity/) covers everything.
+If you delete the whole entry, either with `del playlists["road_trip"]` or by removing it from the file, `road_trip` becomes [dead](#dead), and so does every reactive object inside it.
+
+There would be more to say about which objects die and when, but these concepts apply to all reactive types, not just reactive collections, so let's leave it at that. [Reactivity](./reactivity/) covers everything.
 
 ## SyncDict
 
-`SyncDict` is the reactive counterpart of `dict`. It can be parameterized with a key type and a value type, e.g. `SyncDict[str, int]`, or it can be used bare. Here's how we can use it to hold some simple settings:
+`SyncDict` is the reactive counterpart of `dict`. It can be parameterized with a key type and a value type, e.g. `SyncDict[str, int]`, or it can be used bare. Here's how to use it, for example to hold some simple settings:
 
 ```python title="main.py"
 from syncwave import SyncDict, Syncwave
@@ -244,8 +255,8 @@ Run the program, then open the file:
 
 ```json title="syncstores/settings.json"
 {
-  "volume": 8,
-  "brightness": 5
+    "volume": 8,
+    "brightness": 5
 }
 ```
 
@@ -253,7 +264,7 @@ The usual `dict` operations (`get`, `items`, `update`, deletions, iteration, and
 
 ### Key Types
 
-A `SyncDict` maps to a JSON object, and the keys of a JSON object are always strings. That puts three requirements on the **key type**:
+A `SyncDict` maps to a JSON object, and the keys of a JSON object are always strings. That puts three requirements on the **key type** of the `SyncDict`:
 
 1. It must produce a valid JSON object key when serializing to a string.
 2. It must deserialize back to an equal value (it must round-trip through a string).
@@ -271,7 +282,7 @@ print(dag[1])  # [2, 3]
 
 ```json title="syncstores/dag.json"
 {
-  "1": [2, 3]
+    "1": [2, 3]
 }
 ```
 
@@ -293,9 +304,11 @@ any_dict["1"] = 123  # also good
 any_dict[1] = 2  # will raise an error: the store is implicitly `SyncDict[str, Any]`
 ```
 
+To be clear, these restrictions only apply to the **key type**, not to the values of the `SyncDict`. For example, `SyncDict[int | str, int]` is not valid, but `SyncDict[int, str | int]` is perfectly fine.
+
 ## SyncList
 
-`SyncList` is the reactive counterpart of `list`. It can be parameterized with the type of its items, e.g. `SyncList[str]`, or it can be used bare:
+`SyncList` is the reactive counterpart of `list`. It can be parameterized with the type of its items, e.g. `SyncList[str]`, or it can be used bare. Here's how to use it, for example to hold some tags:
 
 ```python title="main.py"
 from syncwave import SyncList, Syncwave
@@ -373,7 +386,7 @@ print(most_popular_song)  # {'title': 'Bones', 'artist': 'The Killers'}
 
 ## SyncSet
 
-`SyncSet` is the reactive counterpart of `set`: items are unique and unordered. It can be parameterized with the type of its items, e.g. `SyncSet[int]`, or it can be used bare. JSON has no set type, so the file representation is an array:
+`SyncSet` is the reactive counterpart of `set`: items are unique and unordered. It can be parameterized with the type of its items, e.g. `SyncSet[int]`, or it can be used bare. JSON has no set type, so the file representation is an array. Here's how to use it, for example to hold some IDs:
 
 ```python title="main.py"
 from syncwave import SyncSet, Syncwave
@@ -392,7 +405,7 @@ print(ids)  # {1, 2}
 [1, 2]
 ```
 
-If you write duplicate values into the file by hand, they collapse into one item when loaded.
+If you write duplicate values into the file by hand, they collapse into one item: as soon as you save if the program is running, or the next time the store is loaded otherwise.
 
 ### Hashable Items
 
@@ -406,11 +419,11 @@ syncwave.create_store(SyncSet[list[int]], name="bad")
 TypeError: `SyncSet` must hold hashable elements, got `list`.
 ```
 
-Notably, this means **reactive types are excluded as items of a `SyncSet`**: hashable values are immutable, while a reactive object must be mutable so it can be updated in place; no type can be both. This makes `SyncSet` the exception to nesting: it can hold `int`, `str`, `UUID`, and other hashable values, but never another reactive type, so it always ends the reactive chain.
+Notably, this means other **reactive types are excluded as items of a `SyncSet`**: hashable values are immutable, while a reactive object must be mutable so it can be updated in place; no type can be both. This makes `SyncSet` the exception to nesting: it can hold `int`, `str`, `UUID`, and other hashable values, but never another reactive type, so it always ends the reactive chain.
 
 ## What's Next
 
-Let's bring back the settings example from above:
+Let's bring back the settings example from [above](#syncdict):
 
 ```python
 from syncwave import SyncDict, Syncwave
@@ -426,6 +439,6 @@ This has an obvious weakness: `SyncDict[str, int]` works while every setting is 
 
 What that store really needs is a fixed set of named fields, each with its own type. That's exactly what a [Pydantic model](https://pydantic.dev/docs/validation/latest/concepts/models/) is. Define your model by subclassing `SyncModel` instead of Pydantic's `BaseModel`, and it becomes reactive. Just like the collections on this page, that means assigning a field is validated and written to the file, and fields can themselves hold reactive collections, so the whole structure stays reactive all the way down. The [Models](./models/) page covers it.
 
-One last thing before you move on: much of what this page introduced is not specific to collections; it applies to all reactive types, `SyncModel` included. Instances go through the same three states, nesting follows the same rules, and references behave the same way. The next page revisits all of it in more detail as it applies to models.
+One last thing before you move on: much of what this page introduced is not specific to collections; it applies to all reactive types. The [Reactivity](./reactivity/) page presents the system as a whole.
 
 For the complete API of the types presented on this page, see the [API Reference](../api/sync_collections/).
