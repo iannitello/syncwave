@@ -8,7 +8,7 @@ This page introduces reactive **models**. You'll see how to define one, how mode
 
 ## Introduction to Models
 
-!!! info
+!!! info "Skip"
 
     Feel free to [skip](#the-syncmodel-class) this introduction if you're already familiar with Pydantic.
 
@@ -18,10 +18,10 @@ The previous page, [collections](./collections/), ended on a problem. A store co
 
     Reactivity aside, you may be tempted to represent the app's settings using a `TypedDict` or a `NamedTuple`, but they aren't really what we need:
 
-    - **`TypedDict`** is just a `dict` at runtime, meaning you can still assign whatever you want `settings["typo"] = 5`, and types aren't enforced `Settings({"volume": "loud!"})`. It is mostly useful for type checkers (`pyright`, `mypy`, `ty`, etc.) and IDE tools.
-    - **`NamedTuple`** supports dot-notation, so reading `settings.volume` works while `settings.typo` would get rejected. However, it is immutable: `settings.volume = 5` raises an exception. Also, typing isn't enforced either, `Settings(volume="loud!")` works just fine.
+    - **`TypedDict`** is just a `dict` at runtime, meaning you can still assign whatever you want (`settings["typo"] = 5`), and types aren't enforced (`Settings({"volume": "loud!"})`). It is mostly useful for type checkers (`pyright`, `mypy`, `ty`, etc.) and IDE tools.
+    - **`NamedTuple`** supports dot notation, so reading `settings.volume` works while `settings.typo` would get rejected. However, it is immutable: `settings.volume = 5` raises an exception. Types aren't enforced either: `Settings(volume="loud!")` works just fine.
 
-The standard library [`dataclasses`](https://docs.python.org/3/library/dataclasses.html) module is _almost_ what we need:
+The standard library's [`dataclasses`](https://docs.python.org/3/library/dataclasses.html) module is _almost_ what we need:
 
 ```python
 from dataclasses import dataclass
@@ -56,7 +56,7 @@ settings = Settings(volume=8, brightness=5, theme="dark")
 
 You define your model class by subclassing Pydantic's [`BaseModel`](https://pydantic.dev/docs/validation/latest/concepts/models/). `Settings` is a regular class you instantiate with keyword arguments. The `settings` instance is mutable, rejects typos, works well with tooling, _and_ data is validated at runtime.
 
-It always has exactly these three fields with these types, and anything else is an error:
+Now our model always has exactly these three fields with these types, and anything else is an error:
 
 ```python
 Settings(volume=8, brightness=5, theme="dark")  # valid
@@ -69,7 +69,7 @@ theme
   Input should be 'light', 'dark' or 'system' [type=literal_error, input_value='dakr', input_type=str]
 ```
 
-If you really want to stick with dataclasses, Pydantic also provides its own [dataclass](https://pydantic.dev/docs/validation/latest/concepts/dataclasses/), but with added runtime validation. Just import it `from pydantic.dataclasses import dataclass`, and create your dataclass like with the standard library's version.
+If you really want to stick with dataclasses, Pydantic also provides its own [dataclass](https://pydantic.dev/docs/validation/latest/concepts/dataclasses/), with added runtime validation. Just import it with `from pydantic.dataclasses import dataclass`, and create your dataclass like with the standard library's version.
 
 One detail to know: Pydantic validates the data when an instance is created, but not when you assign a field afterward (unless you configure the model with `validate_assignment=True`). `settings.volume = "loud!"` goes through on a regular model. You'll see below that reactive models always validate assignments.
 
@@ -186,15 +186,30 @@ As always, `default` is ignored if the file already contains data.
 
 ### Instance Lifecycle
 
-Reactive models, like all[^1] reactive objects, can be **inert**, **live**, or **dead**.
+Reactive models, like all[^1] reactive objects, can be inert, live, or dead.
 
-[^1]: Excluding the `syncwave` instance itself which is always **live**.
+[^1]: Excluding the `syncwave` instance itself, which is always **live**.
 
-An instance you create yourself, like `Settings(volume=8)`, is inert. It behaves exactly like a regular Pydantic instance, so assignments aren't validated (unless you configured the model with `validate_assignment=True`), and it isn't connected to any store.
-
-An instance you get from a store is live. You can assign a whole new value to the store and Syncwave updates the live instance in place:
+An instance you create yourself is **inert**:
 
 ```python
+settings = Settings(volume=8)
+print(settings.sync_state)  # SyncState.INERT
+```
+
+It behaves exactly like a regular Pydantic instance, so assignments aren't validated (unless you configured the model with `validate_assignment=True`), and it isn't connected to any store.
+
+An instance you get from a store is **live**:
+
+```python
+settings = syncwave["settings"]
+print(settings.sync_state)  # SyncState.LIVE
+```
+
+You can assign a whole new value to the store and Syncwave updates the live instance in place:
+
+```python
+print(settings)  # volume=8 brightness=5 theme='light'
 syncwave["settings"] = {"volume": 1}
 print(settings)  # volume=1 brightness=5 theme='system'
 ```
@@ -211,9 +226,9 @@ print(settings)  # volume=2 brightness=5 theme='system'
 print(inert_settings.sync_state)  # SyncState.INERT
 ```
 
-Note that the instance you assigned was inert and it remained inert. Only its values were used to update the existing live instance in-place.
+Note that the instance you assigned was inert and it remained inert. Only its values were used to update the existing live instance in place.
 
-A live instance becomes dead when it's removed from the store. From then on, reading or assigning a field raises a `DeadReferenceError`:
+A live instance becomes **dead** when it's removed from the store. From then on, reading or assigning a field raises a `DeadReferenceError`:
 
 ```python
 from syncwave import DeadReferenceError
@@ -265,9 +280,9 @@ Everything from [Collections](./collections/) applies to the `recent_files` fiel
 
     In the example, the default value for `recent_files` is `SyncList()`, an inert `SyncList`. Using a normal list `[]` would work, but there are a few things you should know if you do:
 
-    - By default, Pydantic doesn't validate the default values, so when you create an instance with `settings = Settings()`, the default list `[]` enters the model and is never validated. That means it's never transformed into a `SyncList`. For example, `type(settings.recent_files)` would just return `<class 'list'>`. The reason why this is not a problem is because this situation only happens with inert objects (a live `Settings` will have a live `SyncList` at `recent_files`), and an inert `SyncList` behaves just like a normal `list`. Alternatively, you could use `Field(default=[], validate_default=True)`, but that's not prettier than simply using `SyncList()`.
+    - By default, Pydantic doesn't validate the default values, so when you create an instance with `settings = Settings()`, the default list `[]` enters the model and is never validated. That means it's never transformed into a `SyncList`. For example, `type(settings.recent_files)` would just return `<class 'list'>`. This isn't a problem because this situation only happens with inert objects (a live `Settings` will have a live `SyncList` at `recent_files`): an inert `SyncList` behaves just like a normal `list`, so everything you could do with `recent_files` would be the same whether it's a `list` or a `SyncList`. Alternatively, you could use `Field(default=[], validate_default=True)`, but that's not prettier than simply using `SyncList()`.
     - Since you declare `recent_files` as a `SyncList` and you use `[]` as a default value, type checkers will see this as an error. It works in practice, but it's a small lie we tell type checkers.
-    - You may also have a linter error since using a mutable value as a class attribute is a bad thing to do. This not seen as a problem for `BaseModel` because Pydantic deep-copies the mutable default, and linters know this, so they exempt `BaseModel` from that warning. Since `SyncModel` is a subclass of `BaseModel` the same behavior is inherited, but linters don't know that (yet).
+    - You may also have a linter error since using a mutable value as a class attribute is a bad thing to do. This isn't seen as a problem for `BaseModel` because Pydantic deep-copies the mutable default, and linters know this, so they exempt `BaseModel` from that warning. Since `SyncModel` is a subclass of `BaseModel`, the same behavior is inherited, but linters don't know that (yet).
 
 Fields can hold other reactive models too. Let's nest a window inside the settings:
 
@@ -288,13 +303,13 @@ settings.window.width = 1920
 
 `settings.window.width = 1920` is validated and synced like any other change, two levels down.
 
-Like with other reactive types the chain can't be broken. Here's what happens if you use a `SyncList` inside a regular `BaseModel`:
+As with other reactive types, the chain can't be broken. Here's what happens if you use a `SyncList` inside a regular `BaseModel`:
 
-```python
+```python hl_lines="4"
 from pydantic import BaseModel
 
 
-class Broken(BaseModel):
+class Broken(BaseModel):  # a `BaseModel`, not a `SyncModel`
     recent_files: SyncList[str] = []
 
 
@@ -307,7 +322,7 @@ TypeError: `SyncList` cannot be used here: Field `recent_files` in `Broken`: not
 
 ## Models in Collections
 
-The composition works in the other direction too. The most common pattern is probably a `SyncModel` inside a `SyncDict`:
+The composition works in the other direction too. The most common pattern is probably a `SyncModel` inside a `SyncDict` (this is pretty much why the library was created in the first place!):
 
 ```python title="main.py" hl_lines="6 11"
 from syncwave import SyncDict, SyncModel, Syncwave
@@ -354,7 +369,7 @@ The only collection that can't hold reactive models is `SyncSet`, because its it
 Defining a reactive model and creating a store of its instances right after is so common that there's a decorator for it. [`@syncwave.store`](../api/syncwave/#syncwave.Syncwave.store) creates the store as soon as the class is defined:
 
 ```python title="main.py" hl_lines="6 12"
-from syncwave import SyncModel, Syncwave
+from syncwave import SyncList, SyncModel, Syncwave
 
 syncwave = Syncwave()
 
@@ -365,14 +380,14 @@ class Customer(SyncModel):
     age: int
 
 
-customers = syncwave["customers"]
+customers: SyncList[Customer] = syncwave["customers"]
 customers.append(Customer(name="Alice", age=25))
 
 alice = customers[0]
 alice.age = 26  # validated, written to the file
 ```
 
-You need to delete the previous `syncstores/customers.json` for this example to run: the store was a `SyncDict[int, Customer]`, and now it's a `SyncList[Customer]`. See the [next](#collection-wrapping) section to see why.
+You need to delete the previous `syncstores/customers.json` for this example to run: the store was a `SyncDict[int, Customer]`, and now it's a `SyncList[Customer]`. The [next section](#collection-wrapping) explains why.
 
 The result is:
 
@@ -396,9 +411,9 @@ class Customer(SyncModel):
 customers = syncwave.create_store(SyncList[Customer], name="customers")
 ```
 
-The decorator returns your class unchanged, so you keep using `Customer` as usual (instantiation, type hints, `isinstance` checks). Since the store is created inside the decorator, you get it afterward by reading `syncwave["customers"]`.
+The decorator returns your class unchanged, so you keep using `Customer` as usual (instantiation, type hints, `isinstance` checks). Since the store is created inside the decorator, you get it afterward by reading from `syncwave` like `customers: SyncList[Customer] = syncwave["customers"]`. The type hint `SyncList[Customer]` isn't mandatory, but it helps your editor and type checker, which have no way of knowing the type of `customers` otherwise.
 
-The class must be reactive. Decorating a regular `BaseModel` raises an error:
+The decorated class must be reactive. Decorating a regular `BaseModel` raises an error:
 
 ```console
 TypeError: Use a `SyncModel` instead of a `BaseModel`.
@@ -430,9 +445,9 @@ customers = syncwave["customers"]
 customers["c1"] = {"key": "c1", "name": "Alice", "age": 25}
 ```
 
-Note that the dictionary key and the model's `key` field are independent: the field only influences which wrapping `"auto"` picks, and the type of the `SyncDict`'s key. For example, defining a model with `key: datetime.datetime` makes `"auto"` pick `SyncDict[datetime.datetime, Customer]` for the store.
+Note that the dictionary key and the model's `key` field are independent: the field only influences which wrapping `"auto"` picks, and the key type of the `SyncDict`. For example, defining a model with `key: datetime.datetime` makes `"auto"` pick `SyncDict[datetime.datetime, Customer]` for the store. The same rules described in [Key Types](./collections/#key-types) apply, even if the type comes from the annotation on `key`.
 
-You can also override the auto behavior explicitly:
+You can also pick the collection explicitly:
 
 - `collection=SyncList` forces a list, even if the model has a `key` field.
 - `collection=SyncDict` forces a dictionary with `str` keys. For another key type, pass it as the only type argument, e.g. `collection=SyncDict[int]`.
@@ -442,7 +457,7 @@ You can also override the auto behavior explicitly:
 
 ### The `default` Parameter
 
-`store` accepts a `default`, just like `create_store`. Without wrapping, you need it when some fields have no default. Since the class doesn't exist yet when the decorator's arguments are evaluated, pass plain data:
+`store` accepts a `default`, just like `create_store`. Without wrapping, you need it when some fields have no default. Since the class doesn't exist yet when the decorator's arguments are evaluated, pass plain data (not an instance):
 
 ```python
 @syncwave.store(name="config", collection=None, default={"debug": True})
@@ -478,9 +493,9 @@ For example, you could have:
 locale = syncwave.create_store(str, name="locale", default="en-US")
 ```
 
-(`default` is not necessary because a `str` defaults to `""`.)
+(Without `default`, the store would start as an empty string `""`.)
 
-Here, `locale` is not a reactive value; it's a normal string, which means it's a snapshot of the store, and if the file changes, or if the value at `syncwave["locale"]` changes, `locale` won't change. To read a fresh value or to write a new value you must go through `syncwave["locale"]`.
+Here, `locale` is not a reactive value; it's a normal string. This has all the limitations we know: you can't use `locale` to update the store, and `locale` is a snapshot of the store, so changing the file or the value at `syncwave["locale"]` won't update it.
 
 You might wish for a reactive handle on such a store, i.e. have `locale` be an object you could mutate to change the store, and print to see the current one (something like `ref()` in Vue.js). This can be achieved using [`SyncRoot`](../api/sync_model/#syncwave.SyncRoot), the reactive version of Pydantic's [`RootModel`](https://pydantic.dev/docs/validation/latest/concepts/models/#rootmodel-and-custom-root-types):
 
@@ -496,7 +511,27 @@ class Locale(SyncRoot[str]): ...
 locale = syncwave.create_store(Locale, name="locale", default="en-US")
 ```
 
-You subclass `SyncRoot` and give it a type, which produces a model with a single field named `root`. It comes with the same validation and serialization as with other models.
+You subclass `SyncRoot` and give it a type, which produces a model with a single field named `root`. It comes with the same validation and serialization as other models.
+
+You can achieve the same result with the `store` decorator:
+
+```python hl_lines="1 5"
+@syncwave.store(name="locale", default="en-US")
+class Locale(SyncRoot[str]): ...
+
+
+locale: Locale = syncwave["locale"]
+```
+
+When using the decorator with a `SyncRoot`, the `"auto"` mode doesn't wrap it in a collection, since the whole point is to hold a single value.
+
+To be even more concise, you don't have to define `Locale` at all. You can simply write:
+
+```python
+locale = syncwave.create_store(SyncRoot[str], name="locale", default="en-US")
+```
+
+Whichever you prefer, the result is the same.
 
 The JSON file holds the bare value, not an object around it:
 
@@ -526,13 +561,6 @@ Assigning through the instance still works too; `syncwave["locale"] = "fr-CA"` u
     issubclass(Locale, Reactive)  # True
     ```
 
-When using the `store` decorator with a `SyncRoot`, the `"auto"` mode doesn't wrap it in a collection, since the whole point is to hold one value:
-
-```python
-@syncwave.store(name="theme", default="light")
-class Theme(SyncRoot[Literal["light", "dark"]]): ...
-```
-
 ## Reactive Dataclasses
 
 If you prefer the dataclass syntax, Syncwave provides [`@sync_dataclass`](../api/sync_model/#syncwave.sync_dataclass). It applies Pydantic's dataclass decorator, so the class is validated exactly like a [Pydantic dataclass](https://pydantic.dev/docs/validation/latest/concepts/dataclasses/), and makes it reactive on top:
@@ -558,7 +586,7 @@ A class decorated with `@sync_dataclass` behaves like a `SyncModel` regarding re
 
 !!! warning "Mutable defaults"
 
-    Dataclasses don't accept mutable defaults. A field like `tags: list[str] = []` raises an error when the class is defined, and so does `SyncList()`[^2] and any other mutable default. `BaseModel` and `SyncModel` don't have this restriction because Pydantic copies mutable defaults for each instance.
+    Dataclasses don't accept mutable defaults. A field like `tags: list[str] = []` raises an error when the class is defined, and so do `SyncList()`[^2] and any other unhashable default. `BaseModel` and `SyncModel` don't have this restriction because Pydantic copies mutable defaults for each instance.
 
     To use a mutable default on dataclasses you need to use a factory:
 
@@ -572,11 +600,12 @@ A class decorated with `@sync_dataclass` behaves like a `SyncModel` regarding re
         sync_list: SyncList[str] = field(default_factory=SyncList)
     ```
 
-[^2]: `SyncList()` doesn't actually raise an error before Python 3.11, but still don't use it there.
+[^2]: Before Python 3.11, `SyncList()` doesn't raise an error, but still don't use it 
+there.
 
 The class decorated with `@sync_dataclass` keeps its own class hierarchy, so it doesn't inherit from `Reactive`. For example, `issubclass(Point, Reactive)` and `isinstance(Point(), Reactive)` both return `False`. To check whether a dataclass is reactive, Syncwave provides the function [`is_sync_dataclass`](../api/sync_model/#syncwave.is_sync_dataclass).
 
-This follows the syntax of the other kinds of dataclasses:
+This follows the naming of the other kinds of dataclasses:
 
 | Kind     | Decorator                         | Check                   |
 | -------- | --------------------------------- | ----------------------- |
@@ -588,6 +617,6 @@ A reactive dataclass is also a Pydantic dataclass, and a Pydantic dataclass is a
 
 ## What's Next
 
-With models covered, you now know all the reactive types. What remains is the system they form: what exactly a reference points to over time, when it stops being valid, and how to tell (`sync_live`, `sync_state`, `DeadReferenceError`). [Reactivity](./reactivity/) covers that lifecycle.
+With models covered, you now know all the reactive types. A lot of information about the reactive system is scattered across the previous three pages. [Reactivity](./reactivity/) presents everything in one place.
 
 For the complete API of reactive models, see the [API Reference](../api/sync_model/).

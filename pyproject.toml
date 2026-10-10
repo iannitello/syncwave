@@ -29,9 +29,9 @@ build-backend = "uv_build"
 dev = [
     "fastapi[standard]>=0.141.1",
     "mkdocstrings-python>=2.0.8",
-    "ruff>=0.16.6",
-    "ty>=0.0.78",
-    "zensical>=0.0.59",
+    "ruff>=0.16.7",
+    "ty>=0.0.80",
+    "zensical>=0.0.61",
 ]
 
 [tool.uv]
