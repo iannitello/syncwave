@@ -40,6 +40,10 @@ class Context:
 class UnionCtx(dict[type[ReactiveLike], Context]): ...
 
 
+def union_key(value: ReactiveLike) -> type[ReactiveLike]:
+    return value.__dict__.get("__syncwave_validated_as__", type(value))
+
+
 @dataclass(frozen=True)
 class StoreRef:
     lock: RLock
