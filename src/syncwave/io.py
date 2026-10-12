@@ -24,10 +24,10 @@ class PendingWrite:
     timer: Timer
 
 
-class EmptyFileType: ...
+class Void: ...
 
 
-EmptyFile: Final = EmptyFileType()
+void: Final = Void()
 
 
 class _IO:
@@ -93,8 +93,8 @@ class _IO:
         self,
         path: Path,
         ta: TypeAdapter = _any_ta,
-        default: Any | EmptyFileType = EmptyFile,
-    ) -> Any | EmptyFileType:
+        default: Any | Void = void,
+    ) -> Any | Void:
 
         created = not path.exists()
         self.create_file(path)
@@ -102,11 +102,11 @@ class _IO:
         if content:
             value = self._deserialize(content, ta, path)
         else:
-            value = default if default is not EmptyFile else self._get_default(ta)
-            if value is EmptyFile:
+            value = default if default is not void else self._get_default(ta)
+            if value is void:
                 if created:
                     path.unlink()
-                return EmptyFile
+                return void
         self._atomic_write(path, self._serialize(value, ta))
         return value
 
@@ -204,14 +204,14 @@ class _IO:
             raise ValueError(err) from e
         return value
 
-    def _get_default(self, ta: TypeAdapter) -> Any | EmptyFileType:
+    def _get_default(self, ta: TypeAdapter) -> Any | Void:
         defaults = [{}, [], "", None]
         for default in defaults:
             try:
                 return ta.validate_python(default)
             except ValidationError:
                 continue
-        return EmptyFile
+        return void
 
 
 io = _IO()

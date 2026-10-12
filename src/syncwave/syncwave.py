@@ -7,13 +7,13 @@ from inspect import isclass
 from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING, Any, Literal, NoReturn, TypeVar, cast
-from typing_extensions import Never
+from typing_extensions import Never, TypeForm
 
 from pydantic import BaseModel, PydanticSchemaGenerationError, TypeAdapter
 from pydantic.dataclasses import is_pydantic_dataclass
 
 from .errors import unreachable
-from .io import EmptyFile, io
+from .io import io, void
 from .ownership import detach, ingest
 from .reactive import Context, Reactive, StoreRef, SyncState, UnionCtx, is_reactive
 from .sync_collection import SyncDict, SyncList
@@ -95,7 +95,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
 
         value, store_info = self.__stores[key]
         with store_info.sref.lock:
-            if value is EmptyFile:
+            if value is void:
                 raise ValueError(f"Store '{key}' has not been initialized.")
             return detach(value, store_info.type_adapter)
 
@@ -149,7 +149,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
 
     __hash__ = None
 
-    def create_store(self, tp: type[T], /, *, name: str, default: Any = EmptyFile) -> T:
+    def create_store(self, tp: TypeForm[T], /, *, name: str, default: Any = void) -> T:
         """Create a store persisted to a JSON file and two-way synced with it.
 
         A store is an item (key/value pair) on a `Syncwave` instance, and each store has
@@ -204,7 +204,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         collection: type[SyncDict[Any, Never] | SyncList[Never]]
         | Literal["auto"]
         | None = "auto",
-        default: Any = EmptyFile,
+        default: Any = void,
     ) -> F[[type[SyncModelLike_T]], type[SyncModelLike_T]]:
         """Create a store from a reactive model as a class decorator.
 
@@ -396,7 +396,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         io.write_json(store_info.path, text)
         self.__on_file_change(store_info)
 
-    def __create_store(self, tp: type[Any], name: str, default: Any) -> None:
+    def __create_store(self, tp: TypeForm[Any], name: str, default: Any) -> None:
         try:
             type_adapter = TypeAdapter(tp)
         except PydanticSchemaGenerationError as e:
@@ -405,13 +405,13 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         ctx = drill_tp(tp)
 
         # default is checked whether it will be used or not
-        if default is not EmptyFile:
+        if default is not void:
             default = validate_default(default, type_adapter, tp)
 
         path = self.__root_path / f"{name}.json"
         value = io.init_json(path, type_adapter, default)
 
-        if value is EmptyFile:
+        if value is void:
             raise ValueError(f"Unable to create store '{name}' without a default.")
         value = cast(Any, value)  # removes the EmptyFileType for type checking
 
