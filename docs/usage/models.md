@@ -600,8 +600,7 @@ A class decorated with `@sync_dataclass` behaves like a `SyncModel` regarding re
         sync_list: SyncList[str] = field(default_factory=SyncList)
     ```
 
-[^2]: Before Python 3.11, `SyncList()` doesn't raise an error, but still don't use it 
-there.
+[^2]: Before Python 3.11, `SyncList()` doesn't raise an error, but still don't use it there.
 
 The class decorated with `@sync_dataclass` keeps its own class hierarchy, so it doesn't inherit from `Reactive`. For example, `issubclass(Point, Reactive)` and `isinstance(Point(), Reactive)` both return `False`. To check whether a dataclass is reactive, Syncwave provides the function [`is_sync_dataclass`](../api/sync_model/#syncwave.is_sync_dataclass).
 
@@ -617,6 +616,6 @@ A reactive dataclass is also a Pydantic dataclass, and a Pydantic dataclass is a
 
 ## What's Next
 
-With models covered, you now know all the reactive types. A lot of information about the reactive system is scattered across the previous three pages. [Reactivity](./reactivity/) presents everything in one place.
+With models covered, you now know all the reactive types. A lot of information about the reactive system is scattered across this page and the previous two. [Reactivity](./reactivity/) presents everything in one place.
 
 For the complete API of reactive models, see the [API Reference](../api/sync_model/).
