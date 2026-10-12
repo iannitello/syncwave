@@ -111,12 +111,14 @@ class SyncModel(BaseModel, Reactive[SyncModelCtx], _syncwave=True):
     def __syncwave_update__(self, new: Self) -> None:
         _update(self, new, BaseModel.__setattr__)
 
-    def __getattribute__(self, name: str) -> Any:
-        return _getattribute(self, name)
+    if not TYPE_CHECKING:
 
-    @mut_reactive_op(inert_fn=BaseModel.__setattr__)
-    def __setattr__(self, name: str, value: Any) -> None:
-        _setattr(self, name, value, BaseModel.__setattr__)
+        def __getattribute__(self, name: str) -> Any:
+            return _getattribute(self, name)
+
+        @mut_reactive_op(inert_fn=BaseModel.__setattr__)
+        def __setattr__(self, name: str, value: Any) -> None:
+            _setattr(self, name, value, BaseModel.__setattr__)
 
     @mut_reactive_op(inert_fn=BaseModel.__delattr__)
     def __delattr__(self, name: str) -> None:
