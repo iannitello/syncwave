@@ -148,9 +148,14 @@ def drill_tp(tp: Any, _err_if_reactive: str = "") -> Context | UnionCtx | None:
         return drill_tp(annotated_inner, _err_if_reactive)
 
     if (union_members := _handle_union(origin, args)) is not None:
-        ctxs = [drill_tp(member, _err_if_reactive) for member in union_members]
-        ctx_map = {ctx.tp: ctx for ctx in ctxs if isinstance(ctx, Context)}
-        return UnionCtx(ctx_map) if ctx_map else None
+        u_ctx = UnionCtx()
+        for member in union_members:
+            ctx = drill_tp(member, _err_if_reactive)
+            if isinstance(ctx, Context):
+                u_ctx[ctx.tp] = ctx
+            elif isinstance(ctx, UnionCtx):  # e.g. a member `Annotated[A | B, ...]`
+                u_ctx.update(ctx)
+        return u_ctx or None
 
     _handle_literal(origin, args)  # nothing to do, just to check there are args
 
@@ -266,7 +271,6 @@ def _field_annotation(field_info: FieldInfo) -> Any:
 
 
 def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
-    origin = get_origin(tp) or tp
     args = type_args(tp, SyncDict)
 
     if len(args) == 2:
@@ -281,11 +285,10 @@ def _get_sync_dict_ctx(tp: type[SyncDict[KT, VT]]) -> SyncDictCtx[KT, VT]:
     else:
         raise TypeError("`SyncDict` requires 0 or 2 type arguments.")
 
-    return SyncDictCtx(origin, inner_ctx, key_type_adapter, val_type_adapter)
+    return SyncDictCtx(tp, inner_ctx, key_type_adapter, val_type_adapter)
 
 
 def _get_sync_list_ctx(tp: type[SyncList[VT]]) -> SyncListCtx[VT]:
-    origin = get_origin(tp) or tp
     args = type_args(tp, SyncList)
 
     if len(args) == 1:
@@ -297,11 +300,10 @@ def _get_sync_list_ctx(tp: type[SyncList[VT]]) -> SyncListCtx[VT]:
     else:
         raise TypeError("`SyncList` requires 0 or 1 type argument.")
 
-    return SyncListCtx(origin, inner_ctx, item_type_adapter)
+    return SyncListCtx(tp, inner_ctx, item_type_adapter)
 
 
 def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
-    origin = get_origin(tp) or tp
     args = type_args(tp, SyncSet)
 
     if len(args) == 1:
@@ -315,7 +317,7 @@ def _get_sync_set_ctx(tp: type[SyncSet[VT]]) -> SyncSetCtx[VT]:
     else:
         raise TypeError("`SyncSet` requires 0 or 1 type argument.")
 
-    return SyncSetCtx(origin, None, item_type_adapter)
+    return SyncSetCtx(tp, None, item_type_adapter)
 
 
 # Whitelist: types that round-trip as dict keys through JSON (dump_json/validate_json).

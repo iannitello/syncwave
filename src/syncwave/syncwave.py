@@ -15,7 +15,15 @@ from pydantic.dataclasses import is_pydantic_dataclass
 from .errors import unreachable
 from .io import io, void
 from .ownership import detach, ingest
-from .reactive import Context, Reactive, StoreRef, SyncState, UnionCtx, is_reactive
+from .reactive import (
+    Context,
+    Reactive,
+    StoreRef,
+    SyncState,
+    UnionCtx,
+    is_reactive,
+    union_key,
+)
 from .sync_collection import SyncDict, SyncList
 from .sync_model import SyncModel, is_sync_dataclass, undecorated_guard
 from .tp_validation import collection_wrap, drill_tp, str_guard, validate_default
@@ -424,7 +432,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
             elif isinstance(ctx, Context):
                 value.__syncwave_init__(sref, ctx)
             elif isinstance(ctx, UnionCtx):
-                value.__syncwave_init__(sref, ctx[type(value)])
+                value.__syncwave_init__(sref, ctx[union_key(value)])
             else:
                 unreachable()
         self.__stores[name] = (value, store_info)
@@ -466,15 +474,18 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         elif isinstance(ctx, UnionCtx):
             old_is_reactive = is_reactive(old_value)
             new_is_reactive = is_reactive(new_value)
-            same_type = type(old_value) is (new_type := type(new_value))
 
-            if old_is_reactive and new_is_reactive and same_type:
+            if (
+                old_is_reactive
+                and new_is_reactive
+                and union_key(old_value) == union_key(new_value)
+            ):
                 old_value.__syncwave_update__(new_value)
             else:
                 if old_is_reactive:
                     old_value.__syncwave_kill__()
                 if new_is_reactive:
-                    new_value.__syncwave_init__(sref, ctx[new_type])
+                    new_value.__syncwave_init__(sref, ctx[union_key(new_value)])
                 self.__stores[key] = (new_value, store_info)
         else:
             unreachable()

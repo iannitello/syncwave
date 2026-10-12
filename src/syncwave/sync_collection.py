@@ -38,6 +38,7 @@ from .reactive import (
     is_reactive,
     mut_reactive_op,
     reactive_op,
+    union_key,
 )
 
 __all__ = ["SyncCollection", "SyncDict", "SyncList", "SyncSet"]
@@ -165,6 +166,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive[SyncDictCtx[KT, VT]], _syncwave=
 
     __data: dict[KT, VT]
     __syncwave_ctx__: SyncDictCtx[KT, VT]
+    __syncwave_validated_as__: type[SyncDict[KT, VT]]
     __pydantic_serializer__: SchemaSerializer
 
     def __init__(
@@ -194,7 +196,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive[SyncDictCtx[KT, VT]], _syncwave=
             _serializer_factory(cls, unwrap=cls.__data_unwrap), schema=dict_schema
         )
         return cs.no_info_wrap_validator_function(
-            _validator_factory(cls, new=cls.__new, unwrap=cls.__data_unwrap),
+            _validator_factory(src, new=cls.__new, unwrap=cls.__data_unwrap),
             dict_schema,
             serialization=ser_schema,
         )
@@ -225,7 +227,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive[SyncDictCtx[KT, VT]], _syncwave=
         elif isinstance(inner_ctx, UnionCtx):
             for value in self.__data.values():
                 if is_reactive(value):
-                    value.__syncwave_init__(sref, inner_ctx[type(value)])
+                    value.__syncwave_init__(sref, inner_ctx[union_key(value)])
         else:
             unreachable()
 
@@ -342,15 +344,14 @@ class SyncDict(MutableMapping[KT, VT], Reactive[SyncDictCtx[KT, VT]], _syncwave=
     def __setitem_union(self, k: KT, old: VT | None, new: VT, u_ctx: UnionCtx) -> None:
         old_is_reactive = is_reactive(old)
         new_is_reactive = is_reactive(new)
-        same_type = type(old) is (new_type := type(new))
 
-        if old_is_reactive and new_is_reactive and same_type:
+        if old_is_reactive and new_is_reactive and union_key(old) == union_key(new):
             old.__syncwave_update__(new)
         else:
             if old_is_reactive:
                 old.__syncwave_kill__()
             if new_is_reactive:
-                new.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
+                new.__syncwave_init__(self.__syncwave_sref__, u_ctx[union_key(new)])
             self.__data[k] = new
 
 
@@ -400,6 +401,7 @@ class SyncList(MutableSequence[VT], Reactive[SyncListCtx[VT]], _syncwave=True):
 
     __data: list[VT]
     __syncwave_ctx__: SyncListCtx[VT]
+    __syncwave_validated_as__: type[SyncList[VT]]
     __pydantic_serializer__: SchemaSerializer
 
     def __init__(self, iterable: Iterable[VT] = ()) -> None:
@@ -422,7 +424,7 @@ class SyncList(MutableSequence[VT], Reactive[SyncListCtx[VT]], _syncwave=True):
             _serializer_factory(cls, unwrap=cls.__data_unwrap), schema=list_schema
         )
         return cs.no_info_wrap_validator_function(
-            _validator_factory(cls, new=cls.__new, unwrap=cls.__data_unwrap),
+            _validator_factory(src, new=cls.__new, unwrap=cls.__data_unwrap),
             list_schema,
             serialization=ser_schema,
         )
@@ -453,7 +455,7 @@ class SyncList(MutableSequence[VT], Reactive[SyncListCtx[VT]], _syncwave=True):
         elif isinstance(inner_ctx, UnionCtx):
             for item in self.__data:
                 if is_reactive(item):
-                    item.__syncwave_init__(sref, inner_ctx[type(item)])
+                    item.__syncwave_init__(sref, inner_ctx[union_key(item)])
         else:
             unreachable()
 
@@ -499,7 +501,7 @@ class SyncList(MutableSequence[VT], Reactive[SyncListCtx[VT]], _syncwave=True):
                 for i in range(old_len, new_len):
                     new_item = new.__data[i]
                     if is_reactive(new_item):
-                        ctx = inner_ctx[type(new_item)]
+                        ctx = inner_ctx[union_key(new_item)]
                         new_item.__syncwave_init__(self.__syncwave_sref__, ctx)
                     self.__data.append(new_item)
             # items to remove
@@ -595,15 +597,14 @@ class SyncList(MutableSequence[VT], Reactive[SyncListCtx[VT]], _syncwave=True):
     def __setitem_union(self, i: int, old: VT, new: VT, u_ctx: UnionCtx) -> None:
         old_is_reactive = is_reactive(old)
         new_is_reactive = is_reactive(new)
-        same_type = type(old) is (new_type := type(new))
 
-        if old_is_reactive and new_is_reactive and same_type:
+        if old_is_reactive and new_is_reactive and union_key(old) == union_key(new):
             old.__syncwave_update__(new)
         else:
             if old_is_reactive:
                 old.__syncwave_kill__()
             if new_is_reactive:
-                new.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
+                new.__syncwave_init__(self.__syncwave_sref__, u_ctx[union_key(new)])
             self.__data[i] = new
 
     def __roundtrip_copy(self) -> list[VT]:
@@ -667,6 +668,7 @@ class SyncSet(MutableSet[VT], Reactive[SyncSetCtx[VT]], _syncwave=True):
     # SyncSet cannot hold reactive items because a reactive item is mutable
     __data: set[VT]
     __syncwave_ctx__: SyncSetCtx[VT]
+    __syncwave_validated_as__: type[SyncSet[VT]]
     __pydantic_serializer__: SchemaSerializer
 
     def __init__(self, iterable: Iterable[VT] = ()) -> None:
@@ -689,7 +691,7 @@ class SyncSet(MutableSet[VT], Reactive[SyncSetCtx[VT]], _syncwave=True):
             _serializer_factory(cls, unwrap=cls.__data_unwrap), schema=set_schema
         )
         return cs.no_info_wrap_validator_function(
-            _validator_factory(cls, new=cls.__new, unwrap=cls.__data_unwrap),
+            _validator_factory(src, new=cls.__new, unwrap=cls.__data_unwrap),
             set_schema,
             serialization=ser_schema,
         )
@@ -770,13 +772,17 @@ CT = TypeVar("CT", bound=SyncDict[Any, Any] | SyncList[Any] | SyncSet[Any])
 ValFn, SerFn = cs.NoInfoWrapValidatorFunction, cs.WrapSerializerFunction
 
 
-def _validator_factory(cls: type[CT], new: F[[Any], CT], unwrap: F[[CT], Any]) -> ValFn:
+def _validator_factory(tp: type[CT], new: F[[Any], CT], unwrap: F[[CT], Any]) -> ValFn:
+    origin = get_origin(tp) or tp
+
     def validate(value: Any, handler: cs.ValidatorFunctionWrapHandler) -> CT:
         if is_reactive(value):
             dead_guard(value)
-            if isinstance(value, cls):
+            if isinstance(value, origin):
                 value = unwrap(value)
-        return new(handler(value))
+        validated = new(handler(value))
+        validated.__syncwave_validated_as__ = tp
+        return validated
 
     return validate
 

@@ -4,7 +4,7 @@ import contextlib
 from copy import deepcopy
 from dataclasses import dataclass, field
 from inspect import isclass
-from typing import TYPE_CHECKING, Any, Final, Generic, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Final, Generic, TypeGuard, TypeVar, overload
 from typing_extensions import Self, TypeIs, dataclass_transform
 
 from pydantic import BaseModel, GetCoreSchemaHandler as Handler, RootModel, TypeAdapter
@@ -28,6 +28,7 @@ from .reactive import (
     is_reactive_cls,
     mut_reactive_op,
     reactive_op,
+    union_key,
 )
 
 __all__ = ["SyncModel", "SyncRoot", "is_sync_dataclass", "sync_dataclass"]
@@ -435,7 +436,7 @@ def _init(self: SyncModelLike, sref: StoreRef, ctx: SyncModelCtx) -> None:
         value = self.__dict__.get(name)
 
         # can be the case for a default value e.g. `SyncList[str] = []`
-        if not is_reactive(value):
+        if not _is_validated(value, field_ctx):
             ta = ctx.fields_type_adapter[name]
             value = self.__dict__[name] = ta.validate_python(value)
 
@@ -447,7 +448,7 @@ def _init(self: SyncModelLike, sref: StoreRef, ctx: SyncModelCtx) -> None:
         # case 3: union content type
         elif isinstance(field_ctx, UnionCtx):
             if is_reactive(value):
-                value.__syncwave_init__(sref, field_ctx[type(value)])
+                value.__syncwave_init__(sref, field_ctx[union_key(value)])
         else:
             unreachable()
 
@@ -468,7 +469,7 @@ def _update(self: SyncModelLike, new: SyncModelLike, b_setattr: FSet) -> None:
         new_value = new.__dict__.get(name)
 
         # can be the case for a default value e.g. `SyncList[str] = []`
-        if field_ctx is not None and not is_reactive(new_value):
+        if field_ctx is not None and not _is_validated(new_value, field_ctx):
             ta = ctx.fields_type_adapter[name]
             new_value = ta.validate_python(new_value)
 
@@ -551,16 +552,15 @@ def _setattr_union(
 ) -> None:
     old_is_reactive = is_reactive(old)
     new_is_reactive = is_reactive(new)
-    same_type = type(old) is (new_type := type(new))
 
-    if old_is_reactive and new_is_reactive and same_type:
+    if old_is_reactive and new_is_reactive and union_key(old) == union_key(new):
         old.__syncwave_update__(new)
         _base_write(self, f_name, old, b_setattr)
     else:
         if old_is_reactive:
             old.__syncwave_kill__()
         if new_is_reactive:
-            new.__syncwave_init__(self.__syncwave_sref__, u_ctx[new_type])
+            new.__syncwave_init__(self.__syncwave_sref__, u_ctx[union_key(new)])
         _base_write(self, f_name, new, b_setattr)
 
 
@@ -580,6 +580,14 @@ def _detach_fields(self: SyncModelLike, target: SyncModelLike) -> None:
     for name in type(self).__pydantic_fields__:
         if name in target.__dict__:
             target.__dict__[name] = getattr(self, name)
+
+
+def _is_validated(value: Any, field_ctx: Context | UnionCtx) -> TypeGuard[ReactiveLike]:
+    # Pydantic doesn't validate defaults: a `[]` default is not reactive, and a
+    # `SyncList()` default doesn't know which union member it is.
+    if not is_reactive(value):
+        return False
+    return not isinstance(field_ctx, UnionCtx) or union_key(value) in field_ctx
 
 
 def _eager_validate(cls: type[SyncModelLike]) -> None:
