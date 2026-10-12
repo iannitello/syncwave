@@ -64,9 +64,7 @@ issubclass(SyncList, SyncCollection)  # True
 issubclass(SyncCollection, Reactive)  # True
 ```
 
-??? note "Only three collection types?"
-
-    It might seem like a short list, but it goes further than it looks. A reactive type has to be mutable, since its whole point is to be changed in place, and among the containers that can be represented in JSON, `dict`, `list`, and `set` are just about the only general-purpose mutable ones Python has. `tuple`, for example, is immutable, so a reactive counterpart of it couldn't exist. [The JSON Schema Foundation](./types_and_validation/#the-json-schema-foundation) covers the bigger picture of what maps between Python and JSON.
+See the discussion at the end of [The Reactive Types](./reactivity/#the-reactive-types) if you think there should be more collection types.
 
 ## Instance Lifecycle
 
