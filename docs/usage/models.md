@@ -8,11 +8,11 @@ This page introduces reactive **models**. You'll see how to define one, how mode
 
 ## Introduction to Models
 
-!!! info "Skip"
+!!! success "Skip"
 
     Feel free to [skip](#the-syncmodel-class) this introduction if you're already familiar with Pydantic.
 
-The previous page, [collections](./collections/), ended on a problem. A store containing settings as `SyncDict[str, int]` works while every setting is an `int`, but as soon as you want to represent a `theme`, no dict type describes the data anymore. What the data needs is a fixed set of named fields, each with its own type.
+The previous page, [Collections](./collections/), ended on a problem. A store containing settings as `SyncDict[str, int]` works while every setting is an `int`, but as soon as you want to represent a `theme`, no dict type describes the data anymore. What the data needs is a fixed set of named fields, each with its own type.
 
 ??? note "`TypedDict` or `NamedTuple`?"
 
@@ -613,6 +613,25 @@ This follows the naming of the other kinds of dataclasses:
 | Syncwave | `@syncwave.sync_dataclass`        | `is_sync_dataclass`     |
 
 A reactive dataclass is also a Pydantic dataclass, and a Pydantic dataclass is also a stdlib dataclass, so all three checks return `True` for `Point`.
+
+`@sync_dataclass` rejects parameters normally accepted by `@dataclasses.dataclass` and `@pydantic.dataclasses.dataclass`:
+
+- `frozen=True`: a frozen model can't be reactive, like explained [below](#restrictions).
+- `unsafe_hash=True`: a reactive object is mutable, so it can't be hashable.
+- `slots=True`: Syncwave keeps the state of each instance in its `__dict__`, which a slotted class doesn't have.
+
+## Restrictions
+
+A few restrictions apply to every kind of reactive model: `SyncModel`, `SyncRoot`, and reactive dataclasses.
+
+- **Frozen models can't be reactive.** A frozen model can never change, so Syncwave couldn't update it when the file changes. Frozen fields are rejected for the same reason.
+- **Defaults must be valid.** Pydantic doesn't validate a field's default (unless you ask it to), but Syncwave does when the class is defined: `brightness: int = "hello"` raises a `ValueError` right away. Default factories are skipped, since calling one could have side effects. An invalid value from a factory is caught later, when it would reach a file.
+
+To keep the in-memory objects in sync with the files, Syncwave also validates and serializes values many times. It happens on reads and writes, at moments you don't control, and sometimes on [background threads](./json_files/#thread-safety). So a model must round-trip through JSON without changing. In practice:
+
+- **Validators and serializers must be pure and idempotent.** A validated value must validate to itself. A validator like `Annotated[int, AfterValidator(lambda v: v * 2)]` compounds on each validation which can happen more than once. Likewise, a side effect in a validator runs an unpredictable number of times.
+- **Fields with `exclude=True` don't work.** An excluded field is never written to the file, so it's missing whenever Syncwave reads the value back. Without a default, that's an error. With a default, the field silently goes back to it, at moments you don't control.
+- **Tracked fields can't be deleted.** On a live instance, `del alice.age` raises an `AttributeError`. Allowing it would be confusing: without a default, you'd just get a different error later, and with a default, the field you deleted would come back.
 
 ## What's Next
 

@@ -8,7 +8,7 @@ This page introduces the reactive collections: `SyncDict`, `SyncList`, and `Sync
 
 ## Why Reactive Collections
 
-!!! info "Skip"
+!!! success "Skip"
 
     This is just a reminder of the previous page. Feel free to [skip](#the-synccollection-types) if you just read it.
 
@@ -163,7 +163,7 @@ print(playlists)  # {'synthwave': <['Nightcall — Kavinsky'] (live)>}
 
 ```json title="syncstores/playlists.json"
 {
-    "synthwave": ["Nightcall — Kavinsky"]
+  "synthwave": ["Nightcall — Kavinsky"]
 }
 ```
 
@@ -206,11 +206,8 @@ Assuming `syncstores/playlists.json` contained the data from the previous exampl
 
 ```json title="syncstores/playlists.json"
 {
-    "synthwave": ["Nightcall — Kavinsky"],
-    "road_trip": [
-        "Sweet Virginia — The Rolling Stones",
-        "Dreams — Fleetwood Mac"
-    ]
+  "synthwave": ["Nightcall — Kavinsky"],
+  "road_trip": ["Sweet Virginia — The Rolling Stones", "Dreams — Fleetwood Mac"]
 }
 ```
 
@@ -253,8 +250,8 @@ Run the program, then open the file:
 
 ```json title="syncstores/settings.json"
 {
-    "volume": 8,
-    "brightness": 5
+  "volume": 8,
+  "brightness": 5
 }
 ```
 
@@ -262,13 +259,23 @@ The usual `dict` operations (`get`, `items`, `update`, deletions, iteration, and
 
 ### Key Types
 
-A `SyncDict` maps to a JSON object, and the keys of a JSON object are always strings. That puts three requirements on the **key type** of the `SyncDict`:
+The keys of a JSON object are always strings. That puts three requirements on the **key type** of anything that serializes to a JSON object: `SyncDict`, a regular `dict`, or a subclass of either. The key type must:
 
-1. It must produce a valid JSON object key when serializing to a string.
-2. It must deserialize back to an equal value (it must round-trip through a string).
-3. It must be hashable, like any Python `dict` key.
+1. produce a valid JSON object key when serialized to a string,
+2. deserialize back to an equal value (it must round-trip through a string),
+3. be hashable, like any Python `dict` key.
 
-Syncwave checks the key type when the store is created. `str` qualifies trivially, but so do `int`, `float`, `UUID`, `datetime`, and quite a few others; the full list is in [Types and Validation](./types_and_validation/#dictionary-keys).
+Syncwave checks the key type when the store is created. `str` qualifies trivially, but so do `int`, `float`, `UUID`, `datetime`, etc.
+
+??? note "What is accepted"
+
+    The following types are all accepted:
+
+    `str`, `int`, `float`, `bool`, `bytes`, `Decimal`, `Pattern`, `Path`, `date`, `datetime`, `time`, `timedelta`, `UUID`, `IPv4Address`, `IPv4Interface`, `IPv4Network`, `IPv6Address`, `IPv6Interface`, `IPv6Network`, `ByteSize`.
+
+    `Literal` is accepted if all its members are strings (members of a `StrEnum`, or of an `Enum` subclassing `str`, count as strings). For instance, `Literal["light", "dark"]` is fine, but `Literal[1, 2]` and `Literal[1, "other"]` aren't.
+
+    Enums are accepted with a few more conditions: the enum must subclass `str`, `int`, or `float` (like `IntEnum`), or have all string values (values taken from a different `StrEnum`, or from an `Enum` subclassing `str`, count as strings). Flag enums are always rejected.
 
 The conversion is transparent. With a `SyncDict[int, list[int]]` you use integer keys in Python, while the file stores strings. Here's an example of that with a directed acyclic graph (DAG):
 
@@ -280,7 +287,7 @@ print(dag[1])  # [2, 3]
 
 ```json title="syncstores/dag.json"
 {
-    "1": [2, 3]
+  "1": [2, 3]
 }
 ```
 
@@ -407,7 +414,7 @@ If you write duplicate values into the file by hand, they collapse into one item
 
 ### Hashable Items
 
-Like a regular `set`, a `SyncSet` requires its items to be hashable, and Syncwave enforces this on the item type when the store is created:
+Like a regular `set`, a `SyncSet` requires its items to be hashable. Syncwave checks the item type of `set`, `frozenset`, and `SyncSet` when they're used in a store:
 
 ```python
 syncwave.create_store(SyncSet[list[int]], name="bad")
@@ -416,6 +423,8 @@ syncwave.create_store(SyncSet[list[int]], name="bad")
 ```console
 TypeError: `SyncSet` must hold hashable elements, got `list`.
 ```
+
+The check also covers the less obvious cases: `tuple` and `frozenset` are hashable only if their element types are, and an `Enum` only if its member values are.
 
 Notably, this means other **reactive types are excluded as items of a `SyncSet`**: hashable values are immutable, while a reactive object must be mutable so it can be updated in place; no type can be both. This makes `SyncSet` the exception to nesting: it can hold `int`, `str`, `UUID`, and other hashable values, but never another reactive type, so it always ends the reactive chain.
 

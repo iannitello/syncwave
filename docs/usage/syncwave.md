@@ -6,11 +6,11 @@
 
 This page covers the basics: creating stores, changing their data from Python and from the JSON file, and how validation protects both sides. It closes with a first look at **reactive types**.
 
-## The `syncwave` Instance
-
 !!! success "First, make sure Syncwave is installed"
 
     See [Installation](../#installation) if you haven't done that yet.
+
+## The `syncwave` Instance
 
 The `Syncwave` class is the entry point of the library. You create an instance and use it for everything else.
 
@@ -107,13 +107,11 @@ syncwave.create_store(list[int], name="numbers", default=[1, 2, 3])
 
 However, since the file `syncstores/numbers.json` already contains data, `default` is ignored; the file always wins.
 
-For some store types, passing a `default` value is mandatory. That's the case when no "empty" value (`{}`, `[]`, `""`, or `None`) fits the type. For example, if the store is a simple `int`, you must specify the initial value:
+For some store types, passing a `default` value is mandatory. That's the case when no "empty" value (`{}`, `[]`, `""`, or `None`, tried in that order) fits the type. For example, if the store is a simple `int`, you must specify the initial value:
 
 ```python
 syncwave.create_store(int, name="counter", default=0)
 ```
-
-[Types and Validation](./types_and_validation/) covers default values in more detail.
 
 ??? note "Why a store can never be empty"
 
@@ -299,7 +297,7 @@ pydantic_core._pydantic_core.ValidationError: 1 validation error for list[int]
     For further information visit https://errors.pydantic.dev/2.13/v/int_parsing
 ```
 
-Validation is powered by [Pydantic](https://docs.pydantic.dev/latest/), so you get the exact same behavior and error messages you may already know. [Types and Validation](./types_and_validation/) covers store types in depth.
+Validation is powered by [Pydantic](https://docs.pydantic.dev/latest/), so you get the exact same behavior and error messages you may already know.
 
 The file is protected too. If you (or anything else) write invalid data into `syncstores/numbers.json` while the program runs, Syncwave rejects the change and reverts the file to its last valid state. To see it, run the program from the previous section again. This time, while it waits, put invalid data in the file, like the string `"hello"`:
 

@@ -1,3 +1,3 @@
-# First Example
+# Examples
 
 Under construction 🚧
