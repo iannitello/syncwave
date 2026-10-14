@@ -102,8 +102,7 @@ The full documentation lives at [syncwave.dev](https://syncwave.dev/):
 - [Collections](https://syncwave.dev/usage/collections/): `SyncDict`, `SyncList`, `SyncSet`, and nesting.
 - [Models](https://syncwave.dev/usage/models/): making your Pydantic models reactive with `@syncwave.store`.
 - [Reactivity](https://syncwave.dev/usage/reactivity/): references, in place updates, lifecycles.
-- [Types and Validation](https://syncwave.dev/usage/types_and_validation/): what can be a store, defaults, keys, coercion.
-- [JSON Files](https://syncwave.dev/usage/json_files/): atomic writes, safe access, external edits.
+- [JSON Files](https://syncwave.dev/usage/json_files/): JSON Schema, writes, external edits, thread safety.
 - [API Reference](https://syncwave.dev/api/syncwave/): the complete API.
 
 ## Trade-offs

@@ -535,10 +535,7 @@ def _setattr(self: SyncModelLike, name: str, new_value: Any, b_setattr: FSet) ->
 def _delattr(self: SyncModelLike, name: str, b_delattr: FDel) -> None:
     ctx = self.__syncwave_ctx__
     if name in ctx.fields_type_adapter:
-        raise AttributeError(
-            f"Cannot delete tracked field `{name}` to keep the model in sync. "
-            "Set it to `None` instead (if the field type allows it)."
-        )
+        raise AttributeError(f"Cannot delete field `{name}` to keep the model in sync.")
     b_delattr(self, name)
 
 

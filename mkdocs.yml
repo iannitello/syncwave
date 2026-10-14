@@ -52,7 +52,6 @@ theme:
     - navigation.tabs.sticky
     - navigation.sections
     - navigation.path
-    - navigation.indexes
     - navigation.top
     - navigation.footer
     - toc.follow
@@ -123,13 +122,13 @@ markdown_extensions:
 
 nav:
   - Get Started:
-      - index.md
+      - Welcome: index.md
+      - Cheat Sheet: cheat_sheet.md
   - Usage:
       - Syncwave: usage/syncwave.md
       - Collections: usage/collections.md
       - Models: usage/models.md
       - Reactivity: usage/reactivity.md
-      - Types and Validation: usage/types_and_validation.md
       - JSON Files: usage/json_files.md
   - API Reference:
       - Syncwave: api/syncwave.md
@@ -137,5 +136,4 @@ nav:
       - SyncModel: api/sync_model.md
       - Reactive: api/reactive.md
       - Errors: api/errors.md
-  - Examples:
-      - First Example: examples/first.md
+  - Examples: examples/index.md

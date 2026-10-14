@@ -1,6 +1,4 @@
-# Get Started
-
-## Welcome to Syncwave
+# Welcome to Syncwave
 
 Turn plain JSON files into a live data store, two-way synced with your Python objects.
 
@@ -21,6 +19,14 @@ Install from [PyPI](https://pypi.org/project/syncwave/).
     ```
 
 Requires Python 3.10+.
+
+## Documentation
+
+One of the main goals of the library is to be _easy to use_ and _intuitive_.
+
+- **[Cheat Sheet](./cheat_sheet/)**: You need **30 seconds** to learn what you actually need to know to use Syncwave.
+- **[Usage](./usage/syncwave/)**: The guide is extensive, and (hopefully) answers all your questions.
+- **[API Reference](./api/syncwave/)**: The API is intentionally small. After that, you just need to know plain [type hints](https://docs.python.org/3/library/typing.html), and the rest works like normal Python objects (`dict`, `list`, models, etc.).
 
 ## Motivation
 
@@ -71,7 +77,7 @@ Boom! You now have a server with two API routes, data validation, and interactiv
 
 !!! success "Running this example"
 
-    You'll need `"fastapi[standard]"` and `pydantic` installed. Copy the code into `main.py`, run the command `fastapi dev`, and open <http://localhost:8000/docs> to interact with the API.
+    You'll need `"fastapi[standard]"` installed. Copy the code into `main.py`, run the command `fastapi dev`, and open <http://localhost:8000/docs> to interact with the API.
 
 This isn't just a toy example, that's an actual working web server, _almost_ ready to be used in production. But obviously, there's a _small_ missing piece: data persistence. The initial list of customers is just hard-coded. As soon as you restart the server your data is gone.
 

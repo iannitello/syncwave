@@ -10,7 +10,7 @@ Concretely, if an object is reactive, mutating it triggers a write to its associ
 
 A single value, like an `int` or a `str`, can't be mutated. The string `"hello world"` can't change: its methods return new strings, for example `upper()` returns the new string `"HELLO WORLD"`, but they never mutate the original. Not all containers are mutable either; the most obvious example is a `tuple`.
 
-Python's built-in mutable containers, like `list` or `dict`, and there's no way to make them reactive: they have no hook Syncwave could use to detect a change. Syncwave has to offer its own types.
+Python's built-in mutable containers, like `list` or `dict`, aren't reactive, and there's no way to make them reactive: they have no hook Syncwave could use to detect a change. Syncwave has to offer its own types.
 
 ## The Reactive Types
 
@@ -36,9 +36,13 @@ issubclass(SyncCollection, Reactive)  # True
 
 A class decorated with `@sync_dataclass` keeps its own class hierarchy, so it doesn't inherit from `Reactive`. To check whether a class is a reactive dataclass, use [`is_sync_dataclass`](./models/#reactive-dataclasses) instead.
 
-The list of reactive types might seem short, but there isn't much room for more types. A reactive type has to be mutable, since its whole point is to be changed in place, and among the containers that can be represented in JSON, `dict`, `list`, and `set` are just about the only general-purpose mutable ones Python has. See [The JSON Schema Foundation](./types_and_validation/#the-json-schema-foundation) for the bigger picture of what maps between Python and JSON.
+### More Types
 
-You may also feel like there should be another reactive type to wrap single values, a hypothetical `SyncValue`, a bit like `ref()` in Vue.js. You're in luck: Pydantic already has `RootModel`, and its reactive counterpart [`SyncRoot`](./models/#single-values-with-syncroot) offers exactly that. But even if it didn't, you could always use the `syncwave` instance as the parent of a single value: `syncwave["locale"] = "en-US"`. That brings us to the next subject: the reactive chain.
+The list of reactive types might seem short, but there isn't much room for more types. A reactive type has to be mutable, since its whole point is to be changed in place, and among the containers that can be represented in JSON, `dict`, `list`, and `set` are just about the only general-purpose mutable ones Python has.
+
+The JSON side is already fully covered: the ones Syncwave offers already cover everything that can be described with [JSON Schema](./json_files/#json-schema). New types could offer different Python behaviors, but they would have to share a JSON representation with an existing one. That's already the case with `SyncList` and `SyncSet`: both become JSON arrays, and what differs is how you work with the data in Python.
+
+You may also feel like there should be a reactive type to wrap single values, a hypothetical `SyncValue`, a bit like `ref()` in Vue.js. You're in luck: Pydantic already has `RootModel`, and its reactive counterpart, [`SyncRoot`](./models/#single-values-with-syncroot), offers exactly that. But even if it didn't, you could always use the `syncwave` instance as the parent of a single value: `syncwave["locale"] = "en-US"`. That brings us to the next subject: the reactive chain.
 
 ## The Reactive Chain
 
@@ -170,6 +174,8 @@ syncwave.create_store(SyncList[int] | SyncDict[str, int], name="store_union")
 syncwave.create_store(SyncList[int | SyncList[int]], name="nested_union")
 ```
 
+Without a `default`, a store starts with the first empty value that fits, in the order `{}`, `[]`, `""`, `None`. `store_union` would start as an empty `SyncDict` in the example below, even though `SyncList` comes first in the union.
+
 When the type stays the same but the data changes, the existing object is updated in place and references stay live, like in any other store. When the type changes, the old object is killed and a new one takes its place. References to the old object are dead, and you need to read the store again to get the new live one.
 
 ```python
@@ -182,3 +188,7 @@ print(ref.sync_live)  # False
 ```
 
 The order of the members matters when several of them accept the same data. Take a store declared as `list[int] | SyncList[int]`: any valid `list[int]` is also a valid `SyncList[int]`, and vice-versa. When two members both fit, the first one wins, so this store always holds a plain `list` and never a `SyncList`, even if you assign a `SyncList` to it. Declared as `SyncList[int] | list[int]`, it's the opposite: the store is always a `SyncList`, and the `list[int]` member is never used.
+
+## What's Next
+
+You have now seen how to use the library, all reactive types, and the system as a whole. [JSON Files](./json_files/) covers additional details about the disk side of the synchronization, with more advanced topics.
