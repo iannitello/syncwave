@@ -12,10 +12,8 @@ if TYPE_CHECKING:
 class DeadReferenceError(RuntimeError):
     """Raised when an operation is attempted on a dead reactive object.
 
-    A reactive object becomes dead when it is removed from the store, for example
-    by deleting a key from a `SyncDict` or by deleting the store entirely. Catching
-    this error is one way to check whether a reference is still valid, though
-    checking `sync_live` first is usually cleaner.
+    A reactive object dies when it's removed from its store, e.g. when its key or the
+    whole store is deleted. Check `sync_live` to know if an object is still usable.
 
     Example:
     ```python
@@ -40,6 +38,11 @@ class DeadReferenceError(RuntimeError):
     except DeadReferenceError as e:
         print(e)
     ```
+
+    ---
+
+    Abstract: Usage Documentation
+        [Lifecycle](https://syncwave.dev/usage/reactivity/#lifecycle-and-syncstate)
 
     """
 

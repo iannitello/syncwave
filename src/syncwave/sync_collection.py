@@ -50,12 +50,10 @@ VT = TypeVar("VT", bound=ReactiveLike | Any, default=Any)
 
 @final
 class SyncCollection(Reactive, metaclass=ABCMeta, _syncwave=True):
-    """Virtual base class for Syncwave's reactive collection types.
+    """Virtual base class of `SyncDict`, `SyncList`, and `SyncSet`.
 
-    The `SyncCollection` types are `SyncDict`, `SyncList`, and `SyncSet`.
-
-    `SyncCollection` itself cannot be instantiated or subclassed. Can be used for
-    `isinstance` and `issubclass` checks.
+    Meant for `isinstance` and `issubclass` checks. It can't be instantiated or
+    subclassed.
 
     Example:
     ```python
@@ -68,13 +66,17 @@ class SyncCollection(Reactive, metaclass=ABCMeta, _syncwave=True):
     print(issubclass(SyncList, SyncCollection))  # True
     ```
 
+    ---
+
+    Abstract: Usage Documentation
+        [The `SyncCollection` Types](https://syncwave.dev/usage/collections/#the-synccollection-types)
+
     """
 
     def __init_subclass__(cls, /, **kwargs: Any) -> NoReturn:
         raise TypeError("SyncCollection cannot be subclassed.")
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
-        """Raise `TypeError`: `SyncCollection` itself cannot be instantiated."""
+    def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:  # ruff: ignore[undocumented-public-method]
         raise TypeError("`SyncCollection` is a base class and cannot be instantiated.")
 
     def __syncwave_init__(self, sref: StoreRef, ctx: Context) -> None:
@@ -127,21 +129,10 @@ class SyncDictCtx(Context, Generic[KT, VT]):
 
 
 class SyncDict(MutableMapping[KT, VT], Reactive[SyncDictCtx[KT, VT]], _syncwave=True):
-    """A reactive dictionary.
+    """The reactive counterpart of `dict`.
 
-    `SyncDict` behaves like a regular `dict`. Assignments, updates, and deletions
-    trigger a write to the backing JSON file, and external changes to the file are
-    reflected in place.
-
-    Creating a `SyncDict` yourself, with the same arguments as `dict`, gives an inert
-    object: it behaves like a regular `dict` and is not connected to any store. Nothing
-    is validated while inert, so type arguments (e.g. `SyncDict[str, int]`) are only
-    enforced when the value enters a store, which copies it.
-
-    References to reactive values are stable by key: a reference to `store["alice"]`
-    continues to represent whatever is stored under `"alice"` until that key is removed,
-    at which point `sync_live` is set to `False` and any further operation raises
-    `DeadReferenceError`.
+    When live, every change is validated and written to the JSON file, and changes to
+    the file are applied in place. Created directly, it's inert and acts like a `dict`.
 
     Example:
     ```python
@@ -160,7 +151,7 @@ class SyncDict(MutableMapping[KT, VT], Reactive[SyncDictCtx[KT, VT]], _syncwave=
     ---
 
     Abstract: Usage Documentation
-        [SyncDict](https://syncwave.dev/usage/syncwave/)
+        [SyncDict](https://syncwave.dev/usage/collections/#syncdict)
 
     """
 
@@ -175,11 +166,11 @@ class SyncDict(MutableMapping[KT, VT], Reactive[SyncDictCtx[KT, VT]], _syncwave=
         /,
         **kwargs: VT,
     ) -> None:
-        """Create an inert `SyncDict`.
+        """Create an inert `SyncDict`, with the same arguments as `dict`.
 
         Args:
-            data: Same as for `dict`: a mapping, or an iterable of key/value pairs.
-            **kwargs: Same as for `dict`: additional entries, keyed by name.
+            data: A mapping, or an iterable of key/value pairs.
+            **kwargs: Additional entries.
 
         """
         self.__data = dict(data, **kwargs)
@@ -363,22 +354,13 @@ class SyncListCtx(Context, Generic[VT]):
 
 
 class SyncList(MutableSequence[VT], Reactive[SyncListCtx[VT]], _syncwave=True):
-    """A reactive list.
+    """The reactive counterpart of `list`.
 
-    `SyncList` behaves like a regular `list`. Appending, replacing, inserting, and
-    deleting items trigger a write to the backing JSON file, and external changes to the
-    file are reflected in place.
+    When live, every change is validated and written to the JSON file, and changes to
+    the file are applied in place. Created directly, it's inert and acts like a `list`.
 
-    Creating a `SyncList` yourself, with the same arguments as `list`, gives an inert
-    object: it behaves like a regular `list` and is not connected to any store. Nothing
-    is validated while inert, so type arguments are only enforced when the value enters
-    a store, which copies it: `SyncList[int](["a"])` is accepted, but assigning it to a
-    `SyncList[int]` store raises a `ValidationError`.
-
-    When a `SyncList` holds reactive items, references are stable by position, not by
-    value. A reference to `store[0]` represents whatever is at index `0`. Inserting a
-    new element at the beginning shifts that reference to the new element, not to the
-    one that was there before.
+    References to reactive items follow positions, not content. Slices aren't
+    supported yet.
 
     Example:
     ```python
@@ -395,7 +377,7 @@ class SyncList(MutableSequence[VT], Reactive[SyncListCtx[VT]], _syncwave=True):
     ---
 
     Abstract: Usage Documentation
-        [SyncList](https://syncwave.dev/usage/syncwave/)
+        [SyncList](https://syncwave.dev/usage/collections/#synclist)
 
     """
 
@@ -405,10 +387,10 @@ class SyncList(MutableSequence[VT], Reactive[SyncListCtx[VT]], _syncwave=True):
     __pydantic_serializer__: SchemaSerializer
 
     def __init__(self, iterable: Iterable[VT] = ()) -> None:
-        """Create an inert `SyncList`.
+        """Create an inert `SyncList`, with the same arguments as `list`.
 
         Args:
-            iterable: Initial items, same as for `list`.
+            iterable: Initial items.
 
         """
         self.__data = list(iterable)
@@ -631,19 +613,13 @@ class SyncSetCtx(Context, Generic[VT]):
 
 
 class SyncSet(MutableSet[VT], Reactive[SyncSetCtx[VT]], _syncwave=True):
-    """A reactive set.
+    """The reactive counterpart of `set`.
 
-    `SyncSet` behaves like a regular `set`. Adding and discarding items trigger a write
-    to the backing JSON file, and external changes to the file are reflected in place.
+    When live, every change is validated and written to the JSON file (as an array),
+    and changes to the file are applied in place. Created directly, it's inert and acts
+    like a `set`.
 
-    `SyncSet` can only hold non-reactive, hashable values such as `str`, `int`, `UUID`,
-    etc. Reactive types like `SyncCollection` or `SyncModel` are mutable and therefore
-    not supported.
-
-    Creating a `SyncSet` yourself, with the same arguments as `set`, gives an inert
-    object: it behaves like a regular `set` and is not connected to any store. Nothing
-    is validated while inert, so type arguments (e.g. `SyncSet[int]`) are only enforced
-    when the value enters a store, which copies it.
+    Items must be hashable, so they can't be reactive.
 
     Example:
     ```python
@@ -661,7 +637,7 @@ class SyncSet(MutableSet[VT], Reactive[SyncSetCtx[VT]], _syncwave=True):
     ---
 
     Abstract: Usage Documentation
-        [SyncSet](https://syncwave.dev/usage/syncwave/)
+        [SyncSet](https://syncwave.dev/usage/collections/#syncset)
 
     """
 
@@ -672,10 +648,10 @@ class SyncSet(MutableSet[VT], Reactive[SyncSetCtx[VT]], _syncwave=True):
     __pydantic_serializer__: SchemaSerializer
 
     def __init__(self, iterable: Iterable[VT] = ()) -> None:
-        """Create an inert `SyncSet`.
+        """Create an inert `SyncSet`, with the same arguments as `set`.
 
         Args:
-            iterable: Initial items, same as for `set`.
+            iterable: Initial items.
 
         """
         self.__data = set(iterable)

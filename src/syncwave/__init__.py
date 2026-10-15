@@ -5,7 +5,7 @@ Turn plain JSON files into a live data store, two-way synced with your Python ob
 Imports available from this module:
 
 - [Syncwave](https://syncwave.dev/api/syncwave/#syncwave.Syncwave)
-- [SyncCollection](https://syncwave.dev/api/sync_collection/#syncwave.SyncCollection)
+- [SyncCollection](https://syncwave.dev/api/sync_collections/#syncwave.SyncCollection)
 - [SyncDict](https://syncwave.dev/api/sync_collections/#syncwave.SyncDict)
 - [SyncList](https://syncwave.dev/api/sync_collections/#syncwave.SyncList)
 - [SyncSet](https://syncwave.dev/api/sync_collections/#syncwave.SyncSet)

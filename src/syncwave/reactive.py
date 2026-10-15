@@ -51,11 +51,17 @@ class StoreRef:
 
 
 class SyncState(str, Enum):
-    """Lifecycle of a reactive object.
+    """Lifecycle state of a reactive object.
 
-    - `INERT`: never entered a store, behaves like the plain counterpart.
+    - `INERT`: created directly, not connected to any store.
     - `LIVE`: connected to a store.
-    - `DEAD`: removed from its store, every operation raises `DeadReferenceError`.
+    - `DEAD`: removed from its store. Every operation raises `DeadReferenceError`.
+
+    ---
+
+    Abstract: Usage Documentation
+        [Lifecycle](https://syncwave.dev/usage/reactivity/#lifecycle-and-syncstate)
+
     """
 
     INERT = "inert"
@@ -64,25 +70,13 @@ class SyncState(str, Enum):
 
 
 class Reactive(Generic[Context_T]):
-    """Base class shared by all reactive values in Syncwave.
+    """Base class of all reactive types.
 
-    All reactive types are subclasses of `Reactive`. You will mainly encounter it for
-    type checks: `isinstance(value, Reactive)`. `Reactive` itself cannot be instantiated
-    or subclassed directly; subclass one of the reactive types instead. Reactive
-    dataclasses (see `sync_dataclass`) keep their own MRO, so they are the exception:
+    Mostly useful for type checks, e.g. `isinstance(value, Reactive)`. It can't be
+    instantiated or subclassed directly. Reactive dataclasses don't inherit from it:
     check them with `is_sync_dataclass`.
 
-    A reactive object is always in one of three states, available as `sync_state`:
-
-    - Inert: the object was created directly (e.g. `SyncList([1, 2])`) and never
-      entered a store. It behaves like its plain counterpart.
-    - Live: the object belongs to a store. Changes made through it are validated and
-      written to the JSON file, and changes to the file are applied to it.
-    - Dead: the object was removed or replaced in its store. `sync_live` returns
-      `False` and any further operation raises `DeadReferenceError`.
-
-    A value enters a store as a copy: the store creates a live object holding the same
-    data, and the original stays inert for good. Read the store to get the live object.
+    A reactive object is either inert, live, or dead (see `SyncState`).
 
     Example:
     ```python
@@ -97,7 +91,7 @@ class Reactive(Generic[Context_T]):
     ---
 
     Abstract: Usage Documentation
-        [Reactive](https://syncwave.dev/usage/syncwave/)
+        [The Reactive Types](https://syncwave.dev/usage/reactivity/#the-reactive-types)
 
     """
 
@@ -129,14 +123,9 @@ class Reactive(Generic[Context_T]):
     @final
     @property
     def sync_live(self) -> bool:
-        """Whether this reactive object is connected to a store and syncing.
+        """Whether this object is live, i.e. connected to a store.
 
-        Returns `False` in two cases. The object is dead: it has been removed or
-        replaced in its parent store, for example because a key was deleted from a
-        `SyncDict`, and any further operation on it raises `DeadReferenceError`. Or
-        the object is inert: it never entered a store, and it behaves like its plain
-        counterpart until a store ingests a copy of it. Use `sync_state` to distinguish
-        inert from dead.
+        `False` for both inert and dead objects. Use `sync_state` to tell them apart.
 
         Example:
         ```python
@@ -162,7 +151,7 @@ class Reactive(Generic[Context_T]):
         ---
 
         Abstract: Usage Documentation
-            [Reactive](https://syncwave.dev/usage/syncwave/)
+            [`sync_state` and `sync_live`](https://syncwave.dev/usage/reactivity/#sync_state-and-sync_live)
 
         """
         return self.__syncwave_state__ is SyncState.LIVE  # atomic, no need to lock
@@ -170,7 +159,14 @@ class Reactive(Generic[Context_T]):
     @final
     @property
     def sync_state(self) -> SyncState:
-        """The current state of this reactive object. See `SyncState`."""
+        """The current state of this object (see `SyncState`).
+
+        ---
+
+        Abstract: Usage Documentation
+            [`sync_state` and `sync_live`](https://syncwave.dev/usage/reactivity/#sync_state-and-sync_live)
+
+        """
         return self.__syncwave_state__  # atomic, no need to lock
 
 
