@@ -77,13 +77,10 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
     __syncwave_state__ = SyncState.LIVE
 
     def __init__(self, root_path: str | Path = "syncstores") -> None:
-        """Initialize a new `Syncwave` instance.
+        """Create a `Syncwave` instance.
 
         Args:
-            root_path: Directory holding the JSON files associated with the stores. The
-                given value will be normalized (if relative, it will be made absolute
-                relative to the current working directory, shell variables will be
-                expanded, etc.). The directory will be created if it doesn't already
+            root_path: Directory holding the stores' JSON files. Created if it doesn't
                 exist.
 
         """
@@ -94,7 +91,14 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
 
     @property
     def root_path(self) -> Path:
-        """The normalized path to the directory holding the stores' JSON files."""
+        """The absolute path to the directory holding the stores' JSON files.
+
+        ---
+
+        Abstract: Usage Documentation
+            [The `syncwave` Instance](https://syncwave.dev/usage/syncwave/#the-syncwave-instance)
+
+        """
         return self.__root_path
 
     def __getitem__(self, key: str) -> Any:
@@ -104,7 +108,7 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         value, store_info = self.__stores[key]
         with store_info.sref.lock:
             if value is void:
-                raise ValueError(f"Store '{key}' has not been initialized.")
+                unreachable()
             return detach(value, store_info.type_adapter)
 
     def __setitem__(self, key: str, value: Any) -> None:
@@ -113,7 +117,6 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
                 f"Store '{key}' does not exist. "
                 "Use `syncwave.create_store(...)`, or `@syncwave.store(...)` first."
             )
-        str_guard("key", key)
 
         _, store_info = self.__stores[key]
         with store_info.sref.lock:
@@ -158,15 +161,10 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
     __hash__ = None
 
     def create_store(self, tp: TypeForm[T], /, *, name: str, default: Any = void) -> T:
-        """Create a store persisted to a JSON file and two-way synced with it.
+        """Create a store, persisted to `<root_path>/<name>.json` and two-way synced.
 
-        A store is an item (key/value pair) on a `Syncwave` instance, and each store has
-        a corresponding JSON file at `<root_path>/<name>.json` where the value is
-        persisted. Changes to the store occurring in Python are reflected in the JSON,
-        and changes occurring in the JSON file are reflected in the store.
-
-        Before any changes are made to the store, the value is validated against the
-        type `tp`.
+        Every change to the store, from Python or from the file, is validated against
+        `tp`.
 
         Example:
         ```python
@@ -181,19 +179,16 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         ---
 
         Abstract: Usage Documentation
-            [Syncwave](https://syncwave.dev/usage/syncwave/)
+            [Create a Store](https://syncwave.dev/usage/syncwave/#create-a-store)
 
         Args:
-            tp: Type of the store, e.g. `list[int]`, `SyncSet[str]`, `typing.Any`, etc.
-            name: Name of the store. This is also the key used to access the store
-                (`syncwave[name]`), and the name of the corresponding JSON file
-                (`<root_path>/<name>.json`).
-            default: Default initial value for the store. Ignored if the file already
-                exists and is not empty. Only mandatory if no empty value (`{}`, `[]`,
-                `""`, or `None`) fits the type.
+            tp: Type of the store, e.g. `list[int]`, `SyncSet[str]`, or a `SyncModel`.
+            name: Name of the store, used as its key and as its file name.
+            default: Initial value, used if the file is missing or empty. Required when
+                no empty value (`{}`, `[]`, `""`, or `None`) fits `tp`.
 
         Returns:
-            The current store value, loaded from disk or the initial value.
+            The store's value: the live object for a reactive type, a copy otherwise.
 
         """
         if name in self.__stores:
@@ -214,12 +209,10 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
         | None = "auto",
         default: Any = void,
     ) -> F[[type[SyncModelLike_T]], type[SyncModelLike_T]]:
-        """Create a store from a reactive model as a class decorator.
+        """Class decorator creating a store from a reactive model.
 
-        This is [Syncwave.create_store](https://syncwave.dev/api/syncwave/#syncwave.Syncwave.create_store)
-        with automatic collection wrapping: the decorated class is wrapped in a
-        collection controlled by the `collection` parameter, and the resulting type is
-        used to create a new store. The class itself is returned unchanged.
+        Like `create_store`, but the model is wrapped in a collection first (see
+        `collection`). The class is returned unchanged.
 
         Example:
         ```python
@@ -234,53 +227,25 @@ class Syncwave(MutableMapping[str, Any], Reactive, _syncwave=True):
             age: int
 
 
-        customers = syncwave["customers"]
+        customers = syncwave["customers"]  # a SyncList[Customer]
         customers.append(Customer(name="Alice", age=30))
-
-
-        # equivalent to...
-
-        # from syncwave import SyncList, SyncModel
-
-
-        # class Customer(SyncModel):
-        #     name: str
-        #     age: int
-
-
-        # customers = syncwave.create_store(SyncList[Customer], name="customers")
-        # customers.append(Customer(name="Alice", age=30))
         ```
 
         ---
 
         Abstract: Usage Documentation
-            [Syncwave](https://syncwave.dev/usage/syncwave/)
+            [The `store` Decorator](https://syncwave.dev/usage/models/#the-store-decorator)
 
         Args:
-            name: Name of the store. This is also the key used to access the store
-                (`syncwave[name]`), and the name of the corresponding JSON file
-                (`<root_path>/<name>.json`).
-            collection: The collection the model is wrapped in. `SyncList` holds a
-                list of models. `SyncDict` holds models by key: keys are `str` by
-                default, pass the key type as the only type argument for another key
-                type, e.g. `SyncDict[int]`. The items or values are always the
-                decorated class, which is why the type hint has `Never` in their
-                place. `None` stores the model itself, without a collection. `"auto"`
-                picks `None` for a root model, a `SyncDict` keyed by the type of the
-                `key` field if the model has one, and `SyncList` otherwise. See
-                [usage](https://syncwave.dev/usage/syncwave/) for more details.
-            default: Default initial value for the store. Ignored if the file already
-                exists and is not empty. Only mandatory when there's no collection
-                wrapping the model (`collection=None`, or `"auto"` with a root model)
-                and the model has fields without defaults. Pass plain data, since the
-                class is not defined yet when the decorator runs: a `dict` of field
-                values for an unwrapped model, or the collection's value when the
-                model is wrapped (a `list` for `SyncList`, a `dict` for `SyncDict`).
+            name: Name of the store, used as its key and as its file name.
+            collection: `SyncList`, `SyncDict` (`str` keys) or `SyncDict[<key type>]`,
+                or `None` for no wrapping. `"auto"` picks `None` for a `SyncRoot`, a
+                `SyncDict` if the model has a `key` field, and `SyncList` otherwise.
+            default: Initial value, used if the file is missing or empty. Pass plain
+                data (e.g. a `dict` or a `list`), not an instance.
 
         Returns:
-            A decorator that accepts a reactive model class, creates the store, and
-                returns the class unchanged.
+            A decorator that creates the store and returns the class unchanged.
 
         """
         if name in self.__stores:

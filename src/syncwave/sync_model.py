@@ -42,27 +42,12 @@ class SyncModelCtx(Context):
 
 
 class SyncModel(BaseModel, Reactive[SyncModelCtx], _syncwave=True):
-    """Base class for reactive Pydantic models.
+    """The reactive counterpart of `pydantic.BaseModel`.
 
-    Subclass `SyncModel` instead of `pydantic.BaseModel` to define a reactive model.
-    Fields, validators, `model_config`, and everything else work as with a regular
-    Pydantic model. A reactive model has three states (see `SyncState`):
-
-    - An instance created directly (`Settings(volume=8)`) is inert: it behaves like a
-      regular Pydantic instance and is not connected to any store.
-    - An instance read from a store is live: assigning a field validates the value and
-      writes it to the JSON file, and changes to the file are applied to the instance.
-    - An instance removed from its store is dead: any operation raises
-      `DeadReferenceError`.
-
-    A value enters a store as a copy, so the instance you pass stays inert and the
-    store hands you a live one. Reactive fields (`SyncList[str]`, another reactive
-    model, ...) are live as well when the model is live. Subclassing a reactive model
-    gives another reactive model, and so does `pydantic.create_model` with
-    `__base__=SyncModel`. For a single-value model, see `SyncRoot`.
-
-    Restrictions: a reactive model cannot be frozen and cannot have frozen fields, and
-    field defaults must be valid for their type (checked at class definition).
+    Subclass it instead of `BaseModel`, everything from Pydantic still works. When
+    live, assigning a field is validated and written to the JSON file, and changes to
+    the file are applied in place. Created directly, an instance is inert and acts like
+    a regular Pydantic model.
 
     Example:
     ```python
@@ -73,7 +58,7 @@ class SyncModel(BaseModel, Reactive[SyncModelCtx], _syncwave=True):
 
     class Settings(SyncModel):
         volume: int = 8
-        recent_files: SyncList[str] = []
+        recent_files: SyncList[str] = SyncList()
 
 
     settings = syncwave.create_store(Settings, name="settings")
@@ -85,7 +70,7 @@ class SyncModel(BaseModel, Reactive[SyncModelCtx], _syncwave=True):
     ---
 
     Abstract: Usage Documentation
-        [SyncModel](https://syncwave.dev/usage/models/)
+        [The `SyncModel` Class](https://syncwave.dev/usage/models/#the-syncmodel-class)
 
     """
 
@@ -147,11 +132,10 @@ class SyncModel(BaseModel, Reactive[SyncModelCtx], _syncwave=True):
 
 
 class SyncRoot(SyncModel, RootModel, Generic[RootModelRootType], _syncwave=True):
-    """Base class for reactive root models.
+    """The reactive counterpart of `pydantic.RootModel`.
 
-    Shorthand for `class Locale(SyncModel, RootModel[str])`: a reactive model holding a
-    single value under the `root` field. Everything from `SyncModel` applies. The JSON
-    file holds the bare value, not an object around it.
+    A `SyncModel` holding a single value in its `root` field. The JSON file holds the
+    bare value.
 
     Example:
     ```python
@@ -170,7 +154,7 @@ class SyncRoot(SyncModel, RootModel, Generic[RootModelRootType], _syncwave=True)
     ---
 
     Abstract: Usage Documentation
-        [SyncRoot](https://syncwave.dev/usage/models/)
+        [Single Values with `SyncRoot`](https://syncwave.dev/usage/models/#single-values-with-syncroot)
 
     """
 
@@ -245,19 +229,9 @@ def sync_dataclass(
 ) -> F[[type[T]], type[SyncDataclass]] | type[SyncDataclass]:
     """Make a reactive Pydantic dataclass.
 
-    Use it like `pydantic.dataclasses.dataclass`, which it applies: the class becomes a
-    regular Pydantic dataclass, validated the same way, with the reactive protocol
-    installed on top. Instances behave like `SyncModel` instances: created directly
-    they are inert, read from a store they are live, removed from a store they are dead
-    (see `SyncState`).
-
-    The class keeps its own MRO, so `isinstance(point, Reactive)` is `False`: use
-    `is_sync_dataclass` to check for a reactive dataclass. Type checkers don't see
-    `sync_state` and `sync_live` on the class; narrow with `is_sync_dataclass` first.
-
-    Don't stack it with another dataclass decorator. To make a reactive version of an
-    existing dataclass, subclass it: `@sync_dataclass class SyncPoint(Point): ...`.
-    Mutable defaults need `field(default_factory=...)`, as with any dataclass.
+    Applies `pydantic.dataclasses.dataclass` and makes the class reactive, like a
+    `SyncModel`. The class doesn't inherit from `Reactive`: check it with
+    `is_sync_dataclass`. To make an existing dataclass reactive, subclass it.
 
     Example:
     ```python
@@ -283,17 +257,17 @@ def sync_dataclass(
     ---
 
     Abstract: Usage Documentation
-        [sync_dataclass](https://syncwave.dev/usage/models/)
+        [Reactive Dataclasses](https://syncwave.dev/usage/models/#reactive-dataclasses)
 
     Args:
         _cls: The class to decorate. Omit it to pass options: `@sync_dataclass(...)`.
         init: Must be `False`, as for `pydantic.dataclasses.dataclass`.
-        repr: Whether to generate a `__repr__`.
-        eq: Whether to generate an `__eq__`.
+        repr: Whether to generate `__repr__`.
+        eq: Whether to generate `__eq__`.
         order: Whether to generate the comparison methods.
         unsafe_hash: Must be `False`: reactive objects are mutable, so never hashable.
         frozen: Must be `False`: a frozen dataclass cannot change, so it cannot sync.
-        config: The Pydantic config, as for `pydantic.dataclasses.dataclass`.
+        config: The Pydantic config.
         kw_only: Whether the `__init__` parameters are keyword-only.
         slots: Must be `False`: reactive objects need a `__dict__`.
 
@@ -403,15 +377,18 @@ def sync_dataclass(
 
 
 def is_sync_dataclass(cls: type[Any], /) -> TypeIs[type[SyncDataclass]]:
-    """Whether a class is a reactive dataclass, made with `sync_dataclass`.
+    """Check whether a class is a reactive dataclass, made with `sync_dataclass`.
 
-    A reactive dataclass is also a Pydantic dataclass.
+    ---
+
+    Abstract: Usage Documentation
+        [Reactive Dataclasses](https://syncwave.dev/usage/models/#reactive-dataclasses)
 
     Args:
-        cls: The class.
+        cls: The class to check.
 
     Returns:
-        `True` if the class is a reactive dataclass, `False` otherwise.
+        `True` if `cls` is a reactive dataclass, `False` otherwise.
 
     """
     return isclass(cls) and is_pydantic_dataclass(cls) and is_reactive_cls(cls)
