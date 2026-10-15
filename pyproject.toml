@@ -1,6 +1,6 @@
 [project]
 name = "syncwave"
-version = "0.2.1"
+version = "0.3.0"
 description = "Turn plain JSON files into a live data store, two-way synced with your Python objects."
 readme = "README.md"
 authors = [
@@ -29,8 +29,8 @@ build-backend = "uv_build"
 dev = [
     "fastapi[standard]>=0.141.1",
     "mkdocstrings-python>=2.0.8",
-    "ruff>=0.16.7",
-    "ty>=0.0.80",
+    "ruff>=0.16.8",
+    "ty>=0.0.82",
     "zensical>=0.0.62",
 ]
 
