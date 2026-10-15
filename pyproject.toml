@@ -38,9 +38,11 @@ dev = [
 exclude-newer = "28 days"
 
 [tool.ruff.format]
+preview = true
 docstring-code-format = true
 
 [tool.ruff.lint]
+preview = true
 select = [
     "E",   # pycodestyle errors
     "F",   # pyflakes
@@ -57,7 +59,6 @@ select = [
     "RUF", # ruff
     "UP",  # pyupgrade
 ]
-preview = true
 extend-select = [
     "non-imperative-mood",                   # D401
     "docstring-starts-with-this",            # D404
