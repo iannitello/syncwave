@@ -30,9 +30,6 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Prepare README for PyPI
-        run: sed -i 's/\[!WARNING\]/⚠️ **Warning**/' README.md
-
       - name: Build package
         run: uv build
 

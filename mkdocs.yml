@@ -124,6 +124,7 @@ nav:
   - Get Started:
       - Welcome: index.md
       - Cheat Sheet: cheat_sheet.md
+      - Versioning: versioning.md
   - Usage:
       - Syncwave: usage/syncwave.md
       - Collections: usage/collections.md
