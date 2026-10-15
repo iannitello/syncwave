@@ -57,6 +57,9 @@ theme:
     - toc.follow
     - search.highlight
 
+extra_javascript:
+  - javascripts/instant-videos.js
+
 plugins:
   - search
   - mkdocstrings:

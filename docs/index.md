@@ -20,27 +20,43 @@ Install from [PyPI](https://pypi.org/project/syncwave/).
 
 Requires Python 3.10+.
 
+## Demo
+
+**The most basic example:**
+
+<video autoplay muted loop playsinline style="pointer-events: none; user-select: none; width: 100%;"><source src="assets/non_reactive.mp4" type="video/mp4"></video>
+
+Changing a value in Python changes the JSON file, and vice versa. Data is validated on each side.
+
+**Reactive store:**
+
+<video autoplay muted loop playsinline style="pointer-events: none; user-select: none; width: 100%;"><source src="assets/reactive.mp4" type="video/mp4"></video>
+
+The store now uses a reactive type. `numbers` is a live handle on the store: mutating it in place changes the file, and it gets updated when the file changes.
+
+**Reactive model:**
+
+<video autoplay muted loop playsinline style="pointer-events: none; user-select: none; width: 100%;"><source src="assets/model.mp4" type="video/mp4"></video>
+
+With the `store` decorator, a reactive model can be defined and used in a store in one step. The store is reactive, and so is every instance.
+
 ## Documentation
 
-One of the main goals of the library is to be _easy to use_ and _intuitive_.
+Syncwave is designed to be _small_, _simple_, and _intuitive_.
 
-- **[Cheat Sheet](./cheat_sheet/)**: You need **30 seconds** to learn what you actually need to know to use Syncwave.
-- **[Usage](./usage/syncwave/)**: The guide is extensive, and (hopefully) answers all your questions.
-- **[API Reference](./api/syncwave/)**: The API is intentionally small. After that, you just need to know plain [type hints](https://docs.python.org/3/library/typing.html), and the rest works like normal Python objects (`dict`, `list`, models, etc.).
+The **[Usage](./usage/syncwave/)** guide is detailed and tries to address everything, but it shouldn't make you feel like the library is more complex than it is. The **[Cheat Sheet](./cheat_sheet/)** offers a quick overview, with what you actually need to know to _use_ it.
 
-## Motivation
+The **[API](./api/syncwave/)** surface is intentionally small. Everything works like normal objects (`dict`, `list`, Pydantic models, etc.), and if you're familiar with Python type hints you're good to go.
 
-### Initial Inspiration
+## Inspiration
 
-If you've ever used [VSCode](https://code.visualstudio.com), you probably know you can change the settings either from the app's UI or by editing the `settings.json` file.
+If you've ever used [VSCode](https://code.visualstudio.com), you know you can change the settings either from the settings panel, or by editing a `settings.json` file. I always liked how the app is _two-way synced_ with the file: as soon as you change something from the panel, `settings.json` is updated, and the other way around, editing and saving the file updates the app's settings live.
 
-Something I always found nice is that VSCode is "two-way synced" with the file: As soon as you change something from the UI, `settings.json` gets updated, and conversely, editing and saving the file updates the live app's settings.
+If you don't know what I'm talking about, let's say you want to change the editor's theme. You can go to `Workbench > Appearance > Color Theme` in the settings and select your theme, or you can open `settings.json` and set `"workbench.colorTheme"` to the value you want. Regardless of where you make the change (panel or file), you see the other place get updated instantly, and the app takes on the new appearance. Very satisfying!
 
-If you don't know what I'm talking about, let's say you want to change the editor's theme. You can open the settings panel and go to **Workbench > Appearance > Color Theme** and select your theme, or you can open `settings.json` and set `"workbench.colorTheme"` to the value you want. Regardless of where you make the change (panel or file), you see the other place get updated instantly, and the app takes on the new appearance. Very satisfying!
+I needed something similar for a project I was working on, and was quite surprised to discover that there was no library to achieve this. Syncwave started as a way to fill that gap.
 
-I needed something similar for a project I was working on, and was quite surprise to discover that there was no library to achieve this. Syncwave started as a way to fill in that gap.
-
-### The Missing Piece
+## The Missing Piece
 
 [FastAPI](https://fastapi.tiangolo.com) + [Pydantic](https://pydantic.dev/docs/validation/latest/get-started/) make it extremely easy to build a web API. Consider the following example:
 
@@ -57,8 +73,8 @@ class Customer(BaseModel):
 
 
 customers = [
-    Customer(name="John Doe", age=30),
-    Customer(name="Jane Doe", age=25),
+    Customer(name="Alice", age=25),
+    Customer(name="Bob", age=30),
 ]
 
 
@@ -73,29 +89,30 @@ def create_customer(customer: Customer) -> Customer:
     return customer
 ```
 
-Boom! You now have a server with two API routes, data validation, and interactive documentation.
+Just like that, you now have a server with two API routes, data validation, and interactive documentation.
 
 !!! success "Running this example"
 
     You'll need `"fastapi[standard]"` installed. Copy the code into `main.py`, run the command `fastapi dev`, and open <http://localhost:8000/docs> to interact with the API.
 
-This isn't just a toy example, that's an actual working web server, _almost_ ready to be used in production. But obviously, there's a _small_ missing piece: data persistence. The initial list of customers is just hard-coded. As soon as you restart the server your data is gone.
+That's an actual working web server, _almost_ ready to be used in production. Obviously, data persistence is the missing piece: the initial list of customers is just hard-coded. As soon as you restart the server, your data is gone.
 
-Now you need to set up a database (PostgreSQL, SQLite, Redis, MongoDB, etc.), install a Python client, or an ORM to talk to it, manage connections and sessions, and write queries to read and write data... That's a lot to add on top of what was otherwise a very simple setup.
+Now you need to set up a database (PostgreSQL, SQLite, Redis, MongoDB, etc.), install a Python client or an ORM to talk to it, manage connections and sessions, and write queries to read and write data...
 
-Syncwave takes a radically different approach. Here's how we can update the example above to add persistence:
+That's a lot to add on top of what was otherwise a very simple setup.
 
-```python title="main.py" hl_lines="3 6 9 15"
+Syncwave takes a radically different approach. Here's how you can update the example:
+
+```python title="main.py" hl_lines="2 5 8 9 14"
 from fastapi import FastAPI
-from pydantic import BaseModel
-from syncwave import Syncwave
+from syncwave import SyncModel, Syncwave
 
 app = FastAPI()
 syncwave = Syncwave()
 
 
 @syncwave.store(name="customers")
-class Customer(BaseModel):
+class Customer(SyncModel):
     name: str
     age: int
 
@@ -114,7 +131,7 @@ def create_customer(customer: Customer) -> Customer:
     return customer
 ```
 
-With these _four_ highlighted lines, you now have persistence. Notice how little changed between the two examples. You still define your data with a Pydantic model, you still work with a normal Python list, and your FastAPI routes are identical.
+With these _five_ highlighted lines, you now have persistence. Notice how little changed: you still define your data with a model, you still work with a Python list (well, a reactive one), and your FastAPI routes are identical.
 
 If you run that example, Syncwave creates a JSON file to back the data:
 
@@ -122,17 +139,17 @@ If you run that example, Syncwave creates a JSON file to back the data:
 []
 ```
 
-It starts as an empty JSON array. But if the file already contained data (like the customers John and Jane Doe from the first example), Syncwave would load it into `customers` at startup.
+It starts as an empty JSON array. If the file already contains data, Syncwave loads it into `customers` at startup. Try it by adding this to the file:
 
 ```json title="syncstores/customers.json"
 [
   {
-    "name": "John Doe",
-    "age": 30
+    "name": "Alice",
+    "age": 25
   },
   {
-    "name": "Jane Doe",
-    "age": 25
+    "name": "Bob",
+    "age": 30
   }
 ]
 ```
@@ -145,24 +162,20 @@ One benefit I really wanted was transparency. With most databases, your data liv
 
 ## Why Syncwave
 
-<!-- You only think in Python. Normal types, Pydantic models, familiar collections. No serialization, no connections, no queries, no sync logic. Pydantic validates, JSON Schema defines the format, Syncwave handles the rest. -->
+### Abstraction
 
-## Reactivity
+Usually, you need to think at least a little bit about how your data is saved: how and when to serialize it, how and when to read it, the database's type system and how it maps to your Python types, etc. Obviously an ORM solves many problems, but that's still an interface to control a database.
 
-<!-- The React/Vue parallel: they keep the DOM in sync with JS state, Syncwave keeps JSON files in sync with Python state. Link to the reactivity docs for the deep dive. -->
+Syncwave offers an abstraction that is 100% Python: you interact purely with normal types and operations. You manipulate your data like you already do and _that's it_, everything always stays synchronized.
 
-## Trade-offs
+### Validation
 
-<!-- Honest about limitations. Not a real database. Full file rewrites. Memory-bound (but fast because of it, like Redis). No ACID/BASE guarantees. Real databases are sophisticated for good reasons. Syncwave is for when you want dead-simple persistence without the infrastructure. -->
+Syncwave is only possible thanks to Pydantic.
 
-<!-- It's never been this easy to quickly build applications thanks to powerful modern tools and standards. FastAPI gave perhaps the best example of what is now possible; By intelligently combining many great tools together (Uvicorn, Starlette, Pydantic, Python's type hints, JSON Schema, OpenAPI, Swagger), FastAPI offered a
+It's what handles all validation (and serialization/deserialization as well). Your data is always valid, at all times, through all operations. It doesn't matter whether a change comes from an API route, an ad-hoc manipulation, a file you manually change, etc.
 
-Syncwave builds on JSON Schema and Pydantic to give you persistence with almost no effort. If you know Python types and how to define a Pydantic model, you already know everything you need.
+### Simplicity
 
-!!! note
+The [example](#the-missing-piece) above shows just how easily you can create a server nowadays thanks to the amazing FastAPI: in under a minute, you have a working API with validation and documentation. But as soon as you want to persist data, you hit your first bump, and suddenly there are new things to install and learn, and glue code to write.
 
-    Syncwave is a standalone library, not a FastAPI plugin. It works in any Python project (CLI tools, desktop apps, scripts, etc.).
-
-    If you're not familiar with FastAPI, don't worry, there will be plenty of other examples. You can also check out the [First Steps](https://fastapi.tiangolo.com/tutorial/first-steps/) guide.
-
-    That said, Syncwave especially shines with long-running processes like web servers, since the two-way sync stays active for as long as the program is running. -->
+Of course, Syncwave _is not_ a replacement for a full-fledged database: there are obvious and inherent limitations, but for many projects Syncwave is a good starting point. You can always switch later when you outgrow it, and you won't even have to remove anything since you never wrote anything specific. You'll just have to write what you would have needed from day one without Syncwave.

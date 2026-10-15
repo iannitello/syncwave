@@ -38,7 +38,7 @@ The JSON value `{"name": "Alice", "age": 25}` is valid, while `{"name": "Bob", "
 
 `age` is listed under `required`, and Bob doesn't have one.
 
-In practice, Syncwave delegates all of this to [Pydantic](https://docs.pydantic.dev/latest/). Any type Pydantic can validate and serialize is a valid store type: primitives, containers, `datetime`, `UUID`, `Enum`, `Literal`, your own models, unions, and any nesting of these. Reactive types like `SyncDict` know how to talk to Pydantic too, so they can be validated and serialized.
+In practice, Syncwave delegates all of this to [Pydantic](https://pydantic.dev/docs/validation/latest/get-started/). Any type Pydantic can validate and serialize is a valid store type: primitives, containers, `datetime`, `UUID`, `Enum`, `Literal`, your own models, unions, and any nesting of these. Reactive types like `SyncDict` know how to talk to Pydantic too, so they can be validated and serialized.
 
 The domain of Python objects is vast, while a JSON file can only hold a few kinds of values: objects, arrays, strings, numbers, booleans, and `null`. For instance, the list `[1, 2, 3]` and the set `{1, 2, 3}` both serialize to the array `[1, 2, 3]`, and a `datetime.date` becomes a plain string in the file. What settles the ambiguity is the store's declared type, which tells Pydantic what to rebuild from the file. The JSON alone doesn't carry enough information.
 
@@ -84,7 +84,7 @@ The intended way to delete a store is to remove its key from the `syncwave` inst
 
 Syncwave is multi-threaded by nature. One thread watches the files, and others write your changes to disk and apply file edits to the stores. You don't have to do anything about it: stores are thread-safe.
 
-Each store has its own lock, and every change to the store goes through it, whether it comes from your Python code or from the JSON file. An operation like `numbers[0] = 4`, `settings.volume = 7`, or `syncwave["numbers"] = [1, 2, 3]` never sees the store half-updated, so you can use your stores from as many threads as you want[^1].
+Each store has its own lock, and it's acquired for every change to the store, whether it comes from your Python code or from the JSON file. An operation like `numbers[0] = 4`, `settings.volume = 7`, or `syncwave["numbers"] = [1, 2, 3]` never sees the store half-updated[^1].
 
 Creating and deleting stores, on the other hand, isn't thread-safe. A store is a bit like a table in a database: you don't usually create and drop tables on the fly, they're part of your schema. It's the data inside them that changes all the time. Create your stores once, usually at startup.
 
