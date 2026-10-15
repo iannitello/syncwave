@@ -297,7 +297,7 @@ pydantic_core._pydantic_core.ValidationError: 1 validation error for list[int]
     For further information visit https://errors.pydantic.dev/2.13/v/int_parsing
 ```
 
-Validation is powered by [Pydantic](https://docs.pydantic.dev/latest/), so you get the exact same behavior and error messages you may already know.
+Validation is powered by [Pydantic](https://pydantic.dev/docs/validation/latest/get-started/), so you get the exact same behavior and error messages you may already know.
 
 The file is protected too. If you (or anything else) write invalid data into `syncstores/numbers.json` while the program runs, Syncwave rejects the change and reverts the file to its last valid state. To see it, run the program from the previous section again. This time, while it waits, put invalid data in the file, like the string `"hello"`:
 
