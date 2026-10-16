@@ -88,6 +88,10 @@ plugins:
             show_signature_annotations: true
             separate_signature: true
             signature_crossrefs: true
+  - redirects:
+      redirect_maps:
+        usage/index.md: usage/syncwave.md
+        api/index.md: api/syncwave.md
 
 markdown_extensions:
   # Python Markdown

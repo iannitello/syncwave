@@ -162,7 +162,7 @@ Reactive types compose:
 
 ```python
 SyncDict[str, SyncList[int]]  # nested collections
-SyncList[str, Customer]  # reactive model in collection
+SyncList[Customer]  # reactive model in collection
 
 
 class Settings(SyncModel):
