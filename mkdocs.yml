@@ -95,6 +95,28 @@ plugins:
       redirect_maps:
         usage/index.md: usage/syncwave.md
         api/index.md: api/syncwave.md
+  - llmstxt:
+      markdown_description: |
+        A Python library (3.10+, built on Pydantic, pre-1.0). Each store is a JSON file, two-way synced with a Python value and validated by Pydantic. Plain values are copied on read and write, reactive types are live handles.
+      full_output: llms-full.txt
+      sections:
+        Get Started:
+          - index.md
+          - cheat_sheet.md
+        Usage:
+          - usage/syncwave.md
+          - usage/collections.md
+          - usage/models.md
+          - usage/reactivity.md
+          - usage/json_files.md
+        API Reference:
+          - api/syncwave.md
+          - api/sync_collections.md
+          - api/sync_model.md
+          - api/reactive.md
+          - api/errors.md
+        Optional:
+          - versioning.md: Until version 1.0, releases may introduce backward-incompatible changes.
 
 markdown_extensions:
   # Python Markdown
