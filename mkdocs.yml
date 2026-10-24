@@ -1,11 +1,14 @@
 site_name: Syncwave
 site_url: https://syncwave.dev/
 site_description: Turn plain JSON files into a live data store, two-way synced with your Python objects.
+site_author: Lucas Iannitello
 
 repo_name: syncwave
 repo_url: https://github.com/iannitello/syncwave
 
 copyright: "Copyright &copy; 2026 Lucas Iannitello"
+
+strict: true
 
 theme:
   name: material

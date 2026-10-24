@@ -1,6 +1,10 @@
+---
+description: Syncwave is a Python library that turns plain JSON files into a live data store, two-way synced with your Python objects. Changes are validated with Pydantic.
+---
+
 # Welcome to Syncwave
 
-Turn plain JSON files into a live data store, two-way synced with your Python objects.
+Syncwave is a Python library that turns plain JSON files into a live data store, two-way synced with your Python objects.
 
 ## Installation
 
