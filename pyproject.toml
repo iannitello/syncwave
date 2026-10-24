@@ -56,7 +56,7 @@ dev = [
 
 [tool.uv]
 exclude-newer = "28 days"
-exclude-newer-package = { zensical = false }
+exclude-newer-package = { uv_build = false, zensical = false }
 
 [tool.ruff.format]
 preview = true
