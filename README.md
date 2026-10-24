@@ -1,6 +1,6 @@
 # Syncwave
 
-Turn plain JSON files into a live data store, two-way synced with your Python objects.
+A Python library that turns plain JSON files into a live data store, two-way synced with your Python objects.
 
 ## Documentation
 
@@ -24,6 +24,8 @@ uv add syncwave
 pip install syncwave
 ```
 
+Requires Python 3.10+.
+
 ## What Is Syncwave
 
 Syncwave keeps in-memory Python objects and JSON files synchronized, in both directions:
@@ -35,8 +37,6 @@ Syncwave keeps in-memory Python objects and JSON files synchronized, in both dir
 You get persistence with _zero_ setup: no database to install, no ORM, no serialization code. Your data lives in JSON files you can open and edit at any time.
 
 If you know Python type hints and Pydantic models, you already know everything you need.
-
-Requires Python 3.10+.
 
 ## Versioning
 

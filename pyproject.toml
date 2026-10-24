@@ -12,26 +12,46 @@ dependencies = [
     "typing-extensions>=4.16.0",
     "watchdog>=6.0.0",
 ]
-license = { file = "LICENSE" }
-keywords = []
-classifiers = []
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Pydantic",
+    "Framework :: Pydantic :: 2",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Topic :: Database",
+    "Topic :: File Formats :: JSON",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
 
 [project.urls]
-Homepage = "https://github.com/iannitello/syncwave"
-Issues = "https://github.com/iannitello/syncwave/issues"
+Homepage = "https://syncwave.dev/"
+Documentation = "https://syncwave.dev/"
 Repository = "https://github.com/iannitello/syncwave"
+Issues = "https://github.com/iannitello/syncwave/issues"
 
 [build-system]
-requires = ["uv_build>=0.8.4,<0.9.0"]
+requires = ["uv_build>=0.13.5,<0.14"]
 build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
     "fastapi[standard]>=0.141.1",
-    "mkdocstrings-python>=2.0.8",
-    "ruff>=0.16.8",
-    "ty>=0.0.82",
-    "zensical>=0.0.62",
+    "mkdocstrings-python>=2.0.9",
+    "ruff>=0.16.9",
+    "ty>=0.0.84",
+    "zensical>=0.0.65",
 ]
 
 [tool.uv]
