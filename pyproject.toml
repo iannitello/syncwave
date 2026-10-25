@@ -1,6 +1,6 @@
 [project]
 name = "syncwave"
-version = "0.3.0"
+version = "0.3.1"
 description = "Turn plain JSON files into a live data store, two-way synced with your Python objects."
 readme = "README.md"
 authors = [
