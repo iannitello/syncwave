@@ -18,7 +18,7 @@ Imports available from this module:
 - [DeadReferenceError](https://syncwave.dev/api/errors/#syncwave.DeadReferenceError)
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 
 from .errors import DeadReferenceError
